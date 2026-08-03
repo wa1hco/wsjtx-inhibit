@@ -466,6 +466,7 @@ MainWindow::MainWindow(QDir const& temp_directory, bool multiple,
   m_onAirFreq0 {0.0},
   m_first_error {true},
   tx_status_label {tr ("Receiving")},
+  inhibit_status_label {},
   wsprNet {new WSPRNet {this}},
   Eqsl {new EQSL {this}},
   m_baseCall {Radio::base_callsign (m_config.my_callsign ())},
@@ -4367,6 +4368,34 @@ void MainWindow::createStatusBar()                           //createStatusBar
   tx_status_label.setStyleSheet ("QLabel{color: #000000; background-color: #00ff00}");
   tx_status_label.setFrameStyle (QFrame::Panel | QFrame::Sunken);
   statusBar()->addWidget (&tx_status_label);
+
+  // WIMS TX Inhibit badge — hidden until a hold is active.
+  inhibit_status_label.setAlignment (Qt::AlignHCenter);
+  inhibit_status_label.setMinimumSize (QSize {160, 18});
+  inhibit_status_label.setStyleSheet ("QLabel{color: #ffffff; background-color: #cc0000; font-weight: bold}");
+  inhibit_status_label.setFrameStyle (QFrame::Panel | QFrame::Sunken);
+  statusBar()->addWidget (&inhibit_status_label);
+  inhibit_status_label.hide ();
+  connect (&m_config, &Configuration::tx_inhibit_changed, this,
+           [this] (bool inhibited, QString const& source) {
+             if (inhibited)
+               {
+                 inhibit_status_label.setText (source.isEmpty ()
+                                               ? tr ("TX INHIBITED")
+                                               : source);
+                 inhibit_status_label.show ();
+               }
+             else
+               {
+                 inhibit_status_label.hide ();
+               }
+             if (m_messageClient)
+               {
+                 m_messageClient->inhibit_status (
+                   m_config.tx_inhibit_port (), inhibited, source,
+                   0, 0, 0, 0);
+               }
+           });
 
   config_label.setAlignment (Qt::AlignHCenter);
   config_label.setMinimumSize (QSize {80, 18});

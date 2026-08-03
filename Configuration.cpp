@@ -1,4 +1,8 @@
 #include "Configuration.hpp"
+#include "TxInhibit/TxInhibitGate.hpp"
+
+#include <QMetaObject>
+#include <QThread>
 
 //
 // Read me!
@@ -710,6 +714,15 @@ private:
   Configuration * const self_;	// back pointer to public interface
 
   QThread * transceiver_thread_;
+
+  // WIMS TX Inhibit gate (serial DTR/RTS PTT path).
+  TxInhibitGate * tx_inhibit_gate_ {nullptr};
+  QThread * tx_inhibit_thread_ {nullptr};
+  bool tx_inhibit_owns_serial_ {false};
+  quint16 tx_inhibit_port_ {0};
+
+  void start_tx_inhibit_gate (TransceiverFactory::ParameterPack const& pack);
+  void stop_tx_inhibit_gate ();
   TransceiverFactory transceiver_factory_;
   QList<QMetaObject::Connection> rig_connections_;
 
@@ -1248,6 +1261,16 @@ void Configuration::transceiver_ptt (bool on)
 {
   LOG_TRACE (on << ' ' << m_->cached_rig_state_);
   m_->transceiver_ptt (on);
+}
+
+bool Configuration::tx_inhibit_gate_active () const
+{
+  return m_->tx_inhibit_owns_serial_;
+}
+
+quint16 Configuration::tx_inhibit_port () const
+{
+  return m_->tx_inhibit_port_;
 }
 
 void Configuration::transceiver_audio (bool on)
@@ -2099,9 +2122,61 @@ Configuration::impl::impl (Configuration * self, QNetworkAccessManager * network
 
 Configuration::impl::~impl ()
 {
+  stop_tx_inhibit_gate ();
   transceiver_thread_->quit ();
   transceiver_thread_->wait ();
   write_settings ();
+}
+
+void Configuration::impl::start_tx_inhibit_gate (TransceiverFactory::ParameterPack const& pack)
+{
+  bool serial_ptt = (pack.ptt_type == TransceiverFactory::PTT_method_DTR
+                     || pack.ptt_type == TransceiverFactory::PTT_method_RTS);
+  if (!serial_ptt)
+    {
+      stop_tx_inhibit_gate ();
+      return;
+    }
+  if (!tx_inhibit_gate_)
+    {
+      tx_inhibit_gate_ = TxInhibitGate::create_on_thread (&tx_inhibit_thread_);
+      connect (tx_inhibit_gate_, &TxInhibitGate::inhibitChanged,
+               this, [this] (bool inhibited, QString const& source) {
+                 Q_EMIT self_->tx_inhibit_changed (inhibited, source);
+               }, Qt::QueuedConnection);
+      connect (tx_inhibit_gate_, &TxInhibitGate::portBound,
+               this, [this] (quint16 port) {
+                 tx_inhibit_port_ = port;
+                 Q_EMIT self_->tx_inhibit_port_changed (port);
+               }, Qt::QueuedConnection);
+      connect (tx_inhibit_gate_, &TxInhibitGate::lineError,
+               this, [this] (QString const& msg) {
+                 Q_EMIT self_->transceiver_failure (msg);
+               }, Qt::QueuedConnection);
+    }
+  bool use_rts = (pack.ptt_type == TransceiverFactory::PTT_method_RTS);
+  QMetaObject::invokeMethod (tx_inhibit_gate_, "configure", Qt::QueuedConnection,
+                             Q_ARG (QString, pack.ptt_port),
+                             Q_ARG (bool, use_rts));
+  tx_inhibit_owns_serial_ = true;
+}
+
+void Configuration::impl::stop_tx_inhibit_gate ()
+{
+  if (tx_inhibit_gate_)
+    {
+      QMetaObject::invokeMethod (tx_inhibit_gate_, "shutdown", Qt::BlockingQueuedConnection);
+      tx_inhibit_owns_serial_ = false;
+      tx_inhibit_port_ = 0;
+    }
+  if (tx_inhibit_thread_)
+    {
+      tx_inhibit_thread_->quit ();
+      tx_inhibit_thread_->wait ();
+      delete tx_inhibit_thread_;
+      tx_inhibit_thread_ = nullptr;
+      tx_inhibit_gate_ = nullptr; // deleted via deleteLater on thread finish
+    }
 }
 
 void Configuration::impl::initialize_models ()
@@ -5050,8 +5125,24 @@ bool Configuration::impl::open_rig (bool force)
           if (is_tci_ && rig_active_ && tci_audio_) restart_tci_device_ = true;
           close_rig ();
 
+          // WIMS: DTR/RTS serial PTT is owned by TxInhibitGate; hamlib must not
+          // open the same port. Pass VOX-style PTT into the factory so CAT still
+          // works while the gate drives RTS/DTR = intent ∧ ¬inhibit.
+          auto hamlib_data = rig_data;
+          if (rig_data.ptt_type == TransceiverFactory::PTT_method_DTR
+              || rig_data.ptt_type == TransceiverFactory::PTT_method_RTS)
+            {
+              start_tx_inhibit_gate (rig_data);
+              hamlib_data.ptt_type = TransceiverFactory::PTT_method_VOX;
+              hamlib_data.ptt_port.clear ();
+            }
+          else
+            {
+              stop_tx_inhibit_gate ();
+            }
+
           // create a new Transceiver object
-          auto rig = transceiver_factory_.create (rig_data, transceiver_thread_);
+          auto rig = transceiver_factory_.create (hamlib_data, transceiver_thread_);
           cached_rig_state_ = Transceiver::TransceiverState {};
 
           // hook up Configuration transceiver control signals to Transceiver slots
@@ -5188,6 +5279,15 @@ void Configuration::impl::transceiver_ptt (bool on)
   cached_rig_state_.online (true); // we want the rig online
   set_cached_mode ();
   cached_rig_state_.ptt (on);
+  // WIMS: drive serial PTT through the gate thread when active. Intent is
+  // accepted immediately (audio/sequencer unchanged); the physical line is
+  // RTS/DTR = intent ∧ ¬inhibit. Still notify the CAT thread for split
+  // emulation (hamlib PTT is VOX/none when the gate owns the serial port).
+  if (tx_inhibit_owns_serial_ && tx_inhibit_gate_)
+    {
+      QMetaObject::invokeMethod (tx_inhibit_gate_, "set_intent", Qt::QueuedConnection,
+                                 Q_ARG (bool, on));
+    }
   // qDebug () << "Configuration::impl::transceiver_ptt: n:" << transceiver_command_number_ + 1 << "on:" << on;
   LOG_TRACE ("emitting set_transceiver: requested state:" << cached_rig_state_);
   Q_EMIT set_transceiver (cached_rig_state_, ++transceiver_command_number_);
@@ -5449,6 +5549,7 @@ void Configuration::impl::close_rig ()
       rig_connections_.clear ();
       rig_active_ = false;
     }
+  stop_tx_inhibit_gate ();
 }
 
 // find the audio device that matches the specified name, also

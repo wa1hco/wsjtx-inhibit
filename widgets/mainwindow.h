@@ -787,6 +787,7 @@ private:
 
   // labels in status bar
   QLabel tx_status_label;
+  QLabel inhibit_status_label; // WIMS TX Inhibit badge
   QLabel config_label;
   QLabel mode_label;
   QLabel last_tx_label;

@@ -386,7 +386,16 @@ public:
   // Note that this must be called even if VOX PTT is selected since
   // the "Emulate Split" mode requires PTT information to coordinate
   // frequency changes.
+  //
+  // When PTT method is DTR or RTS, serial line drive is handled by the
+  // WIMS TxInhibitGate thread (RTS/DTR = intent ∧ ¬inhibit). Hamlib is
+  // opened with VOX-style PTT so it does not own the same port.
   Q_SLOT void transceiver_ptt (bool = true);
+
+  // WIMS TX inhibit: true when the gate owns serial PTT for this session.
+  bool tx_inhibit_gate_active () const;
+  // Bound UDP inhibit listen port (0 if not active).
+  quint16 tx_inhibit_port () const;
 //  Q_SLOT void transceiver_tune (bool = true);
 
   // Set/unset Audio streaming for TCI.
@@ -473,6 +482,11 @@ public:
   // re-established with a call to transceiver_online(true) assuming
   // the fault condition has been rectified or is transient.
   Q_SIGNAL void transceiver_failure (QString const& reason) const;
+
+  // WIMS: TX inhibit gate state changed (status-bar badge + InhibitStatus).
+  // source is empty when open; otherwise badge text ("TX INHIBITED — …").
+  Q_SIGNAL void tx_inhibit_changed (bool inhibited, QString const& source) const;
+  Q_SIGNAL void tx_inhibit_port_changed (quint16 port) const;
 
   // signal announces audio devices are being enumerated
   //

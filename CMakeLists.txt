@@ -255,6 +255,7 @@ set (wsjt_qt_CXXSRCS
   Transceiver/HRDMessage.cpp
   Transceiver/HRDTransceiver.cpp
   Transceiver/DXLabSuiteCommanderTransceiver.cpp
+  TxInhibit/TxInhibitGate.cpp
   Network/NetworkMessage.cpp
   Network/MessageClient.cpp
   widgets/LettersSpinBox.cpp
