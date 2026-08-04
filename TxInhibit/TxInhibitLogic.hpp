@@ -16,12 +16,13 @@
 
 namespace TxInhibit {
 
-inline constexpr char const * protocol_key = "tx_inhibit";
-inline constexpr int protocol_version = 1;
-inline constexpr quint16 default_gate_port = 22372;
-inline constexpr int ttl_ms_min = 100;
-inline constexpr int ttl_ms_max = 30000;
-inline constexpr int max_datagram_bytes = 512;
+// static constexpr (C++11): project builds with --std=gnu++11 (-Werror)
+static constexpr char const * protocol_key = "tx_inhibit";
+static constexpr int protocol_version = 1;
+static constexpr quint16 default_gate_port = 22372;
+static constexpr int ttl_ms_min = 100;
+static constexpr int ttl_ms_max = 30000;
+static constexpr int max_datagram_bytes = 512;
 
 struct Datagram
 {

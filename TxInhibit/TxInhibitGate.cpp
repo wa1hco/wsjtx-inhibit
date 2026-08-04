@@ -50,10 +50,12 @@ void TxInhibitGate::ensure_udp ()
     }
   udp_ = new QUdpSocket (this);
   // Prefer 22372; fall back to ephemeral (§11.2).
-  if (!udp_->bind (QHostAddress::AnyIPv4, TxInhibit::default_gate_port,
+  // Construct QHostAddress explicitly so bind() is not ambiguous under C++11.
+  QHostAddress const any4 {QHostAddress::AnyIPv4};
+  if (!udp_->bind (any4, TxInhibit::default_gate_port,
                    QUdpSocket::ShareAddress | QUdpSocket::ReuseAddressHint))
     {
-      udp_->bind (QHostAddress::AnyIPv4, 0);
+      udp_->bind (any4, quint16 (0));
     }
   bound_port_ = udp_->localPort ();
   QObject::connect (udp_, &QUdpSocket::readyRead, this, &TxInhibitGate::on_udp_ready);
