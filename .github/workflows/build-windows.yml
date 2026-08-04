@@ -143,6 +143,17 @@ jobs:
             LDFLAGS="-Wl,--gc-sections"
           make -j$(nproc)
           make install-strip
+          # Ensure rigctl tools are present (find_program + install rename)
+          test -x "${WORKSPACE}/hamlib-prefix/bin/rigctl.exe" || test -x "${WORKSPACE}/hamlib-prefix/bin/rigctl"
+          ls -la "${WORKSPACE}/hamlib-prefix/bin" | head -20
+
+      - name: Put Hamlib tools on PATH
+        run: |
+          WORKSPACE=$(cygpath "${GITHUB_WORKSPACE}")
+          echo "${WORKSPACE}/hamlib-prefix/bin" >> "$GITHUB_PATH"
+          export PATH="${WORKSPACE}/hamlib-prefix/bin:$PATH"
+          which rigctl || true
+          rigctl -V || true
 
       - name: Install OmniRig
         shell: pwsh
