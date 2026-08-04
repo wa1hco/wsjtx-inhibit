@@ -131,18 +131,18 @@ WSJT-X sequencing and audio stay the same. When another operator or interlock so
 
 ---
 
-## 6. Test inhibit without WIMS (spacebar GUI)
+## 6. Test inhibit without WIMS (spacebar tester)
 
-Need to verify TX Inhibit without full multi-op software? Use the **spacebar tester**:
+Need to verify TX Inhibit without full multi-op software?
 
 | Platform | How |
 |----------|-----|
-| Windows | Double-click `tools/Run-InhibitSpacebar.cmd` (needs [Python 3](https://www.python.org/downloads/) with tkinter) |
-| Any OS | `python3 tools/inhibit_spacebar_gui.py` |
+| **Windows** | Run **`inhibit_spacebar.exe`** from the install `bin\` folder (or Start menu **TX Inhibit Spacebar Tester**). No Python. |
+| Linux / dev | Optional: `python3 tools/inhibit_spacebar_gui.py` |
 
 1. Start this build with **PTT method = RTS or DTR**.  
-2. Focus the tester window → **hold SPACE** (or hold the big green button).  
-3. WSJT-X should show **TX INHIBITED**; release space to clear.
+2. Open the spacebar tester → **hold SPACE** (or hold the button).  
+3. WSJT-X should show **TX INHIBITED**; release to clear.
 
 Details: [tools/README-INHIBIT-TESTER.md](tools/README-INHIBIT-TESTER.md).
 

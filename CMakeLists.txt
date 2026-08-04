@@ -1687,6 +1687,11 @@ if (NOT WSJT_SKIP_MAP65)
 endif ()
 add_subdirectory (qmap)
 
+# Windows TX Inhibit spacebar tester (native .exe for operators; no Python)
+if (WIN32)
+  add_subdirectory (tools/inhibit_spacebar)
+endif ()
+
 # build the main application
 generate_version_info (wsjtx_VERSION_RESOURCES
   NAME wsjtx

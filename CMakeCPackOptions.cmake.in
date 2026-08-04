@@ -6,7 +6,10 @@ set (CPACK_PACKAGE_VENDOR "@PROJECT_VENDOR@")
 set (CPACK_PACKAGE_CONTACT "@PROJECT_CONTACT@")
 set (CPACK_RESOURCE_FILE_LICENSE "@PROJECT_SOURCE_DIR@/COPYING")
 set (CPACK_PACKAGE_INSTALL_DIRECTORY ${CPACK_PACKAGE_NAME})
-set (CPACK_PACKAGE_EXECUTABLES wsjtx "@PROJECT_NAME@")
+set (CPACK_PACKAGE_EXECUTABLES
+  wsjtx "@PROJECT_NAME@"
+  inhibit_spacebar "TX Inhibit Spacebar Tester"
+  )
 set (CPACK_CREATE_DESKTOP_LINKS wsjtx)
 set (CPACK_STRIP_FILES TRUE)
 
@@ -32,6 +35,7 @@ if (CPACK_GENERATOR MATCHES "NSIS")
   set (CPACK_NSIS_MENU_LINKS
     "@PROJECT_MANUAL_DIRECTORY_URL@/@PROJECT_MANUAL@" "@PROJECT_NAME@ Documentation"
     "@PROJECT_HOMEPAGE@" "@PROJECT_NAME@ Web Site"
+    "bin\\\\inhibit_spacebar.exe" "TX Inhibit Spacebar Tester"
     )
   # Use the icon from wsjtx for add-remove programs
   set (CPACK_NSIS_INSTALLED_ICON_NAME "bin\\\\wsjtx.exe")
