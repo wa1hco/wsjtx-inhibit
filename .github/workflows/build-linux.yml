@@ -188,14 +188,35 @@ jobs:
       # rebuild the .deb already produced above.
       - name: Package RPM
         working-directory: wsjtx-build
+        env:
+          VERSION: ${{ inputs.version }}
+          ARCH: ${{ inputs.arch }}
         run: |
-          cpack -G RPM
-          ls -lh *.rpm
+          cpack -G RPM \
+            -D "CPACK_PACKAGE_FILE_NAME=wsjtx-${VERSION}-linux-${ARCH}"
+          RPM="wsjtx-${VERSION}-linux-${ARCH}.rpm"
+          # Some CPack versions append release suffix; normalize filename
+          if [ ! -f "$RPM" ]; then
+            gen=$(ls -1 wsjtx-${VERSION}-linux-${ARCH}*.rpm 2>/dev/null | head -1 || true)
+            if [ -n "$gen" ] && [ "$gen" != "$RPM" ]; then
+              mv "$gen" "$RPM"
+            fi
+          fi
+          if [ ! -f "$RPM" ]; then
+            echo "::error::cpack -G RPM produced no expected .rpm: $RPM"
+            ls -la *.rpm 2>/dev/null || true
+            exit 1
+          fi
+          ls -lh "$RPM"
+          file "$RPM"
 
       - name: Smoke-test RPM
         working-directory: wsjtx-build
+        env:
+          VERSION: ${{ inputs.version }}
+          ARCH: ${{ inputs.arch }}
         run: |
-          RPM=$(ls *.rpm | head -1)
+          RPM="wsjtx-${VERSION}-linux-${ARCH}.rpm"
           echo "Querying $RPM"
           rpm -qpi "$RPM"
           rpm -qpR "$RPM"
@@ -210,7 +231,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: wsjtx-${{ inputs.version }}-linux-${{ inputs.arch }}-rpm
-          path: wsjtx-build/*.rpm
+          path: wsjtx-build/wsjtx-${{ inputs.version }}-linux-${{ inputs.arch }}.rpm
           if-no-files-found: error
 
       - name: Install to AppDir

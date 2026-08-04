@@ -1,0 +1,156 @@
+# Build Windows + Linux x86_64 installers for tester distribution.
+# Faster than full release.yml (skips macOS and linux aarch64).
+#
+# Trigger:
+#   - Actions → "Tester packages" → Run workflow
+#   - git tag packages/v3.0.2-rc1 && git push origin packages/v3.0.2-rc1
+#
+# Publishes a GitHub prerelease with AppImage, .deb, .rpm, Windows NSIS,
+# and points testers at INSTALL.md.
+
+name: Tester packages
+
+on:
+  workflow_dispatch:
+    inputs:
+      version_suffix:
+        description: "Optional suffix after CMake version (e.g. rc1, dev1). Empty = plain version."
+        required: false
+        default: "dev"
+        type: string
+  push:
+    tags: ["packages/v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      tag: ${{ steps.v.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v6
+      - id: v
+        run: |
+          BASE=$(grep -E '^\s*VERSION\s+[0-9]' CMakeLists.txt | head -1 | awk '{print $2}' | cut -d. -f1-3)
+          if [ -z "$BASE" ]; then
+            echo "::error::Could not derive VERSION from CMakeLists.txt"
+            exit 1
+          fi
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            # packages/v3.0.2-rc1 → 3.0.2-rc1
+            VER="${GITHUB_REF_NAME#packages/v}"
+            TAG="${GITHUB_REF_NAME}"
+          else
+            SUFFIX="${{ inputs.version_suffix }}"
+            if [ -n "$SUFFIX" ]; then
+              VER="${BASE}-${SUFFIX}"
+            else
+              VER="${BASE}"
+            fi
+            TAG="packages/v${VER}"
+          fi
+          echo "version=$VER" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Tester package version=$VER tag=$TAG"
+
+  linux:
+    needs: prepare
+    uses: ./.github/workflows/build-linux.yml
+    with:
+      version: ${{ needs.prepare.outputs.version }}
+      hamlib_branch: "4.7.1"
+      arch: "x86_64"
+      release_channel: "DEVEL"
+    secrets: inherit
+
+  windows:
+    needs: prepare
+    uses: ./.github/workflows/build-windows.yml
+    with:
+      version: ${{ needs.prepare.outputs.version }}
+      hamlib_branch: "4.7.1"
+      release_channel: "DEVEL"
+    secrets: inherit
+
+  publish:
+    needs: [prepare, linux, windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v8
+        with:
+          path: artifacts
+
+      - name: List artifacts
+        run: find artifacts -type f | sort
+
+      - name: Collect installer files
+        id: files
+        run: |
+          shopt -s nullglob
+          mapfile -t files < <(find artifacts -type f \( \
+            -name '*.AppImage' -o -name '*.deb' -o -name '*.rpm' -o \
+            -name '*.exe' -o -name '*win64*.exe' \))
+          if [ "${#files[@]}" -lt 3 ]; then
+            echo "::error::Expected AppImage+deb/rpm+Windows exe; found ${#files[@]}"
+            find artifacts -type f
+            exit 1
+          fi
+          # Require at least one of each major class
+          find artifacts -name '*.AppImage' | grep -q . || { echo "::error::missing AppImage"; exit 1; }
+          find artifacts -name '*.deb' | grep -q . || { echo "::error::missing deb"; exit 1; }
+          find artifacts -name '*.rpm' | grep -q . || { echo "::error::missing rpm"; exit 1; }
+          find artifacts -name '*.exe' | grep -q . || { echo "::error::missing Windows exe"; exit 1; }
+          printf '%s\n' "${files[@]}"
+          # Write null-separated for gh
+          printf '%s\0' "${files[@]}" > /tmp/asset_list
+
+      - name: Publish GitHub prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          # Ensure tag exists on this commit for non-tag dispatches
+          if [ "${GITHUB_REF_TYPE}" != "tag" ]; then
+            git tag -f "$TAG" || true
+            git push origin "$TAG" --force || true
+          fi
+
+          NOTES=$(mktemp)
+          {
+            echo "# wsjtx-inhibit ${VERSION} (tester packages)"
+            echo
+            echo "WSJT-X + **TX Inhibit**. Not an official WSJT-X release."
+            echo
+            echo "**Install instructions:** see [INSTALL.md](https://github.com/wa1hco/wsjtx-inhibit/blob/main/INSTALL.md) in this repository."
+            echo
+            echo "## Windows"
+            echo "- Download the **\`.exe\`** installer, run it (UAC OK)."
+            echo "- Or use a portable **\`.zip\`** if attached."
+            echo
+            echo "## Linux"
+            echo "| File | Use |"
+            echo "|------|-----|"
+            echo "| **\`.AppImage\`** | Any modern Linux — \`chmod +x\` then run (preferred) |"
+            echo "| **\`.deb\`** | Debian / Ubuntu: \`sudo apt install ./wsjtx-…-linux-x86_64.deb\` |"
+            echo "| **\`.rpm\`** | Fedora / RHEL: \`sudo dnf install ./wsjtx-…-linux-x86_64.rpm\` |"
+            echo
+            echo "Details: [INSTALL-LINUX.md](https://github.com/wa1hco/wsjtx-inhibit/blob/main/INSTALL-LINUX.md)"
+          } > "$NOTES"
+
+          # Delete existing release/tag assets if re-running
+          gh release delete "$TAG" --yes 2>/dev/null || true
+
+          mapfile -d '' files < /tmp/asset_list
+          gh release create "$TAG" \
+            --title "wsjtx-inhibit ${VERSION} (testers)" \
+            --notes-file "$NOTES" \
+            --prerelease \
+            --target "${GITHUB_SHA}" \
+            "${files[@]}"

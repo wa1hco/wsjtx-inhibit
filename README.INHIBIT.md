@@ -11,7 +11,9 @@ gate. The feature is useful anywhere multi-op / co-band PTT interlock is needed.
 
 | Doc | Content |
 |-----|---------|
-| **[INSTALL-WINDOWS.md](INSTALL-WINDOWS.md)** | Windows install system (Releases, NSIS, portable ZIP) |
+| **[INSTALL.md](INSTALL.md)** | **Testers: Windows + Linux install (send this link)** |
+| [INSTALL-WINDOWS.md](INSTALL-WINDOWS.md) | Windows install system detail |
+| [INSTALL-LINUX.md](INSTALL-LINUX.md) | AppImage / `.deb` / `.rpm` detail |
 | [docs/WIMS_TX_INHIBIT.md](docs/WIMS_TX_INHIBIT.md) | Gate behaviour & operator setup |
 | [docs/SUPERBUILD.md](docs/SUPERBUILD.md) | Superbuild vs application tree |
 | [docs/BUILDING.md](docs/BUILDING.md) | Linux / Windows build from source |
@@ -19,23 +21,24 @@ gate. The feature is useful anywhere multi-op / co-band PTT interlock is needed.
 | Upstream [README.md](README.md) | Stock WSJT-X description |
 | [UPSTREAM.md](UPSTREAM.md) | Baseline pin |
 
-## Install (Windows)
+## Install (testers)
 
-This repo is the **source of truth** for Windows builds and installers:
+**Send testers this page:** **[INSTALL.md](INSTALL.md)**  
+**Downloads:** [Releases](https://github.com/wa1hco/wsjtx-inhibit/releases)
 
-1. **Operators** download the NSIS installer or portable ZIP from
-   [GitHub Releases](https://github.com/wa1hco/wsjtx-inhibit/releases).
-2. **CI** builds installers on tag `build/vX.Y.Z` / `build/vX.Y.Z-rcN`
-   via [`.github/workflows/release.yml`](.github/workflows/release.yml).
-3. **Developers** use MSYS2 stage builds and
-   [`scripts/windows`](scripts/windows) under `C:\WSJT\wsjtx-inhibit\`.
-
-Details: **[INSTALL-WINDOWS.md](INSTALL-WINDOWS.md)**.
+| OS | Packages |
+|----|----------|
+| Windows | NSIS `.exe`, portable ZIP |
+| Linux | **AppImage** (distro-agnostic), **`.deb`**, **`.rpm`** |
+| macOS | `.pkg` on full `build/v*` releases |
 
 ```bash
-# Publish installers (VERSION must match CMakeLists.txt first three components)
-git tag build/v3.0.2-rc1
-git push origin build/v3.0.2-rc1
+# Full multi-platform release (incl. macOS)
+git tag build/v3.0.2-rc1 && git push origin build/v3.0.2-rc1
+
+# Faster tester packages (Windows + Linux x86_64 only)
+git tag packages/v3.0.2-dev1 && git push origin packages/v3.0.2-dev1
+# or: Actions → "Tester packages" → Run workflow
 ```
 
 ## Former names
