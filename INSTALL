@@ -1,3 +1,18 @@
+========================================================================
+  wsjtx-inhibit operators / testers: STOP — this file is upstream
+  mainline "build from source" text. It is not how you install the
+  ready-made TX Inhibit program.
+
+  Go here instead:
+    INSTALL.md                 — start here (all platforms)
+    INSTALL-WINDOWS.md         — Windows step-by-step
+    INSTALL-LINUX.md           — Linux step-by-step
+    GitHub Releases            — download .exe / .zip / AppImage / .deb / .rpm
+      https://github.com/wa1hco/wsjtx-inhibit/releases
+
+  Everything below is stock-style source build documentation.
+========================================================================
+
 
  __       __   ______      _____  ________      __    __ 
 |  \  _  |  \ /      \    |     \|        \    |  \  |  \

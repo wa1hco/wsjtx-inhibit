@@ -1,14 +1,30 @@
-# Linux packages — wsjtx-inhibit
+# Install on Linux — wsjtx-inhibit
 
-CI ([`.github/workflows/build-linux.yml`](.github/workflows/build-linux.yml))
-builds three installers per architecture (**x86_64** and **aarch64** on full
-releases):
+**Audience: operators and testers.**  
+How to download and run the Linux **wsjtx-inhibit** packages (WSJT-X + TX Inhibit).
 
-1. **AppImage** — portable, distro-agnostic (preferred for most testers)
-2. **`.deb`** — CPack DEB (Debian/Ubuntu family)
-3. **`.rpm`** — CPack RPM (Fedora/RHEL/SUSE family)
+You do **not** need to compile from source or use CMake for a normal test.
 
-Filenames look like:
+---
+
+## Where do I get the program?
+
+Linux packages are **not** stored in the git folders you browse on GitHub.  
+They only appear as **downloadable files** on a Release.
+
+1. Open **[https://github.com/wa1hco/wsjtx-inhibit/releases](https://github.com/wa1hco/wsjtx-inhibit/releases)**.
+2. Click the release you were asked to use.
+3. Scroll to **Assets** at the bottom.
+
+### What should I look for in Assets?
+
+| File name ends with | For whom | Notes |
+|---------------------|----------|--------|
+| **`.AppImage`** | Most people on 64-bit Linux | **Preferred.** No root required. |
+| **`.deb`** | Debian, Ubuntu, Mint, Pop!_OS, … | Installs like other `.deb` packages |
+| **`.rpm`** | Fedora, Rocky, RHEL, openSUSE, … | Installs like other `.rpm` packages |
+
+Example names (version numbers change):
 
 ```text
 wsjtx-3.0.2-linux-x86_64.AppImage
@@ -16,55 +32,152 @@ wsjtx-3.0.2-linux-x86_64.deb
 wsjtx-3.0.2-linux-x86_64.rpm
 ```
 
-(Version string matches the release tag / CI `version` input.)
+On ARM computers, names may say `aarch64` instead of `x86_64`.
 
-## Which file should I give testers?
+### I only see Windows `.exe` / `.zip` under Assets
 
-| Audience | Send |
-|----------|------|
-| Mixed Linux users / unknown distro | **AppImage** |
-| “We’re all on Ubuntu 22.04/24.04” | **`.deb`** |
-| “We’re all on Fedora / Rocky” | **`.rpm`** |
+Then **this release has no Linux build yet.**
 
-Point them at **[INSTALL.md](INSTALL.md)** for copy-paste install steps.
+- Do not search the repository tree for `.deb` / AppImage files — they will not be there.
+- Use a different release that lists Linux assets, or ask the maintainer to publish a Linux package.
+- Overview of all platforms: [INSTALL.md](INSTALL.md).
 
-## AppImage notes
+---
 
-- Built with **linuxdeploy** + Qt5 plugin; ships Qt and common deps.
-- Smoke-tested in CI for core binaries and Qt audio plugins.
-- Needs a 64-bit glibc-based system (typical for AppImages from Ubuntu 24.04 runners).
-- Very old distros (e.g. CentOS 7) may need the `.rpm` built on a matching
-  host, or build from source ([docs/BUILDING.md](docs/BUILDING.md)).
+## Choose one package type
 
-## .deb / .rpm notes
+| Situation | Download |
+|-----------|----------|
+| Unsure which Linux you have, or mixed group of testers | **AppImage** |
+| Everyone on Ubuntu / Debian / Mint | **`.deb`** is fine (AppImage still easiest) |
+| Everyone on Fedora / Rocky / openSUSE | **`.rpm`** is fine (AppImage still easiest) |
 
-- Produced by **CPack** after `cmake --build` (same tree as the AppImage).
-- Package **name** remains upstream `wsjtx` so desktop files and paths match
-  stock WSJT-X (`/usr/bin/wsjtx`). This **can conflict** with distro packages
-  named `wsjtx` — uninstall the distro package first if needed.
-- Dependencies are declared for common Qt5 / FFTW / Boost / portaudio stacks;
-  if install fails, install distro “WSJT-X build deps” or use the AppImage.
+Install **one** method only; you do not need all three files.
 
-### Local packaging (after a normal Linux build)
+---
 
-```bash
-# from the cmake build directory
-cpack -G DEB -D "CPACK_DEBIAN_FILE_NAME=wsjtx-${VERSION}-linux-$(uname -m).deb"
-cpack -G RPM  -D "CPACK_PACKAGE_FILE_NAME=wsjtx-${VERSION}-linux-$(uname -m)"
-```
+## Method A — AppImage (recommended)
 
-Or use the helper:
+1. From **Assets**, download the file ending in **`.AppImage`** for your CPU (`x86_64` or `aarch64`).
+2. Open a terminal in the download folder.
+3. Make it executable and run it:
 
 ```bash
-scripts/linux/package-cpack.sh /path/to/build-dir 3.0.2
+chmod +x wsjtx-*-linux-*.AppImage
+./wsjtx-*-linux-*.AppImage
 ```
 
-### AppImage locally
+If your system complains about FUSE / “not mountable”:
 
-Requires `linuxdeploy` (see CI step **Package AppImage** in
-`build-linux.yml`). Prefer CI artifacts unless you are debugging packaging.
+```bash
+./wsjtx-*-linux-*.AppImage --appimage-extract-and-run
+```
 
-## TX Inhibit on Linux
+No `sudo` required. You can move the AppImage anywhere (Desktop, `~/bin`, etc.).
 
-Same protocol as Windows: UDP JSON on port **22372**, PTT via RTS/DTR.
+---
+
+## Method B — Debian / Ubuntu (`.deb`)
+
+Only if **Assets** includes a `.deb` file.
+
+1. Download the `.deb` (same architecture as your PC).
+2. In the download folder:
+
+```bash
+sudo apt install ./wsjtx-*-linux-*.deb
+```
+
+If that fails, try:
+
+```bash
+sudo dpkg -i ./wsjtx-*-linux-*.deb
+sudo apt-get install -f
+```
+
+3. Start from the application menu, or run:
+
+```bash
+wsjtx
+```
+
+**Conflict with distro WSJT-X:** the package may be named `wsjtx`. If install complains, remove the distro package first (only if you are OK replacing it for this test):
+
+```bash
+sudo apt remove wsjtx
+```
+
+Then install the `.deb` again. Prefer AppImage if you want to keep distro WSJT-X untouched.
+
+---
+
+## Method C — Fedora / RHEL / openSUSE (`.rpm`)
+
+Only if **Assets** includes an `.rpm` file.
+
+```bash
+sudo dnf install ./wsjtx-*-linux-*.rpm
+# older systems:
+# sudo rpm -Uvh ./wsjtx-*-linux-*.rpm
+```
+
+Then run `wsjtx` from the menu or terminal.  
+Same note as `.deb`: may conflict with a distro package named `wsjtx`.
+
+---
+
+## First-time settings
+
+Same as stock WSJT-X:
+
+1. **File → Settings → General** — callsign, grid.
+2. **Settings → Radio** — rig, CAT device, baud rate.
+3. **Settings → Audio** — input/output devices.
+
+### For TX Inhibit testing
+
+1. **Settings → Radio** → **PTT method** = **RTS** or **DTR**.
+2. Choose the serial device used for PTT (often not the same as CAT).
+3. Wire RTS/DTR to radio PTT as for any digital interface.
+
 See [docs/WIMS_TX_INHIBIT.md](docs/WIMS_TX_INHIBIT.md).
+
+### Quick check
+
+- **Help → About** shows **3.0.x** for this build.
+- Receive and TX behave like normal WSJT-X when inhibit is not active.
+
+---
+
+## Troubleshooting
+
+| Problem | What to try |
+|---------|-------------|
+| No AppImage/deb/rpm in Assets | Linux not published on that release — see above |
+| AppImage will not run | `chmod +x`; try `--appimage-extract-and-run`; need 64-bit glibc-ish desktop |
+| `.deb` / `.rpm` dependency errors | Use **AppImage** instead, or install missing Qt/audio packages |
+| Serial PTT / device permissions | Add your user to the `dialout` (or `uucp`) group, log out/in |
+| Inhibit never engages | Need RTS/DTR PTT path; CAT-PTT alone is not gated in this build |
+
+---
+
+## Feedback
+
+[https://github.com/wa1hco/wsjtx-inhibit/issues](https://github.com/wa1hco/wsjtx-inhibit/issues)
+
+---
+
+## Maintainers only (not for operators)
+
+How Linux packages are built and named is described in CI (`.github/workflows/build-linux.yml`) and [docs/BUILDING.md](docs/BUILDING.md). Operators only need files attached under Release **Assets**.
+
+Local packaging after a source build (developers):
+
+```bash
+# from cmake build directory — examples
+cpack -G DEB
+cpack -G RPM
+# AppImage: see CI “Package AppImage” / scripts/linux/
+```
+
+Not an official WSJT-X release. GPL-3.

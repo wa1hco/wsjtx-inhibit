@@ -1,96 +1,151 @@
-# Windows install system — wsjtx-inhibit
+# Install on Windows — wsjtx-inhibit
 
-This repository is the **source of truth** for the Windows build of
-**WSJT-X + TX Inhibit** (product name: `wsjtx-inhibit`).
+**Audience: operators and testers.**  
+Step-by-step install of the Windows **wsjtx-inhibit** program (WSJT-X + TX Inhibit).
 
-## What operators install
+You do **not** need Microsoft Visual Studio, MSYS2, or anything called “NSIS.”
 
-| Artifact | How you get it | Notes |
-|----------|----------------|-------|
-| **NSIS installer** `wsjtx-<ver>-win64.exe` | [GitHub Releases](https://github.com/wa1hco/wsjtx-inhibit/releases) | Preferred for seats |
-| **Portable stage ZIP** | Same Releases, or local `scripts/windows` | Unzip and run `bin\wsjtx.exe` |
-| **Build from source** | This repo + MSYS2 | See [docs/BUILDING.md](docs/BUILDING.md) |
+---
 
-Releases are produced by [`.github/workflows/release.yml`](.github/workflows/release.yml)
-when a tag matching `build/v*` is pushed.
+## Where do I get the program?
 
-## TX Inhibit (included)
+1. Open **[Releases](https://github.com/wa1hco/wsjtx-inhibit/releases)**.
+2. Open the release you were asked to test (for example *Windows test build 3.0.2*).
+3. Scroll to **Assets** (file list at the bottom).
 
-Every Windows build from `main` includes the in-process **TxInhibit** path:
+### Which file do I download?
 
-- UDP hold/keepalive on port **22372** (or ephemeral if busy)
-- Physical PTT = RTS/DTR intent ∧ ¬inhibit (milliseconds, not Halt Tx)
-- See [docs/WIMS_TX_INHIBIT.md](docs/WIMS_TX_INHIBIT.md)
+| Under Assets, look for | Meaning | What you do |
+|------------------------|---------|-------------|
+| File ending in **`-win64.exe`** | Windows **installer** (recommended) | Download → double-click → Next, Next, Finish |
+| File ending in **`.zip`** with `windows` in the name | **Portable** copy (no installer) | Download → unzip → run `bin\wsjtx.exe` |
 
-[WIMS](https://github.com/wa1hco/WIMS) is one multi-seat consumer; any
-co-band interlock agent can use the same protocol.
+Example names (exact names change with version):
 
-## Publish a Windows (and multi-platform) release
-
-```bash
-# VERSION must match CMakeLists.txt project VERSION first three components
-# Example CMake: VERSION 3.0.2.0  →  tags build/v3.0.2 or build/v3.0.2-rc1
-git tag build/v3.0.2-rc1
-git push origin build/v3.0.2-rc1
+```text
+wsjtx-…-win64.exe              ← use this if you want a normal install
+wsjtx-…-windows-x86_64.zip     ← use this for a portable folder
 ```
 
-CI builds Hamlib, WSJT-X, runs tests, packages **NSIS** for Windows, and
-attaches installers to the GitHub Release. That Release page is the install
-system front door for seats.
+Names may still say `mainline-wims`. That is still this project.
 
-## Local MSYS2 stage (developers)
+### What about “NSIS”?
 
-Prerequisites: MSYS2 MINGW64 toolchain, Qt5, FFTW, Boost, OmniRig, Hamlib
-prefix with **both** `libhamlib-4.dll` **and** `rigctl.exe` installed
-(`make install-strip` must install `tests/` tools).
+**You do not install NSIS.**  
+NSIS is a tool *package builders* use to create a Windows setup program. The file you download that ends in **`.exe`** *is already* that setup program. Treat it like any other Windows installer.
 
-```bash
-# From MINGW64 shell, after Hamlib is installed into e.g. /c/src/wsjtx-prefix/hamlib
-export PATH="/c/src/wsjtx-prefix/hamlib/bin:/mingw64/bin:/usr/bin:$PATH"
-cmake -G "MSYS Makefiles" -S /c/src/wsjtx-wims -B /c/src/wsjtx-prefix/build \
-  -DCMAKE_BUILD_TYPE=Release \
-  -DCMAKE_PREFIX_PATH="/c/src/wsjtx-prefix/hamlib" \
-  -DOMNIRIG_TYPE_LIB="/c/Program Files (x86)/Afreet/OmniRig/OmniRig.exe" \
-  -DWSJT_SKIP_MANPAGES=ON -DWSJT_GENERATE_DOCS=OFF -DWSJT_BUILD_TESTS=OFF \
-  -DWSJT_RELEASE_CHANNEL=DEVEL -Wno-dev
-cmake --build /c/src/wsjtx-prefix/build -j$(nproc)
-cmake --install /c/src/wsjtx-prefix/build --prefix /c/src/wsjtx-prefix/stage
-```
+### There is no .exe in Assets?
 
-(Local source path may still be `C:\src\wsjtx-wims` on existing build VMs;
-the **product** name is `wsjtx-inhibit`.)
+Then that release has no Windows package. Use another release that lists a `-win64.exe` or Windows `.zip`, or contact the person who sent you the link.
 
-Or use the helper scripts:
+---
 
-| Script | Purpose |
-|--------|---------|
-| [`scripts/windows/Build-Stage.ps1`](scripts/windows/Build-Stage.ps1) | Drive MSYS2 full stage build from PowerShell |
-| [`scripts/windows/Install-FromStage.ps1`](scripts/windows/Install-FromStage.ps1) | Copy stage → install dir + desktop shortcut |
-| [`scripts/windows/Package-PortableZip.ps1`](scripts/windows/Package-PortableZip.ps1) | Zip stage for distribution |
+## Method A — installer (recommended)
 
-## Seat layout
+1. **Close** stock WSJT-X and any older wsjtx-inhibit windows.
+2. Download the **`-win64.exe`** from **Assets**.
+3. Double-click the downloaded file.
+4. If **User Account Control** asks for permission, choose **Yes**.
+5. If **Windows protected your PC** (SmartScreen) appears:
+   - Click **More info**
+   - Click **Run anyway**  
+   - Only do this if you trust **this** GitHub project (`wa1hco/wsjtx-inhibit`).
+6. Follow the installer screens.  
+   Default location is often under **`C:\WSJT\`** (for example `C:\WSJT\wsjtx` or similar).
+7. When finished, start the program:
+   - From the **Start** menu (search for WSJT-X / the name the installer created), or  
+   - Open the install folder → **`bin`** → double-click **`wsjtx.exe`**.
 
-Typical multi-seat Windows install:
+### Can I keep official WSJT-X installed?
 
-```
-C:\WSJT\wsjtx-inhibit\   ← this product (not stock WSJT-X)
+Yes. Prefer side-by-side installs. For testing, always launch **this** build’s `wsjtx.exe`, not the SourceForge/ARRL one. Do not run both against the same radio and COM ports at the same time.
+
+---
+
+## Method B — portable ZIP
+
+1. Download the Windows **`.zip`** from **Assets**.
+2. Right-click → **Extract All…** (or use 7-Zip).  
+   Example folder: `C:\WSJT\wsjtx-inhibit\`
+3. Open the extracted folder.
+4. Open **`bin`**.
+5. Double-click **`wsjtx.exe`**.
+
+Optional: right-click `wsjtx.exe` → **Send to** → **Desktop (create shortcut)**.
+
+---
+
+## First-time settings (same as normal WSJT-X)
+
+1. **File → Settings → General** — callsign, grid square, etc.
+2. **Settings → Radio** — your transceiver, CAT port, baud rate.
+3. **Settings → Audio** — sound input and output devices.
+4. **Settings → Reporting** — optional (PSK Reporter, etc.).
+
+Click **OK**. Try receive first, then a careful TX test (dummy load recommended).
+
+---
+
+## Settings for TX Inhibit testing
+
+Inhibit only controls the **serial PTT key line** in this build.
+
+1. **File → Settings → Radio**
+2. Set **PTT method** to **RTS** or **DTR** (not “CAT” alone, not VOX-only for this test).
+3. Select the **COM port** of your USB-serial PTT adapter (often a **different** port than CAT).
+4. Connect that adapter’s RTS or DTR line to the radio’s PTT / SEND as you would for any digital-mode interface.
+
+When inhibit is active, the status area may show something like **TX INHIBITED**.  
+The radio should **not** key even if WSJT-X is in a TX cycle.
+
+More detail: [docs/WIMS_TX_INHIBIT.md](docs/WIMS_TX_INHIBIT.md).
+
+---
+
+## How do I know I have the right program?
+
+1. You started the copy you just installed (not the old Start-menu stock WSJT-X by mistake).
+2. **Help → About** shows version **3.0.x** matching the release you downloaded.
+3. Normal FT8/FT4 decode and (with correct settings) transmit work as with stock WSJT-X.
+
+---
+
+## Troubleshooting
+
+| Problem | What to try |
+|---------|-------------|
+| SmartScreen blocks the `.exe` | More info → Run anyway (if you trust this repo) |
+| Antivirus quarantines the file | Restore from quarantine or add an exception for the download; report false positive if needed |
+| Program starts but no radio control | Same as stock WSJT-X: CAT port, baud, driver, cable |
+| Inhibit never holds TX | PTT must be **RTS or DTR** on the inhibit-capable path; CAT-PTT-only is not gated |
+| “I can’t find Linux files here” | Correct — this page is Windows only. See [INSTALL.md](INSTALL.md) |
+
+---
+
+## Feedback
+
+Please report install issues, Windows version, rig, PTT method, and whether inhibit worked:
+
+[https://github.com/wa1hco/wsjtx-inhibit/issues](https://github.com/wa1hco/wsjtx-inhibit/issues)
+
+---
+
+## Maintainers only (not for operators)
+
+How Windows packages are produced and published:
+
+- Preferred operator path: GitHub Release **Assets** (`.exe` installer + portable `.zip`).
+- CI / tags: see [INSTALL.md](INSTALL.md) maintainer section and `.github/workflows/`.
+- Local MSYS2 stage builds: [docs/BUILDING.md](docs/BUILDING.md), `scripts/windows/`.
+- Product should be launched from **this** install’s `bin\wsjtx.exe` so the inhibit code is present.
+
+Typical multi-seat layout:
+
+```text
+C:\WSJT\wsjtx-inhibit\
   bin\wsjtx.exe
   bin\jt9.exe
-  bin\rigctl-wsjtx.exe
   ...
 ```
 
-Launchers should point at **this** `wsjtx.exe`, not the stock SourceForge
-build, so the inhibit path is present.
-
-## Versioning
-
-| Piece | Rule |
-|-------|------|
-| `CMakeLists.txt` `VERSION` | Numeric only (e.g. `3.0.2.0`) |
-| Git tag | `build/v3.0.2` or `build/v3.0.2-rcN` |
-| Artifact names | `wsjtx-<tag-version>-win64.exe` |
-
-## Not official WSJT-X
-
-GPL-3 same as upstream. Not an ARRL / WSJT Development Group release.
+Not an official WSJT-X release. GPL-3.

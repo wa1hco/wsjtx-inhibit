@@ -2,44 +2,48 @@
 
 **Repository:** https://github.com/wa1hco/wsjtx-inhibit  
 
-WSJT-X mainline plus an in-process **TX Inhibit** path: co-band digital
-stations stop **radiating** within milliseconds when another operator keys,
-**without** aborting FT8 sequencing (Halt Tx is the wrong instrument).
+WSJT-X mainline plus **TX Inhibit**: co-band stations can stop **radiating** within milliseconds when another operator keys, **without** aborting FT8 sequencing (Halt Tx is the wrong tool for that).
 
-[WIMS](https://github.com/wa1hco/WIMS) is one multi-seat consumer of this
-gate. The feature is useful anywhere multi-op / co-band PTT interlock is needed.
+[WIMS](https://github.com/wa1hco/WIMS) is one multi-seat user of this feature. The same path works for other interlock software.
+
+---
+
+## Operators / testers — start here
+
+| Go to | Purpose |
+|-------|---------|
+| **[INSTALL.md](INSTALL.md)** | **Main install guide** (all platforms) |
+| **[Releases](https://github.com/wa1hco/wsjtx-inhibit/releases)** | **Download** the `.exe`, `.zip`, AppImage, `.deb`, `.rpm` (see **Assets** on a release) |
+| [INSTALL-WINDOWS.md](INSTALL-WINDOWS.md) | Windows step-by-step |
+| [INSTALL-LINUX.md](INSTALL-LINUX.md) | Linux step-by-step |
+| [docs/WIMS_TX_INHIBIT.md](docs/WIMS_TX_INHIBIT.md) | How inhibit works + PTT wiring |
+
+**Important:** Install files live under each release’s **Assets** list. They are not loose files inside the source code folders. If your OS is missing from Assets, that package was not published on that release.
+
+Do **not** use the plain file named [`INSTALL`](INSTALL) for binary install — that is upstream “build from source” text.
+
+---
+
+## Maintainers / developers
 
 | Doc | Content |
 |-----|---------|
-| **[INSTALL.md](INSTALL.md)** | **Testers: Windows + Linux install (send this link)** |
-| [INSTALL-WINDOWS.md](INSTALL-WINDOWS.md) | Windows install system detail |
-| [INSTALL-LINUX.md](INSTALL-LINUX.md) | AppImage / `.deb` / `.rpm` detail |
-| [docs/WIMS_TX_INHIBIT.md](docs/WIMS_TX_INHIBIT.md) | Gate behaviour & operator setup |
+| [docs/BUILDING.md](docs/BUILDING.md) | Build from source |
 | [docs/SUPERBUILD.md](docs/SUPERBUILD.md) | Superbuild vs application tree |
-| [docs/BUILDING.md](docs/BUILDING.md) | Linux / Windows build from source |
-| [scripts/windows/](scripts/windows/) | Stage build, install, portable package helpers |
+| [scripts/windows/](scripts/windows/) | Windows stage / package helpers |
 | Upstream [README.md](README.md) | Stock WSJT-X description |
 | [UPSTREAM.md](UPSTREAM.md) | Baseline pin |
 
-## Install (testers)
-
-**Send testers this page:** **[INSTALL.md](INSTALL.md)**  
-**Downloads:** [Releases](https://github.com/wa1hco/wsjtx-inhibit/releases)
-
-| OS | Packages |
-|----|----------|
-| Windows | NSIS `.exe`, portable ZIP |
-| Linux | **AppImage** (distro-agnostic), **`.deb`**, **`.rpm`** |
-| macOS | `.pkg` on full `build/v*` releases |
-
 ```bash
-# Full multi-platform release (incl. macOS)
+# Full multi-platform release (when CI is configured for it)
 git tag build/v3.0.2-rc1 && git push origin build/v3.0.2-rc1
 
-# Faster tester packages (Windows + Linux x86_64 only)
+# Faster tester packages (often Windows + Linux x86_64)
 git tag packages/v3.0.2-dev1 && git push origin packages/v3.0.2-dev1
 # or: Actions → "Tester packages" → Run workflow
 ```
+
+---
 
 ## Former names
 
@@ -57,5 +61,5 @@ git tag packages/v3.0.2-dev1 && git push origin packages/v3.0.2-dev1
 
 ## License
 
-GNU GPL v3 — same as WSJT-X (`COPYING`). Inhibit patches are GPL-3.0-or-later.
+GNU GPL v3 — same as WSJT-X (`COPYING`). Inhibit patches are GPL-3.0-or-later.  
 Not an official WSJT-X release.
