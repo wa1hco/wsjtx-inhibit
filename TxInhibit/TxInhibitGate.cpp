@@ -9,20 +9,19 @@
 #include <QByteArray>
 
 namespace {
-// Local KEY via CTS is optional. Many machines expose a phantom COM1
-// (ACPI PNP0501) or USB-serial with floating CTS that reads permanently
-// asserted — that stuck the TX INHIBITED badge even with no UDP hold.
-// Opt in only when KEY is actually wired: set environment WSJTX_INHIBIT_CTS=1
-// before starting wsjtx.
-bool cts_key_enabled ()
+// Local KEY via CTS: enabled when a serial PTT port is open, unless disabled
+// with WSJTX_INHIBIT_CTS=0. Phantom COM1 with floating CTS is handled by
+// cts_armed_ (must see CTS low once). Hang after KEY-up follows WIMS
+// adaptive_hang (dit → multi-dit hang; long KEY → ~20 ms).
+bool cts_key_disabled ()
 {
   QByteArray v = qgetenv ("WSJTX_INHIBIT_CTS");
   if (v.isEmpty ())
     {
-      return false;
+      return false; // default: KEY sense on when serial open + armed
     }
   v = v.toLower ();
-  return v == "1" || v == "true" || v == "yes" || v == "on";
+  return v == "0" || v == "false" || v == "no" || v == "off";
 }
 }
 
@@ -105,7 +104,9 @@ void TxInhibitGate::configure (QString const& port_name, bool use_rts)
   // Always clear KEY/UDP-local state on reconfigure so a bad port cannot stick.
   cts_armed_ = false;
   last_cts_raw_ = false;
+  cts_down_at_ms_ = -1;
   cts_release_at_ms_ = -1;
+  closure_count_ = 0;
   logic_.set_local_cts (false);
 
   if (port_name.isEmpty () || port_name == QLatin1String ("None")
@@ -167,7 +168,9 @@ void TxInhibitGate::shutdown ()
   intent_ = false;
   cts_armed_ = false;
   last_cts_raw_ = false;
+  cts_down_at_ms_ = -1;
   cts_release_at_ms_ = -1;
+  closure_count_ = 0;
   logic_.set_local_cts (false);
   // Drop any UDP hold so restart/settings change cannot leave badge stuck.
   // (GateLogic has no public clear; send synthetic release via deadline.)
@@ -227,11 +230,33 @@ void TxInhibitGate::on_serial_error (QSerialPort::SerialPortError err)
                     .arg (serial_ ? serial_->errorString () : QStringLiteral ("unknown")));
 }
 
+void TxInhibitGate::push_closure_ms (int duration_ms)
+{
+  if (duration_ms < TxInhibit::closure_debounce_ms)
+    {
+      return; // bounce
+    }
+  if (closure_count_ < TxInhibit::closure_window)
+    {
+      closure_ms_[closure_count_++] = duration_ms;
+      return;
+    }
+  for (int i = 1; i < TxInhibit::closure_window; ++i)
+    {
+      closure_ms_[i - 1] = closure_ms_[i];
+    }
+  closure_ms_[TxInhibit::closure_window - 1] = duration_ms;
+}
+
+int TxInhibitGate::current_hang_ms () const
+{
+  return TxInhibit::adaptive_hang_ms (closure_ms_, closure_count_);
+}
+
 void TxInhibitGate::poll_cts ()
 {
-  if (!cts_key_enabled ())
+  if (cts_key_disabled ())
     {
-      // Default: UDP-only inhibit (safe with phantom COM / floating CTS).
       if (logic_.local_cts ())
         {
           logic_.set_local_cts (false);
@@ -253,6 +278,7 @@ void TxInhibitGate::poll_cts ()
         {
           cts_armed_ = true;
           last_cts_raw_ = false;
+          cts_down_at_ms_ = -1;
           cts_release_at_ms_ = -1;
           logic_.set_local_cts (false);
         }
@@ -261,17 +287,32 @@ void TxInhibitGate::poll_cts ()
 
   if (cts)
     {
+      if (!last_cts_raw_)
+        {
+          // KEY-down edge
+          cts_down_at_ms_ = t;
+        }
       last_cts_raw_ = true;
       cts_release_at_ms_ = -1;
       logic_.set_local_cts (true);
     }
   else if (last_cts_raw_)
     {
-      // Edge: KEY opened — start hang (fixed 0.5 s for raw KEY; UDP hang is agent-side).
+      // KEY-up edge — measure closure, apply WIMS adaptive hang
       last_cts_raw_ = false;
-      cts_release_at_ms_ = t + cts_hang_ms_;
+      int dur = 0;
+      if (cts_down_at_ms_ >= 0)
+        {
+          dur = static_cast<int> (t - cts_down_at_ms_);
+        }
+      cts_down_at_ms_ = -1;
+      push_closure_ms (dur);
+      int hang = current_hang_ms ();
+      cts_release_at_ms_ = t + hang;
+      logic_.set_local_cts (true); // still inhibited during hang
     }
-  if (cts_release_at_ms_ >= 0)
+
+  if (cts_release_at_ms_ >= 0 && !last_cts_raw_)
     {
       if (t >= cts_release_at_ms_)
         {

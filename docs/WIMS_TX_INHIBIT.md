@@ -21,7 +21,11 @@ Design authority:
   1. UDP datagram on port **22372** (or ephemeral if busy):  
      `{"tx_inhibit":1,"ttl_ms":600,"station":"ROY-222-SSB","band":"222","seq":1}`  
      Release: `"ttl_ms":0`. Deadman expires hold if no keepalive.
-  2. **CTS** on the same USB-serial PTT port (local KEY), with 0.5 s hang.
+  2. **CTS** on the same USB-serial PTT port (local KEY), with **WIMS adaptive hang**:
+     short dit-like closures → hang ≈ 8×dit (clamped 0.2–1.0 s);
+     long KEY (≥ ~0.75 s) or non-dit → hang ≈ **20 ms**.
+     CTS must go idle once after open before KEY sense is live (avoids floating CTS).
+     Disable KEY sense: env `WSJTX_INHIBIT_CTS=0`.
 - Badge: `TX INHIBITED — …` while held.
 - Plane A: `InhibitStatus` announces bind port + state (ignored by old clients).
 

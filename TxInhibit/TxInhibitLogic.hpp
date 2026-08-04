@@ -24,6 +24,61 @@ static constexpr int ttl_ms_min = 100;
 static constexpr int ttl_ms_max = 30000;
 static constexpr int max_datagram_bytes = 512;
 
+// Local KEY (CTS) adaptive hang — WIMS src/wims/interlock/inhibit.py adaptive_hang_s
+// (design §3). Key-agent side for UDP; gate-side for wired KEY→CTS.
+static constexpr int long_hang_ms = 20;          // long / SSB-like closures
+static constexpr int adaptive_dits = 8;          // CW hang = 8 × measured dit
+static constexpr int adaptive_hang_min_ms = 200; // ~60 WPM floor
+static constexpr int adaptive_hang_max_ms = 1000;// ~10 WPM ceiling
+static constexpr int long_closure_ms = 750;      // ≥ this: treat as long KEY
+static constexpr int dit_max_ms = 200;           // dit-plausible upper bound
+static constexpr int closure_debounce_ms = 20;   // bounce, not an element
+static constexpr int closure_window = 8;
+
+// closures_ms: recent KEY-down durations in ms, oldest first / newest last.
+// Returns hang milliseconds after KEY-up.
+inline int adaptive_hang_ms (int const * closures_ms, int n)
+{
+  if (!closures_ms || n <= 0)
+    {
+      return long_hang_ms;
+    }
+  int const last = closures_ms[n - 1];
+  if (last >= long_closure_ms)
+    {
+      return long_hang_ms; // SSB-PTT / long KEY — debounce only
+    }
+  int min_dit = 0;
+  bool have_dit = false;
+  for (int i = 0; i < n; ++i)
+    {
+      int c = closures_ms[i];
+      if (c > 0 && c <= dit_max_ms)
+        {
+          if (!have_dit || c < min_dit)
+            {
+              min_dit = c;
+              have_dit = true;
+            }
+        }
+    }
+  if (!have_dit)
+    {
+      // Mid-length (e.g. 0.2–0.75 s) or only bounce — not CW elements.
+      return long_hang_ms;
+    }
+  int hang = adaptive_dits * min_dit;
+  if (hang < adaptive_hang_min_ms)
+    {
+      hang = adaptive_hang_min_ms;
+    }
+  if (hang > adaptive_hang_max_ms)
+    {
+      hang = adaptive_hang_max_ms;
+    }
+  return hang;
+}
+
 struct Datagram
 {
   int ttl_ms {0};
