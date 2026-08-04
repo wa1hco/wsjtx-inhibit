@@ -6,6 +6,25 @@
 #include <QTimer>
 #include <QUdpSocket>
 #include <QtGlobal>
+#include <QByteArray>
+
+namespace {
+// Local KEY via CTS is optional. Many machines expose a phantom COM1
+// (ACPI PNP0501) or USB-serial with floating CTS that reads permanently
+// asserted — that stuck the TX INHIBITED badge even with no UDP hold.
+// Opt in only when KEY is actually wired: set environment WSJTX_INHIBIT_CTS=1
+// before starting wsjtx.
+bool cts_key_enabled ()
+{
+  QByteArray v = qgetenv ("WSJTX_INHIBIT_CTS");
+  if (v.isEmpty ())
+    {
+      return false;
+    }
+  v = v.toLower ();
+  return v == "1" || v == "true" || v == "yes" || v == "on";
+}
+}
 
 TxInhibitGate::TxInhibitGate (QObject * parent)
   : QObject {parent}
@@ -83,6 +102,12 @@ void TxInhibitGate::configure (QString const& port_name, bool use_rts)
       serial_ = nullptr;
     }
 
+  // Always clear KEY/UDP-local state on reconfigure so a bad port cannot stick.
+  cts_armed_ = false;
+  last_cts_raw_ = false;
+  cts_release_at_ms_ = -1;
+  logic_.set_local_cts (false);
+
   if (port_name.isEmpty () || port_name == QLatin1String ("None")
       || port_name == QLatin1String ("CAT"))
     {
@@ -113,18 +138,15 @@ void TxInhibitGate::configure (QString const& port_name, bool use_rts)
                         .arg (port_name, serial_->errorString ()));
       serial_->deleteLater ();
       serial_ = nullptr;
+      logic_.set_local_cts (false);
+      apply_line ();
+      emit_state_if_changed ();
       return;
     }
 
   // Idle: deassert PTT lines.
   serial_->setRequestToSend (false);
   serial_->setDataTerminalReady (false);
-  // CTS KEY sense: re-arm only after we observe CTS low (idle). Prevents
-  // stuck "local KEY line" when the pin floats high with nothing wired.
-  cts_armed_ = false;
-  last_cts_raw_ = false;
-  cts_release_at_ms_ = -1;
-  logic_.set_local_cts (false);
   apply_line ();
   emit_state_if_changed ();
 }
@@ -143,6 +165,17 @@ void TxInhibitGate::set_hold_test (bool hold)
 void TxInhibitGate::shutdown ()
 {
   intent_ = false;
+  cts_armed_ = false;
+  last_cts_raw_ = false;
+  cts_release_at_ms_ = -1;
+  logic_.set_local_cts (false);
+  // Drop any UDP hold so restart/settings change cannot leave badge stuck.
+  // (GateLogic has no public clear; send synthetic release via deadline.)
+  {
+    QByteArray rel = QByteArrayLiteral (
+        "{\"tx_inhibit\":1,\"ttl_ms\":0,\"station\":\"\",\"band\":\"\",\"seq\":0}");
+    logic_.on_datagram (rel, now_ms ());
+  }
   if (serial_)
     {
       serial_->setRequestToSend (false);
@@ -164,6 +197,7 @@ void TxInhibitGate::shutdown ()
       timer_->deleteLater ();
       timer_ = nullptr;
     }
+  emit_state_if_changed ();
 }
 
 void TxInhibitGate::on_udp_ready ()
@@ -195,6 +229,15 @@ void TxInhibitGate::on_serial_error (QSerialPort::SerialPortError err)
 
 void TxInhibitGate::poll_cts ()
 {
+  if (!cts_key_enabled ())
+    {
+      // Default: UDP-only inhibit (safe with phantom COM / floating CTS).
+      if (logic_.local_cts ())
+        {
+          logic_.set_local_cts (false);
+        }
+      return;
+    }
   if (!serial_ || !serial_->isOpen ())
     {
       return;
