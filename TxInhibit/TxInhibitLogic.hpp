@@ -51,10 +51,18 @@ inline Datagram parse_datagram (QByteArray const& data)
     {
       return out;
     }
-  if (!obj.contains (QLatin1String ("ttl_ms")) || !obj.value (QLatin1String ("ttl_ms")).isDouble ())
+  // Accept JSON number (Qt stores as Double). Also accept String digits.
+  if (!obj.contains (QLatin1String ("ttl_ms")))
     {
       return out;
     }
+  {
+    auto const ttl_v = obj.value (QLatin1String ("ttl_ms"));
+    if (!ttl_v.isDouble () && !ttl_v.isString ())
+      {
+        return out;
+      }
+  }
   int ttl = obj.value (QLatin1String ("ttl_ms")).toInt (-1);
   if (ttl != 0 && (ttl < ttl_ms_min || ttl > ttl_ms_max))
     {

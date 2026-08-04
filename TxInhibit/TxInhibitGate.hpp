@@ -77,6 +77,9 @@ private:
   quint16 bound_port_ {0};
   bool last_cts_raw_ {false};
   qint64 cts_release_at_ms_ {-1}; // hang for raw KEY: fixed 500 ms (Key agent owns hang for UDP)
+  // Do not treat CTS as KEY until we have seen it deasserted once after open.
+  // Floating CTS-high on many USB-serial adapters would otherwise stick inhibit.
+  bool cts_armed_ {false};
   static constexpr int cts_hang_ms_ = 500;
 };
 

@@ -119,6 +119,12 @@ void TxInhibitGate::configure (QString const& port_name, bool use_rts)
   // Idle: deassert PTT lines.
   serial_->setRequestToSend (false);
   serial_->setDataTerminalReady (false);
+  // CTS KEY sense: re-arm only after we observe CTS low (idle). Prevents
+  // stuck "local KEY line" when the pin floats high with nothing wired.
+  cts_armed_ = false;
+  last_cts_raw_ = false;
+  cts_release_at_ms_ = -1;
+  logic_.set_local_cts (false);
   apply_line ();
   emit_state_if_changed ();
 }
@@ -196,6 +202,20 @@ void TxInhibitGate::poll_cts ()
   auto pins = serial_->pinoutSignals ();
   bool cts = pins & QSerialPort::ClearToSendSignal;
   qint64 t = now_ms ();
+
+  if (!cts_armed_)
+    {
+      // Wait for an idle (CTS low) sample before KEY sensing is live.
+      if (!cts)
+        {
+          cts_armed_ = true;
+          last_cts_raw_ = false;
+          cts_release_at_ms_ = -1;
+          logic_.set_local_cts (false);
+        }
+      return;
+    }
+
   if (cts)
     {
       last_cts_raw_ = true;

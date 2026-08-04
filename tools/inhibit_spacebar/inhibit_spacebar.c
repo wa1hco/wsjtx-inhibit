@@ -1,10 +1,12 @@
 /*
  * inhibit_spacebar.c — Windows GUI TX Inhibit tester for wsjtx-inhibit
  *
- * Single static-ish .exe (only system DLLs: user32, gdi32, ws2_32, comctl32).
- * Hold SPACE or the HOLD button → UDP keepalives; release → ttl_ms=0.
+ * Native .exe (system DLLs only). Protocol matches TxInhibitLogic.hpp.
  *
- * Protocol matches TxInhibitLogic.hpp / tools/send_inhibit_hold.py
+ * SPACE  = hold while down (keepalive), release on key-up
+ * Button = TOGGLE click (on / off) — reliable for mouse users
+ * "Send release" / Escape = force clear
+ *
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
@@ -17,11 +19,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-#pragma comment(lib, "ws2_32.lib")
-#pragma comment(lib, "comctl32.lib")
-#pragma comment(lib, "user32.lib")
-#pragma comment(lib, "gdi32.lib")
 
 enum {
   IDC_HOST = 1001,
@@ -40,6 +37,11 @@ enum {
   IDT_UI = 2
 };
 
+#ifndef BN_PUSHED
+#define BN_PUSHED 2
+#define BN_UNPUSHED 3
+#endif
+
 #define DEFAULT_HOST "127.0.0.1"
 #define DEFAULT_PORT 22372
 #define DEFAULT_TTL_MS 600
@@ -55,13 +57,12 @@ static HWND g_counters;
 static SOCKET g_sock = INVALID_SOCKET;
 static int g_seq;
 static int g_holds, g_releases, g_keepalives, g_errors;
-static int g_holding;
-static int g_space_down;
-static int g_btn_down;
-static ULONGLONG g_deadline_ms; /* GetTickCount64-based end of current hold */
+static int g_holding;     /* UDP hold active (keepalives running) */
+static int g_space_down;  /* physical space currently down */
+static ULONGLONG g_deadline_ms;
 
 static void set_text(HWND h, const char *s) {
-  SetWindowTextA(h, s ? s : "");
+  if (h) SetWindowTextA(h, s ? s : "");
 }
 
 static void get_text(HWND parent, int id, char *buf, int n) {
@@ -79,30 +80,28 @@ static int get_int_field(HWND parent, int id, int defv) {
 static int encode_datagram(char *out, int outn,
                            const char *station, const char *band,
                            int seq, int ttl_ms) {
-  /* Compact JSON, same keys as C++/Python protocol */
   return snprintf(out, outn,
                   "{\"tx_inhibit\":1,\"ttl_ms\":%d,\"station\":\"%s\","
                   "\"band\":\"%s\",\"seq\":%d}",
                   ttl_ms, station, band, seq);
 }
 
-static int sanitize_token(char *s) {
-  /* Keep station/band JSON-safe: strip quotes and control chars */
+static void sanitize_token(char *s) {
   char *r = s, *w = s;
   for (; *r; ++r) {
     if (*r == '"' || *r == '\\' || (unsigned char)*r < 0x20) continue;
     *w++ = *r;
   }
   *w = 0;
-  return (int)(w - s);
 }
 
-static int send_datagram(HWND hwnd, int ttl_ms, int is_keepalive) {
+/* ttl_ms_arg: 0 = release; nonzero = use UI TTL field (hold/keepalive) */
+static int send_datagram(HWND hwnd, int ttl_ms_arg, int is_keepalive) {
   char host[128], station[64], band[32], portstr[32];
   char payload[512];
-  char status[256];
+  char status[288];
   struct sockaddr_in addr;
-  int port, ttl, n, sent;
+  int port, ttl_ms, n, sent;
 
   get_text(hwnd, IDC_HOST, host, sizeof host);
   get_text(hwnd, IDC_STATION, station, sizeof station);
@@ -121,14 +120,15 @@ static int send_datagram(HWND hwnd, int ttl_ms, int is_keepalive) {
     return 0;
   }
 
-  if (ttl_ms != 0) {
-    ttl = get_int_field(hwnd, IDC_TTL, DEFAULT_TTL_MS);
-    if (ttl < TTL_MIN || ttl > TTL_MAX) {
+  if (ttl_ms_arg == 0) {
+    ttl_ms = 0;
+  } else {
+    ttl_ms = get_int_field(hwnd, IDC_TTL, DEFAULT_TTL_MS);
+    if (ttl_ms < TTL_MIN || ttl_ms > TTL_MAX) {
       set_text(g_status, "ERROR: TTL must be 100..30000");
       g_errors++;
       return 0;
     }
-    ttl_ms = ttl;
   }
 
   g_seq++;
@@ -144,7 +144,6 @@ static int send_datagram(HWND hwnd, int ttl_ms, int is_keepalive) {
   addr.sin_port = htons((u_short)port);
   addr.sin_addr.s_addr = inet_addr(host);
   if (addr.sin_addr.s_addr == INADDR_NONE) {
-    /* hostname lookup (IPv4) */
     struct hostent *he = gethostbyname(host);
     if (!he || !he->h_addr_list || !he->h_addr_list[0]) {
       set_text(g_status, "ERROR: bad host");
@@ -167,12 +166,11 @@ static int send_datagram(HWND hwnd, int ttl_ms, int is_keepalive) {
   if (ttl_ms == 0) {
     g_releases++;
     g_deadline_ms = 0;
-    snprintf(status, sizeof status, "RELEASE → %s:%d  seq=%d", host, port, g_seq);
+    snprintf(status, sizeof status, "RELEASE sent → %s:%d  seq=%d", host, port, g_seq);
   } else if (is_keepalive) {
     g_keepalives++;
     g_deadline_ms = GetTickCount64() + (ULONGLONG)ttl_ms;
-    snprintf(status, sizeof status, "KEEPALIVE → %s:%d  seq=%d  ttl=%d",
-             host, port, g_seq, ttl_ms);
+    snprintf(status, sizeof status, "KEEPALIVE → %s:%d  seq=%d", host, port, g_seq);
   } else {
     g_holds++;
     g_deadline_ms = GetTickCount64() + (ULONGLONG)ttl_ms;
@@ -184,64 +182,81 @@ static int send_datagram(HWND hwnd, int ttl_ms, int is_keepalive) {
 }
 
 static void update_counters(void) {
-  char b[256];
+  char b[320];
   ULONGLONG now = GetTickCount64();
   int rem = 0;
   if (g_deadline_ms > now)
     rem = (int)(g_deadline_ms - now);
 
-  snprintf(b, sizeof b,
-           "seq=%d   holds=%d   keepalives=%d   releases=%d   errors=%d   "
-           "deadline=%s",
-           g_seq, g_holds, g_keepalives, g_releases, g_errors,
-           g_deadline_ms ? (rem > 0 ? "" : "expired") : "—");
   if (g_deadline_ms && rem > 0) {
     snprintf(b, sizeof b,
-             "seq=%d   holds=%d   keepalives=%d   releases=%d   errors=%d   "
-             "deadline in %d ms",
-             g_seq, g_holds, g_keepalives, g_releases, g_errors, rem);
+             "state=%s   seq=%d   holds=%d   ka=%d   releases=%d   err=%d   "
+             "deadman in %d ms",
+             g_holding ? "HOLDING" : "idle", g_seq, g_holds, g_keepalives,
+             g_releases, g_errors, rem);
+  } else {
+    snprintf(b, sizeof b,
+             "state=%s   seq=%d   holds=%d   ka=%d   releases=%d   err=%d",
+             g_holding ? "HOLDING" : "idle", g_seq, g_holds, g_keepalives,
+             g_releases, g_errors);
   }
   set_text(g_counters, b);
 }
 
 static void set_holding_ui(int holding) {
   if (holding) {
-    set_text(g_hold_btn, "INHIBITING — release SPACE / mouse");
-    set_text(g_status, "INHIBITING (hold active)");
+    set_text(g_hold_btn, "INHIBITING — click again or release SPACE to clear");
   } else {
-    set_text(g_hold_btn, "HOLD TO INHIBIT (SPACE or mouse)");
+    set_text(g_hold_btn, "Click to INHIBIT (toggle)  |  hold SPACE");
   }
+}
+
+static void stop_keepalive_timer(HWND hwnd) {
+  KillTimer(hwnd, IDT_KEEPALIVE);
+}
+
+static void start_keepalive_timer(HWND hwnd) {
+  int ka = get_int_field(hwnd, IDC_KEEPALIVE, DEFAULT_KA_MS);
+  if (ka < 50) ka = 50;
+  if (ka > 2000) ka = 2000;
+  stop_keepalive_timer(hwnd);
+  SetTimer(hwnd, IDT_KEEPALIVE, (UINT)ka, NULL);
 }
 
 static void start_hold(HWND hwnd) {
-  int ka;
   if (g_holding) return;
+  if (!send_datagram(hwnd, 1, 0))
+    return;
   g_holding = 1;
   set_holding_ui(1);
-  if (!send_datagram(hwnd, /*ttl*/1, /*ka*/0)) {
-    g_holding = 0;
-    set_holding_ui(0);
-    return;
-  }
-  ka = get_int_field(hwnd, IDC_KEEPALIVE, DEFAULT_KA_MS);
-  if (ka < 50) ka = 50;
-  if (ka > 2000) ka = 2000;
-  SetTimer(hwnd, IDT_KEEPALIVE, (UINT)ka, NULL);
+  start_keepalive_timer(hwnd);
   update_counters();
 }
 
+/* Always stop keepalives and send release (idempotent). */
 static void end_hold(HWND hwnd) {
-  if (!g_holding) return;
+  int was = g_holding;
   g_holding = 0;
-  KillTimer(hwnd, IDT_KEEPALIVE);
+  stop_keepalive_timer(hwnd);
+  /* Send release even if we thought we were idle (clears stuck gate). */
   send_datagram(hwnd, 0, 0);
   set_holding_ui(0);
+  if (!was)
+    set_text(g_status, "RELEASE sent (was already idle in tester)");
   update_counters();
+}
+
+static void toggle_hold(HWND hwnd) {
+  if (g_holding)
+    end_hold(hwnd);
+  else
+    start_hold(hwnd);
 }
 
 static int is_edit_focus(HWND hwnd) {
   HWND f = GetFocus();
   int id;
+  (void)hwnd;
   if (!f) return 0;
   id = GetDlgCtrlID(f);
   return id == IDC_HOST || id == IDC_PORT || id == IDC_STATION ||
@@ -254,11 +269,10 @@ static HWND add_label(HWND p, int x, int y, int w, int h, const char *t) {
 }
 
 static HWND add_edit(HWND p, int id, int x, int y, int w, int h, const char *t) {
-  HWND e = CreateWindowExA(WS_EX_CLIENTEDGE, "EDIT", t,
-                           WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL,
-                           x, y, w, h, p, (HMENU)(intptr_t)id,
-                           GetModuleHandle(NULL), NULL);
-  return e;
+  return CreateWindowExA(WS_EX_CLIENTEDGE, "EDIT", t,
+                         WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL,
+                         x, y, w, h, p, (HMENU)(intptr_t)id,
+                         GetModuleHandle(NULL), NULL);
 }
 
 static void layout(HWND hwnd) {
@@ -290,15 +304,16 @@ static void layout(HWND hwnd) {
   SendMessage(c, WM_SETFONT, (WPARAM)font, TRUE);
   y += eh + gap + 4;
 
+  /* BS_NOTIFY: we only use BN_CLICKED for toggle (mouse). Space is separate. */
   g_hold_btn = CreateWindowA(
-      "BUTTON", "HOLD TO INHIBIT (SPACE or mouse)",
-      WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON,
+      "BUTTON", "Click to INHIBIT (toggle)  |  hold SPACE",
+      WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON | BS_NOTIFY,
       x, y, 480, 72, hwnd, (HMENU)(intptr_t)IDC_HOLD_BTN,
       GetModuleHandle(NULL), NULL);
   SendMessage(g_hold_btn, WM_SETFONT, (WPARAM)font, TRUE);
   y += 80;
 
-  c = CreateWindowA("BUTTON", "Send release now (ttl=0)",
+  c = CreateWindowA("BUTTON", "Force RELEASE now",
                     WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON,
                     x, y, 200, 28, hwnd, (HMENU)(intptr_t)IDC_RELEASE_BTN,
                     GetModuleHandle(NULL), NULL);
@@ -307,7 +322,7 @@ static void layout(HWND hwnd) {
 
   add_label(hwnd, x, y, 480, eh, "Status");
   y += eh;
-  g_status = CreateWindowA("STATIC", "IDLE — hold SPACE to inhibit",
+  g_status = CreateWindowA("STATIC", "IDLE — click button to toggle, or hold SPACE",
                            WS_CHILD | WS_VISIBLE | SS_LEFT,
                            x, y, 480, eh + 4, hwnd, (HMENU)(intptr_t)IDC_STATUS,
                            GetModuleHandle(NULL), NULL);
@@ -332,11 +347,11 @@ static void layout(HWND hwnd) {
 
   c = CreateWindowA(
       "STATIC",
-      "Start wsjtx-inhibit with PTT=RTS/DTR. Focus this window, hold SPACE "
-      "(or the button). Status bar in WSJT-X should show TX INHIBITED. "
-      "Release to clear. Escape also releases.",
+      "wsjtx-inhibit: PTT=RTS/DTR. Mouse = click to arm, click again to clear. "
+      "SPACE = hold only while pressed. Force RELEASE if stuck. Escape = release. "
+      "If badge says local KEY line, CTS on that COM is asserted (floating pin).",
       WS_CHILD | WS_VISIBLE | SS_LEFT,
-      x, y, 480, eh * 3, hwnd, (HMENU)(intptr_t)IDC_HINT,
+      x, y, 480, eh * 4, hwnd, (HMENU)(intptr_t)IDC_HINT,
       GetModuleHandle(NULL), NULL);
   SendMessage(c, WM_SETFONT, (WPARAM)font, TRUE);
 
@@ -350,67 +365,44 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
     SetTimer(hwnd, IDT_UI, 100, NULL);
     return 0;
 
-  case WM_COMMAND:
-    if (LOWORD(wParam) == IDC_RELEASE_BTN && HIWORD(wParam) == BN_CLICKED) {
+  case WM_COMMAND: {
+    int id = LOWORD(wParam);
+    int code = HIWORD(wParam);
+    if (id == IDC_HOLD_BTN && code == BN_CLICKED) {
+      /* Ignore BN_CLICKED synthesized from SPACE when we handle space ourselves:
+         if space is down, space path owns hold state. */
+      if (!g_space_down)
+        toggle_hold(hwnd);
+      return 0;
+    }
+    if (id == IDC_RELEASE_BTN && code == BN_CLICKED) {
       g_space_down = 0;
-      g_btn_down = 0;
-      if (g_holding)
-        end_hold(hwnd);
-      else {
-        send_datagram(hwnd, 0, 0);
-        update_counters();
-      }
+      end_hold(hwnd);
       return 0;
     }
     break;
-
-  case WM_LBUTTONDOWN:
-    /* not used — button has its own messages */
-    break;
+  }
 
   case WM_TIMER:
-    if (wParam == IDT_KEEPALIVE && g_holding) {
-      send_datagram(hwnd, 1, 1);
-      update_counters();
+    if (wParam == IDT_KEEPALIVE) {
+      if (g_holding) {
+        if (!send_datagram(hwnd, 1, 1)) {
+          /* keep trying; user can Force RELEASE */
+        }
+        update_counters();
+      } else {
+        stop_keepalive_timer(hwnd);
+      }
     } else if (wParam == IDT_UI) {
       update_counters();
     }
     return 0;
 
-  case WM_KEYDOWN:
-    if (wParam == VK_ESCAPE) {
-      g_space_down = 0;
-      g_btn_down = 0;
-      end_hold(hwnd);
-      return 0;
-    }
-    if (wParam == VK_SPACE && !is_edit_focus(hwnd)) {
-      if (!(lParam & (1 << 30))) { /* not autorepeat */
-        g_space_down = 1;
-        start_hold(hwnd);
-      }
-      return 0;
-    }
-    break;
-
-  case WM_KEYUP:
-    if (wParam == VK_SPACE && g_space_down) {
-      g_space_down = 0;
-      if (!g_btn_down)
-        end_hold(hwnd);
-      return 0;
-    }
-    break;
-
-  case WM_PARENTNOTIFY:
-    break;
-
   case WM_DESTROY:
-    if (g_holding) {
-      send_datagram(hwnd, 0, 0);
-      g_holding = 0;
-    }
-    KillTimer(hwnd, IDT_KEEPALIVE);
+    g_holding = 0;
+    stop_keepalive_timer(hwnd);
+    /* best-effort release so we don't leave WSJT stuck */
+    send_datagram(hwnd, 0, 0);
     KillTimer(hwnd, IDT_UI);
     PostQuitMessage(0);
     return 0;
@@ -418,56 +410,31 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
   return DefWindowProcA(hwnd, msg, wParam, lParam);
 }
 
-/* Subclass hold button for press/release */
-static WNDPROC g_old_btn_proc;
+/* SPACE: press-and-hold (not toggle). Filtered before DispatchMessage. */
+static int filter_keys(MSG *m) {
+  if (!g_hwnd) return 0;
 
-static LRESULT CALLBACK HoldBtnProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
-  HWND parent = GetParent(hwnd);
-  switch (msg) {
-  case WM_LBUTTONDOWN:
-    g_btn_down = 1;
-    SetCapture(hwnd);
-    start_hold(parent);
-    break;
-  case WM_LBUTTONUP:
-    if (g_btn_down) {
-      g_btn_down = 0;
-      ReleaseCapture();
-      if (!g_space_down)
-        end_hold(parent);
-    }
-    break;
-  case WM_CAPTURECHANGED:
-    if (g_btn_down && (HWND)lParam != hwnd) {
-      g_btn_down = 0;
-      if (!g_space_down)
-        end_hold(parent);
-    }
-    break;
+  if (m->message == WM_KEYDOWN && m->wParam == VK_ESCAPE) {
+    g_space_down = 0;
+    end_hold(g_hwnd);
+    return 1;
   }
-  return CallWindowProcA(g_old_btn_proc, hwnd, msg, wParam, lParam);
-}
 
-/* Pre-translate so SPACE works even when a child has focus (except edits) */
-static int filter_space(MSG *m) {
   if (m->message == WM_KEYDOWN && m->wParam == VK_SPACE) {
     if (is_edit_focus(g_hwnd)) return 0;
-    if (!(m->lParam & (1 << 30))) {
+    if (!(m->lParam & (1 << 30))) { /* ignore autorepeat */
       g_space_down = 1;
       start_hold(g_hwnd);
     }
-    return 1;
+    return 1; /* swallow so focused button does not also "click" */
   }
-  if (m->message == WM_KEYUP && m->wParam == VK_SPACE && g_space_down) {
-    g_space_down = 0;
-    if (!g_btn_down)
+
+  if (m->message == WM_KEYUP && m->wParam == VK_SPACE) {
+    if (is_edit_focus(g_hwnd) && !g_space_down) return 0;
+    if (g_space_down) {
+      g_space_down = 0;
       end_hold(g_hwnd);
-    return 1;
-  }
-  if (m->message == WM_KEYDOWN && m->wParam == VK_ESCAPE) {
-    g_space_down = 0;
-    g_btn_down = 0;
-    end_hold(g_hwnd);
+    }
     return 1;
   }
   return 0;
@@ -477,7 +444,6 @@ int WINAPI WinMain(HINSTANCE hi, HINSTANCE hp, LPSTR cmd, int show) {
   WNDCLASSA wc;
   MSG msg;
   WSADATA wsa;
-  RECT r;
   (void)hp;
   (void)cmd;
 
@@ -509,28 +475,18 @@ int WINAPI WinMain(HINSTANCE hi, HINSTANCE hp, LPSTR cmd, int show) {
       0, wc.lpszClassName,
       "wsjtx-inhibit — Spacebar TX Inhibit Tester",
       WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
-      CW_USEDEFAULT, CW_USEDEFAULT, 530, 460,
+      CW_USEDEFAULT, CW_USEDEFAULT, 530, 480,
       NULL, NULL, hi, NULL);
   if (!g_hwnd) {
     MessageBoxA(NULL, "CreateWindow failed", "inhibit_spacebar", MB_ICONERROR);
     return 1;
   }
 
-  /* subclass hold button after create */
-  if (g_hold_btn) {
-    g_old_btn_proc = (WNDPROC)SetWindowLongPtrA(
-        g_hold_btn, GWLP_WNDPROC, (LONG_PTR)HoldBtnProc);
-  }
-
-  /* Make client area exact */
-  GetClientRect(g_hwnd, &r);
-  (void)r;
-
   ShowWindow(g_hwnd, show);
   UpdateWindow(g_hwnd);
 
   while (GetMessageA(&msg, NULL, 0, 0) > 0) {
-    if (filter_space(&msg))
+    if (filter_keys(&msg))
       continue;
     TranslateMessage(&msg);
     DispatchMessageA(&msg);
