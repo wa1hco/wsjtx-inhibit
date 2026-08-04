@@ -12,14 +12,14 @@ param(
 
 $ErrorActionPreference = "Stop"
 $wsjtx = Join-Path $StageDir "bin\wsjtx.exe"
-if (-not (Test-Path $wsjtx)) { throw "Missing $wsjtx — build stage first." }
+if (-not (Test-Path $wsjtx)) { throw "Missing $wsjtx - build stage first." }
 
 if ((Test-Path $InstallDir) -and -not $Force) {
   throw "Install dir exists: $InstallDir (pass -Force to overwrite)"
 }
 
 New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
-Write-Host "Copying stage → $InstallDir"
+Write-Host "Copying stage -> $InstallDir"
 robocopy $StageDir $InstallDir /MIR /NFL /NDL /NJH /NJS /nc /ns /np | Out-Null
 # robocopy codes 0-7 are success
 if ($LASTEXITCODE -ge 8) { throw "robocopy failed: $LASTEXITCODE" }
@@ -49,5 +49,4 @@ if ($DesktopShortcut) {
 }
 
 Write-Host "Installed: $installed"
-& $installed --help 2>$null | Select-Object -First 3
 Write-Host "Done."
