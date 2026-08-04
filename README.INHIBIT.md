@@ -2,9 +2,9 @@
 
 **Repository:** https://github.com/wa1hco/wsjtx-inhibit  
 
-WSJT-X mainline plus **TX Inhibit**: co-band stations can stop **radiating** within milliseconds when another operator keys, **without** aborting FT8 sequencing (Halt Tx is the wrong tool for that).
+WSJT-X mainline plus **TX Inhibit**: co-band stations stop **radiating** within milliseconds when a **KEY agent** reports that a priority radio is keyed, **without** aborting FT8 sequencing (Halt Tx ends the QSO sequence; inhibit only holds PTT).
 
-[WIMS](https://github.com/wa1hco/WIMS) is one multi-seat user of this feature. The same path works for other interlock software.
+A KEY agent is any program that senses the priority KEY line and sends the UDP hold protocol documented in [docs/TX_INHIBIT.md](docs/TX_INHIBIT.md).
 
 ---
 
@@ -16,7 +16,7 @@ WSJT-X mainline plus **TX Inhibit**: co-band stations can stop **radiating** wit
 | **[Releases](https://github.com/wa1hco/wsjtx-inhibit/releases)** | **Download** the `.exe`, `.zip`, AppImage, `.deb`, `.rpm` (see **Assets** on a release) |
 | [INSTALL-WINDOWS.md](INSTALL-WINDOWS.md) | Windows step-by-step |
 | [INSTALL-LINUX.md](INSTALL-LINUX.md) | Linux step-by-step |
-| [docs/WIMS_TX_INHIBIT.md](docs/WIMS_TX_INHIBIT.md) | How inhibit works + PTT wiring |
+| [docs/TX_INHIBIT.md](docs/TX_INHIBIT.md) | Gate behaviour, KEY agent design, UDP protocol, smoke test |
 
 **Important:** Install files live under each release’s **Assets** list. They are not loose files inside the source code folders. If your OS is missing from Assets, that package was not published on that release.
 

@@ -1,8 +1,6 @@
 # Moved → [README.INHIBIT.md](README.INHIBIT.md)
 
-This project is now **[wsjtx-inhibit](https://github.com/wa1hco/wsjtx-inhibit)**.
+This project is **[wsjtx-inhibit](https://github.com/wa1hco/wsjtx-inhibit)** —
+WSJT-X mainline plus TX Inhibit (KEY agent protocol). Legacy path name only.
 
-WIMS remains a primary multi-seat user of the TX Inhibit feature; the product
-name is feature-first (inhibit), not WIMS-specific.
-
-See **[README.INHIBIT.md](README.INHIBIT.md)**.
+See **[README.INHIBIT.md](README.INHIBIT.md)** and **[docs/TX_INHIBIT.md](docs/TX_INHIBIT.md)**.

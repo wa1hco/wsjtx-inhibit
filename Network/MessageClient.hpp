@@ -85,7 +85,7 @@ public:
   // of record marker
   Q_SLOT void logged_ADIF (QByteArray const& ADIF_record);
 
-  // WIMS TX Inhibit status (NetworkMessage::InhibitStatus) — plane A telemetry.
+  // TX Inhibit status (NetworkMessage::InhibitStatus) — seat telemetry for agents/tools.
   Q_SLOT void inhibit_status (quint16 inhibit_port, bool inhibited
                               , QString const& source_station
                               , quint32 hold_rx, quint32 release_rx

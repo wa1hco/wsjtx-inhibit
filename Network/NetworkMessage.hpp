@@ -561,7 +561,7 @@ namespace NetworkMessage
       SwitchConfiguration,
       Configure,
       AnnotationInfo,
-      // WIMS: low-latency TX inhibit gate telemetry (§11.4).
+      // TX Inhibit gate telemetry (docs/TX_INHIBIT.md).
       // Fields: inhibit_port (quint16), gate_state (bool inhibited),
       //         source_station (utf8), hold_rx/release_rx/expiries/invalid (quint32).
       InhibitStatus,

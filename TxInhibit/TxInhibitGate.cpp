@@ -6,24 +6,6 @@
 #include <QTimer>
 #include <QUdpSocket>
 #include <QtGlobal>
-#include <QByteArray>
-
-namespace {
-// Local KEY via CTS: enabled when a serial PTT port is open, unless disabled
-// with WSJTX_INHIBIT_CTS=0. Phantom COM1 with floating CTS is handled by
-// cts_armed_ (must see CTS low once). Hang after KEY-up follows WIMS
-// adaptive_hang (dit → multi-dit hang; long KEY → ~20 ms).
-bool cts_key_disabled ()
-{
-  QByteArray v = qgetenv ("WSJTX_INHIBIT_CTS");
-  if (v.isEmpty ())
-    {
-      return false; // default: KEY sense on when serial open + armed
-    }
-  v = v.toLower ();
-  return v == "0" || v == "false" || v == "no" || v == "off";
-}
-}
 
 TxInhibitGate::TxInhibitGate (QObject * parent)
   : QObject {parent}
@@ -32,6 +14,7 @@ TxInhibitGate::TxInhibitGate (QObject * parent)
 
 TxInhibitGate::~TxInhibitGate ()
 {
+  // Ensure PTT is low and ports closed even if Configuration forgot shutdown.
   shutdown ();
 }
 
@@ -40,9 +23,10 @@ TxInhibitGate * TxInhibitGate::create_on_thread (QThread ** out_thread)
   auto * thread = new QThread;
   thread->setObjectName (QStringLiteral ("TxInhibitGateThread"));
   auto * gate = new TxInhibitGate;
+  // Gate's event loop (UDP readyRead, timer, queued slots) runs on this thread.
   gate->moveToThread (thread);
   QObject::connect (thread, &QThread::finished, gate, &QObject::deleteLater);
-  // Raise priority after start (best-effort; may be ignored).
+  // Raise priority after start (best-effort; OS may ignore).
   QObject::connect (thread, &QThread::started, gate, [gate] () {
       QThread::currentThread ()->setPriority (QThread::TimeCriticalPriority);
       Q_UNUSED (gate);
@@ -57,6 +41,8 @@ TxInhibitGate * TxInhibitGate::create_on_thread (QThread ** out_thread)
 
 qint64 TxInhibitGate::now_ms () const
 {
+  // Wall-clock ms; same clock used for UDP hold deadlines.
+  // (Monotonic would be nicer under NTP steps; wall clock matches simple agents.)
   return QDateTime::currentMSecsSinceEpoch ();
 }
 
@@ -67,7 +53,8 @@ void TxInhibitGate::ensure_udp ()
       return;
     }
   udp_ = new QUdpSocket (this);
-  // Prefer 22372; fall back to ephemeral (§11.2).
+  // Prefer well-known port 22372 so KEY agents can use a fixed default.
+  // If busy, bind ephemeral and advertise via portBound (docs/TX_INHIBIT.md).
   // Construct QHostAddress explicitly so bind() is not ambiguous under C++11.
   QHostAddress const any4 {QHostAddress::AnyIPv4};
   if (!udp_->bind (any4, TxInhibit::default_gate_port,
@@ -82,7 +69,8 @@ void TxInhibitGate::ensure_udp ()
   if (!timer_)
     {
       timer_ = new QTimer (this);
-      timer_->setInterval (20); // 50 Hz: deadman + CTS poll
+      // 50 Hz is enough for deadman expiry; UDP assert is event-driven.
+      timer_->setInterval (20);
       QObject::connect (timer_, &QTimer::timeout, this, &TxInhibitGate::tick);
       timer_->start ();
     }
@@ -90,6 +78,7 @@ void TxInhibitGate::ensure_udp ()
 
 void TxInhibitGate::configure (QString const& port_name, bool use_rts)
 {
+  // Always listen for KEY-agent UDP once the seat uses RTS/DTR PTT path.
   ensure_udp ();
   line_ = use_rts ? Line::RTS : Line::DTR;
   port_name_ = port_name;
@@ -101,17 +90,15 @@ void TxInhibitGate::configure (QString const& port_name, bool use_rts)
       serial_ = nullptr;
     }
 
-  // Always clear KEY/UDP-local state on reconfigure so a bad port cannot stick.
-  cts_armed_ = false;
-  last_cts_raw_ = false;
-  cts_down_at_ms_ = -1;
-  cts_release_at_ms_ = -1;
-  closure_count_ = 0;
-  logic_.set_local_cts (false);
-
+  // PTT port must be a real device name (COMx / /dev/tty…). Shared USB CAT+RTS
+  // uses that same real name for both. The list entry "CAT" means OmniRig-style
+  // proxy (docs/TX_INHIBIT.md); gate needs a device path it can open.
   if (port_name.isEmpty () || port_name == QLatin1String ("None")
       || port_name == QLatin1String ("CAT"))
     {
+      // Same brevity as other rig messages: title detail is in docs/TX_INHIBIT.md.
+      Q_EMIT lineError (QStringLiteral ("TX Inhibit: invalid PTT port \"%1\"")
+                        .arg (port_name.isEmpty () ? QStringLiteral ("(empty)") : port_name));
       apply_line ();
       emit_state_if_changed ();
       return;
@@ -119,7 +106,8 @@ void TxInhibitGate::configure (QString const& port_name, bool use_rts)
 
   serial_ = new QSerialPort (this);
   serial_->setPortName (port_name);
-  // Modem lines only; baud is irrelevant for RTS/DTR/CTS.
+  // Modem lines only; baud is unused for RTS/DTR keying.
+  // KEY sense is via UDP KEY agent (CTS left to the agent — docs/TX_INHIBIT.md).
   serial_->setBaudRate (QSerialPort::Baud9600);
   serial_->setDataBits (QSerialPort::Data8);
   serial_->setParity (QSerialPort::NoParity);
@@ -135,17 +123,14 @@ void TxInhibitGate::configure (QString const& port_name, bool use_rts)
 
   if (!serial_->open (QIODevice::ReadWrite))
     {
-      Q_EMIT lineError (QStringLiteral ("TxInhibit: cannot open %1: %2")
+      Q_EMIT lineError (QStringLiteral ("TX Inhibit: failed to open \"%1\": %2")
                         .arg (port_name, serial_->errorString ()));
       serial_->deleteLater ();
       serial_ = nullptr;
-      logic_.set_local_cts (false);
-      apply_line ();
-      emit_state_if_changed ();
       return;
     }
 
-  // Idle: deassert PTT lines.
+  // Safe idle: both handshake outputs low before we apply intent.
   serial_->setRequestToSend (false);
   serial_->setDataTerminalReady (false);
   apply_line ();
@@ -154,33 +139,24 @@ void TxInhibitGate::configure (QString const& port_name, bool use_rts)
 
 void TxInhibitGate::set_intent (bool on)
 {
+  // Intent is always accepted (sequencer thinks it is TXing). Radiation is
+  // gated only in apply_line() when a UDP hold is active.
   intent_ = on;
   apply_line ();
 }
 
 void TxInhibitGate::set_hold_test (bool hold)
 {
+  // Future UI hook: when true, on_udp_ready ignores KEY-agent packets.
   hold_test_ = hold;
 }
 
 void TxInhibitGate::shutdown ()
 {
   intent_ = false;
-  cts_armed_ = false;
-  last_cts_raw_ = false;
-  cts_down_at_ms_ = -1;
-  cts_release_at_ms_ = -1;
-  closure_count_ = 0;
-  logic_.set_local_cts (false);
-  // Drop any UDP hold so restart/settings change cannot leave badge stuck.
-  // (GateLogic has no public clear; send synthetic release via deadline.)
-  {
-    QByteArray rel = QByteArrayLiteral (
-        "{\"tx_inhibit\":1,\"ttl_ms\":0,\"station\":\"\",\"band\":\"\",\"seq\":0}");
-    logic_.on_datagram (rel, now_ms ());
-  }
   if (serial_)
     {
+      // Hard safe: both pins low before close.
       serial_->setRequestToSend (false);
       serial_->setDataTerminalReady (false);
       serial_->close ();
@@ -200,11 +176,12 @@ void TxInhibitGate::shutdown ()
       timer_->deleteLater ();
       timer_ = nullptr;
     }
-  emit_state_if_changed ();
 }
 
 void TxInhibitGate::on_udp_ready ()
 {
+  // Low-latency path: process KEY-agent datagrams and update the PTT pin
+  // immediately (event-driven; tick() only covers deadman).
   if (!udp_ || hold_test_)
     {
       return;
@@ -214,7 +191,9 @@ void TxInhibitGate::on_udp_ready ()
       QByteArray data;
       data.resize (static_cast<int> (udp_->pendingDatagramSize ()));
       udp_->readDatagram (data.data (), data.size ());
-      logic_.on_datagram (data, now_ms ());
+      // on_datagram returns whether UDP-hold level flipped; we always recompute
+      // radiate from intent + current hold (apply_line).
+      (void) logic_.on_datagram (data, now_ms ());
     }
   apply_line ();
   emit_state_if_changed ();
@@ -226,110 +205,13 @@ void TxInhibitGate::on_serial_error (QSerialPort::SerialPortError err)
     {
       return;
     }
-  Q_EMIT lineError (QStringLiteral ("TxInhibit serial: %1")
+  Q_EMIT lineError (QStringLiteral ("TX Inhibit: serial error: %1")
                     .arg (serial_ ? serial_->errorString () : QStringLiteral ("unknown")));
-}
-
-void TxInhibitGate::push_closure_ms (int duration_ms)
-{
-  if (duration_ms < TxInhibit::closure_debounce_ms)
-    {
-      return; // bounce
-    }
-  if (closure_count_ < TxInhibit::closure_window)
-    {
-      closure_ms_[closure_count_++] = duration_ms;
-      return;
-    }
-  for (int i = 1; i < TxInhibit::closure_window; ++i)
-    {
-      closure_ms_[i - 1] = closure_ms_[i];
-    }
-  closure_ms_[TxInhibit::closure_window - 1] = duration_ms;
-}
-
-int TxInhibitGate::current_hang_ms () const
-{
-  return TxInhibit::adaptive_hang_ms (closure_ms_, closure_count_);
-}
-
-void TxInhibitGate::poll_cts ()
-{
-  if (cts_key_disabled ())
-    {
-      if (logic_.local_cts ())
-        {
-          logic_.set_local_cts (false);
-        }
-      return;
-    }
-  if (!serial_ || !serial_->isOpen ())
-    {
-      return;
-    }
-  auto pins = serial_->pinoutSignals ();
-  bool cts = pins & QSerialPort::ClearToSendSignal;
-  qint64 t = now_ms ();
-
-  if (!cts_armed_)
-    {
-      // Wait for an idle (CTS low) sample before KEY sensing is live.
-      if (!cts)
-        {
-          cts_armed_ = true;
-          last_cts_raw_ = false;
-          cts_down_at_ms_ = -1;
-          cts_release_at_ms_ = -1;
-          logic_.set_local_cts (false);
-        }
-      return;
-    }
-
-  if (cts)
-    {
-      if (!last_cts_raw_)
-        {
-          // KEY-down edge
-          cts_down_at_ms_ = t;
-        }
-      last_cts_raw_ = true;
-      cts_release_at_ms_ = -1;
-      logic_.set_local_cts (true);
-    }
-  else if (last_cts_raw_)
-    {
-      // KEY-up edge — measure closure, apply WIMS adaptive hang
-      last_cts_raw_ = false;
-      int dur = 0;
-      if (cts_down_at_ms_ >= 0)
-        {
-          dur = static_cast<int> (t - cts_down_at_ms_);
-        }
-      cts_down_at_ms_ = -1;
-      push_closure_ms (dur);
-      int hang = current_hang_ms ();
-      cts_release_at_ms_ = t + hang;
-      logic_.set_local_cts (true); // still inhibited during hang
-    }
-
-  if (cts_release_at_ms_ >= 0 && !last_cts_raw_)
-    {
-      if (t >= cts_release_at_ms_)
-        {
-          cts_release_at_ms_ = -1;
-          logic_.set_local_cts (false);
-        }
-      else
-        {
-          logic_.set_local_cts (true); // still in hang
-        }
-    }
 }
 
 void TxInhibitGate::tick ()
 {
-  poll_cts ();
-  // Expire UDP deadman.
+  // Run deadman expiry even when no UDP traffic (inhibited() clears deadline).
   (void) logic_.inhibited (now_ms ());
   apply_line ();
   emit_state_if_changed ();
@@ -337,6 +219,8 @@ void TxInhibitGate::tick ()
 
 void TxInhibitGate::apply_line ()
 {
+  // Sole place that sets the physical PTT pin for this seat:
+  // radiate = intent ∧ open hold window (UDP KEY agent).
   bool radiate = intent_ && !logic_.line_inhibited (now_ms ());
   if (!serial_ || !serial_->isOpen ())
     {
@@ -354,6 +238,7 @@ void TxInhibitGate::apply_line ()
 
 void TxInhibitGate::emit_state_if_changed ()
 {
+  // Badge follows line_inhibited (PTT blocked while UDP hold is active).
   qint64 t = now_ms ();
   bool inh = logic_.line_inhibited (t);
   auto badge = logic_.badge_text (t);

@@ -4369,7 +4369,7 @@ void MainWindow::createStatusBar()                           //createStatusBar
   tx_status_label.setFrameStyle (QFrame::Panel | QFrame::Sunken);
   statusBar()->addWidget (&tx_status_label);
 
-  // WIMS TX Inhibit badge — hidden until a hold is active.
+  // TX Inhibit badge — hidden until a hold is active.
   inhibit_status_label.setAlignment (Qt::AlignHCenter);
   inhibit_status_label.setMinimumSize (QSize {160, 18});
   inhibit_status_label.setStyleSheet ("QLabel{color: #ffffff; background-color: #cc0000; font-weight: bold}");
@@ -5185,7 +5185,7 @@ void MainWindow::on_actionKeyboard_shortcuts_triggered()
   <tr><td><b>Esc      </b></td><td>Stop Tx, abort QSO, clear next-call queue</td></tr>
   <tr><td><b>F1       </b></td><td>Online User's Guide (Alt: transmit Tx6)</td></tr>
   <tr><td><b>Shift+F1  </b></td><td>Copyright Notice</td></tr>
-  <tr><td><b>Ctrl+F1  </b></td><td>About WSJT-X</td></tr>
+  <tr><td><b>Ctrl+F1  </b></td><td>About wsjtx-inhibit</td></tr>
   <tr><td><b>F2       </b></td><td>Open settings window (Alt: transmit Tx2)</td></tr>
   <tr><td><b>F3       </b></td><td>Display keyboard shortcuts (Alt: transmit Tx3)</td></tr>
   <tr><td><b>F4       </b></td><td>Clear DX Call, DX Grid, Tx messages 1-4 (Alt: transmit Tx4)</td></tr>

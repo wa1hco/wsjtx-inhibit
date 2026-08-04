@@ -136,16 +136,40 @@ Same as stock WSJT-X:
 
 ### For TX Inhibit testing
 
-1. **Settings → Radio** → **PTT method** = **RTS** or **DTR**.
-2. Choose the serial device used for PTT (often not the same as CAT).
-3. Wire RTS/DTR to radio PTT as for any digital interface.
+Inhibit only gates the **physical serial PTT key line** (RTS or DTR). It is **not** the same as **Halt Tx**.
 
-See [docs/WIMS_TX_INHIBIT.md](docs/WIMS_TX_INHIBIT.md).
+1. **Settings → Radio** → **PTT method** = **RTS** or **DTR** (not **CAT** method, not **VOX** alone).
+2. **PTT port** = a real serial device (for example `/dev/ttyUSB0`).  
+   - Do **not** choose the special list value **CAT**.  
+   - **Same device as CAT** is valid (shared USB CAT + RTS/DTR); a separate PTT adapter is also fine.
+3. Wire RTS or DTR to the radio’s PTT/SEND, or use the radio’s USB SEND / PC KEYING map.
+4. On the radio, turn **VOX off** for the test so only the key line can key the transmitter.
+5. Your user may need membership in the **`dialout`** group (or **`uucp`** on some distros); log out and back in after changing groups.
+6. **Shared USB checklist:** **Handshake = None**; radio menu maps the line to SEND/PTT; one app owns the modem lines. Brand notes: [docs/TX_INHIBIT.md — Shared USB CAT + RTS/DTR](docs/TX_INHIBIT.md#shared-usb-cat--rtsdtr-what-operators-actually-do).
+
+When a hold is active, the status bar shows a red **TX INHIBITED** badge. The radio should **not** key even if WSJT-X is in a TX cycle.
+
+Default inhibit UDP port is **22372** (if free). Design (gate + KEY agent): [docs/TX_INHIBIT.md](docs/TX_INHIBIT.md).
+
+### Optional smoke test
+
+With the program running and PTT set as above, send a hold to UDP port **22372**.  
+If you have a **git clone** of this repository and Python 3:
+
+```bash
+python3 tools/send_inhibit_hold.py --ttl-ms 3000 --station TEST
+# attempt TX — radio should not key; red badge should show
+python3 tools/send_inhibit_hold.py --ttl-ms 0   # release
+```
+
+You do **not** need the script for normal use — a **KEY agent** sends hold/keepalive/release. See [docs/TX_INHIBIT.md](docs/TX_INHIBIT.md).
 
 ### Quick check
 
-- **Help → About** shows **3.0.x** for this build.
+- You launched **this** package (AppImage or installed `wsjtx`), not a distro stock binary by mistake.
+- **Help → About** shows **wsjtx-inhibit** and base version **3.0.x** (mainline + TX Inhibit). The main window title starts with **wsjtx-inhibit**.
 - Receive and TX behave like normal WSJT-X when inhibit is not active.
+- During a hold, the red **TX INHIBITED** badge appears and the radio does not key.
 
 ---
 
@@ -157,7 +181,11 @@ See [docs/WIMS_TX_INHIBIT.md](docs/WIMS_TX_INHIBIT.md).
 | AppImage will not run | `chmod +x`; try `--appimage-extract-and-run`; need 64-bit glibc-ish desktop |
 | `.deb` / `.rpm` dependency errors | Use **AppImage** instead, or install missing Qt/audio packages |
 | Serial PTT / device permissions | Add your user to the `dialout` (or `uucp`) group, log out/in |
-| Inhibit never engages | Need RTS/DTR PTT path; CAT-PTT alone is not gated in this build |
+| Error opening serial / “TX Inhibit: cannot open …” | Wrong device node, permissions, or another program already has the port open |
+| PTT never keys at all | **PTT method** RTS/DTR and **PTT port** a real `/dev/tty…` (**not** the special value “CAT”); check USB SEND / wiring |
+| Inhibit never engages | Need RTS/DTR on a real serial PTT port; **CAT-only PTT is not gated**. Confirm UDP holds reach port **22372** |
+| Radio keys on port open / CAT flaky with RTS PTT | Handshake **None**; polarity; multi-app; see [shared USB CAT + RTS/DTR](docs/TX_INHIBIT.md#shared-usb-cat--rtsdtr-what-operators-actually-do) |
+| Radio still keys during inhibit | Radio **VOX** may still key from audio — turn VOX off |
 
 ---
 

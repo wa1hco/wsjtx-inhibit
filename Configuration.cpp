@@ -715,7 +715,7 @@ private:
 
   QThread * transceiver_thread_;
 
-  // WIMS TX Inhibit gate (serial DTR/RTS PTT path).
+  // TX Inhibit gate (serial DTR/RTS PTT path). See docs/TX_INHIBIT.md.
   TxInhibitGate * tx_inhibit_gate_ {nullptr};
   QThread * tx_inhibit_thread_ {nullptr};
   bool tx_inhibit_owns_serial_ {false};
@@ -2128,6 +2128,9 @@ Configuration::impl::~impl ()
   write_settings ();
 }
 
+// Start (or reconfigure) the TX Inhibit gate when the operator uses RTS/DTR
+// serial PTT. CAT-PTT seats never take this path — those PTT methods are
+// not line-gated. See docs/TX_INHIBIT.md.
 void Configuration::impl::start_tx_inhibit_gate (TransceiverFactory::ParameterPack const& pack)
 {
   bool serial_ptt = (pack.ptt_type == TransceiverFactory::PTT_method_DTR
@@ -2139,25 +2142,31 @@ void Configuration::impl::start_tx_inhibit_gate (TransceiverFactory::ParameterPa
     }
   if (!tx_inhibit_gate_)
     {
+      // One dedicated thread for the seat lifetime of RTS/DTR use.
       tx_inhibit_gate_ = TxInhibitGate::create_on_thread (&tx_inhibit_thread_);
+      // Badge / telemetry (GUI thread).
       connect (tx_inhibit_gate_, &TxInhibitGate::inhibitChanged,
                this, [this] (bool inhibited, QString const& source) {
                  Q_EMIT self_->tx_inhibit_changed (inhibited, source);
                }, Qt::QueuedConnection);
+      // Remember bound port (22372 or ephemeral) for KEY agents / InhibitStatus.
       connect (tx_inhibit_gate_, &TxInhibitGate::portBound,
                this, [this] (quint16 port) {
                  tx_inhibit_port_ = port;
                  Q_EMIT self_->tx_inhibit_port_changed (port);
                }, Qt::QueuedConnection);
+      // Serial open / config problems — same channel as rig failures.
       connect (tx_inhibit_gate_, &TxInhibitGate::lineError,
                this, [this] (QString const& msg) {
                  Q_EMIT self_->transceiver_failure (msg);
                }, Qt::QueuedConnection);
     }
   bool use_rts = (pack.ptt_type == TransceiverFactory::PTT_method_RTS);
+  // configure runs on the gate thread (opens COM, binds UDP).
   QMetaObject::invokeMethod (tx_inhibit_gate_, "configure", Qt::QueuedConnection,
                              Q_ARG (QString, pack.ptt_port),
                              Q_ARG (bool, use_rts));
+  // Hamlib must not open this PTT port; we drive it in transceiver_ptt.
   tx_inhibit_owns_serial_ = true;
 }
 
@@ -2165,6 +2174,7 @@ void Configuration::impl::stop_tx_inhibit_gate ()
 {
   if (tx_inhibit_gate_)
     {
+      // Blocking so PTT is low before we tear down the thread.
       QMetaObject::invokeMethod (tx_inhibit_gate_, "shutdown", Qt::BlockingQueuedConnection);
       tx_inhibit_owns_serial_ = false;
       tx_inhibit_port_ = 0;
@@ -5125,9 +5135,13 @@ bool Configuration::impl::open_rig (bool force)
           if (is_tci_ && rig_active_ && tci_audio_) restart_tci_device_ = true;
           close_rig ();
 
-          // WIMS: DTR/RTS serial PTT is owned by TxInhibitGate; hamlib must not
-          // open the same port. Pass VOX-style PTT into the factory so CAT still
-          // works while the gate drives RTS/DTR = intent ∧ ¬inhibit.
+          // PTT split of responsibility when operator chose RTS or DTR:
+          //   • TxInhibitGate opens the PTT serial port and drives the pin
+          //     as (intent ∧ ¬line_inhibited) — see docs/TX_INHIBIT.md.
+          //   • Hamlib still does CAT on its port, but must not open PTT —
+          //     we pass VOX-style PTT into the factory so it leaves the
+          //     key line alone. Audio/sequencer intent still flows through
+          //     transceiver_ptt() → set_intent on the gate.
           auto hamlib_data = rig_data;
           if (rig_data.ptt_type == TransceiverFactory::PTT_method_DTR
               || rig_data.ptt_type == TransceiverFactory::PTT_method_RTS)
@@ -5138,6 +5152,7 @@ bool Configuration::impl::open_rig (bool force)
             }
           else
             {
+              // CAT / VOX PTT: no line gate for this session.
               stop_tx_inhibit_gate ();
             }
 
@@ -5279,10 +5294,11 @@ void Configuration::impl::transceiver_ptt (bool on)
   cached_rig_state_.online (true); // we want the rig online
   set_cached_mode ();
   cached_rig_state_.ptt (on);
-  // WIMS: drive serial PTT through the gate thread when active. Intent is
-  // accepted immediately (audio/sequencer unchanged); the physical line is
-  // RTS/DTR = intent ∧ ¬inhibit. Still notify the CAT thread for split
-  // emulation (hamlib PTT is VOX/none when the gate owns the serial port).
+  // When the gate owns serial PTT: push TX intent to the gate thread.
+  // Intent is always stored there; physical RTS/DTR stays low while a KEY
+  // agent hold is active. Sequencer/audio are unchanged.
+  // We still emit set_transceiver below for CAT/split bookkeeping (hamlib
+  // was given VOX PTT so it does not fight the gate for the key line).
   if (tx_inhibit_owns_serial_ && tx_inhibit_gate_)
     {
       QMetaObject::invokeMethod (tx_inhibit_gate_, "set_intent", Qt::QueuedConnection,

@@ -40,9 +40,12 @@ WSJT-X + TX Inhibit.
 ## Run
 1. Unzip anywhere (e.g. C:\WSJT\$Product).
 2. Run bin\wsjtx.exe
-3. Settings → Radio: PTT method RTS (or DTR) on dedicated USB-serial for inhibit.
+3. Settings → Radio: PTT method RTS or DTR (real COMx — may be same COM as CAT).
 
-See INSTALL-WINDOWS.md and docs/WIMS_TX_INHIBIT.md in the source repo:
+## Local inhibit test
+With wsjtx running, run bin\inhibit-spacebar.exe and press Spacebar to hold/release.
+(Default UDP 127.0.0.1:22372.) See docs/TX_INHIBIT.md in the source repo.
+
 https://github.com/wa1hco/wsjtx-inhibit
 
 Not an official WSJT-X release. GPL-3.

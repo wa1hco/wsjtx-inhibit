@@ -10,33 +10,21 @@ You do **not** need Microsoft Visual Studio, MSYS2, or anything called “NSIS.�
 ## Where do I get the program?
 
 1. Open **[Releases](https://github.com/wa1hco/wsjtx-inhibit/releases)**.
-2. Open the release you were asked to test (for example *Windows test build 3.0.2*).
-3. Scroll to **Assets** (file list at the bottom).
+2. Open the release you were asked to test (for example **[wsjtx-inhibit-rc1](https://github.com/wa1hco/wsjtx-inhibit/releases/tag/wsjtx-inhibit-rc1)**).
+3. Use the download links in the release notes, or expand **Assets** if needed (same files).
 
 ### Which file do I download?
 
-| Under Assets, look for | Meaning | What you do |
-|------------------------|---------|-------------|
-| File ending in **`-win64.exe`** | Windows **installer** (recommended) | Download → double-click → Next, Next, Finish |
-| File ending in **`.zip`** with `windows` in the name | **Portable** copy (no installer) | Download → unzip → run `bin\wsjtx.exe` |
+| File | Meaning | What you do |
+|------|---------|-------------|
+| **`…-win64.exe`** (e.g. `wsjtx-inhibit-rc1-win64.exe`) | Windows **installer** (recommended) | Download → double-click → Next, Next, Finish |
+| **`…-windows-x86_64.zip`** (e.g. `wsjtx-inhibit-rc1-windows-x86_64.zip`) | **Portable** copy (no installer) | Download → unzip → run `bin\wsjtx.exe` |
 
-Example names (exact names change with version):
+The **`.exe`** is the setup program itself (built with a packaging tool on the maintainers’ side). Treat it like any other Windows installer.
 
-```text
-wsjtx-…-win64.exe              ← use this if you want a normal install
-wsjtx-…-windows-x86_64.zip     ← use this for a portable folder
-```
+### There is no Windows package on that release?
 
-Names may still say `mainline-wims`. That is still this project.
-
-### What about “NSIS”?
-
-**You do not install NSIS.**  
-NSIS is a tool *package builders* use to create a Windows setup program. The file you download that ends in **`.exe`** *is already* that setup program. Treat it like any other Windows installer.
-
-### There is no .exe in Assets?
-
-Then that release has no Windows package. Use another release that lists a `-win64.exe` or Windows `.zip`, or contact the person who sent you the link.
+Use another release that lists a `-win64.exe` or Windows `.zip`, or contact the person who sent you the link.
 
 ---
 
@@ -53,12 +41,23 @@ Then that release has no Windows package. Use another release that lists a `-win
 6. Follow the installer screens.  
    Default location is often under **`C:\WSJT\`** (for example `C:\WSJT\wsjtx` or similar).
 7. When finished, start the program:
-   - From the **Start** menu (search for WSJT-X / the name the installer created), or  
+   - From the **Start** menu (shortcut the installer created),  
+   - From a **desktop** shortcut if the installer offered one, or  
    - Open the install folder → **`bin`** → double-click **`wsjtx.exe`**.
+
+### What the installer typically creates
+
+| Item | Result |
+|------|--------|
+| Program files | Under `C:\WSJT\…` (path is choosable in the wizard) |
+| Start menu | Launch shortcut, documentation/site links, Uninstall |
+| Desktop | Optional app shortcut when that option is enabled |
+| Finish page | Option to launch the app when setup completes |
+| Windows apps list | Uninstaller entry for this install |
 
 ### Can I keep official WSJT-X installed?
 
-Yes. Prefer side-by-side installs. For testing, always launch **this** build’s `wsjtx.exe`, not the SourceForge/ARRL one. Do not run both against the same radio and COM ports at the same time.
+Yes. Prefer side-by-side installs. For testing, always launch **this** build’s Start-menu entry or `wsjtx.exe`. Use one program at a time on a given radio and COM ports.
 
 ---
 
@@ -88,25 +87,52 @@ Click **OK**. Try receive first, then a careful TX test (dummy load recommended)
 
 ## Settings for TX Inhibit testing
 
-Inhibit only controls the **serial PTT key line** in this build.
+Inhibit only gates the **physical serial PTT key line** (RTS or DTR). It does **not** stop CAT-only PTT, and it is **not** the same as **Halt Tx**.
+
+### Required radio settings
 
 1. **File → Settings → Radio**
-2. Set **PTT method** to **RTS** or **DTR** (not “CAT” alone, not VOX-only for this test).
-3. Select the **COM port** of your USB-serial PTT adapter (often a **different** port than CAT).
-4. Connect that adapter’s RTS or DTR line to the radio’s PTT / SEND as you would for any digital-mode interface.
+2. **PTT method** = **RTS** or **DTR**  
+   - Do **not** use **CAT** as the PTT *method* for inhibit tests.  
+   - Do **not** rely on **VOX** alone.
+3. **PTT port** = a real **`COMx`** (not the special list value **CAT**).  
+   - **Same COM as CAT** is valid and common (radio USB CAT + RTS/DTR).  
+   - A **separate** PTT COM is also fine if you use an external keyline adapter.
+4. Wire **RTS** or **DTR** to the radio’s PTT / SEND, or use the radio’s **USB SEND** / **PC KEYING** map on that COM.
+5. On the radio, turn **VOX off** for the test so only the key line can key the transmitter.
+6. **Shared USB CAT + RTS/DTR checklist:** **Handshake = None**; radio menu assigns the line to SEND/PTT (not flow control); only one program drives the modem lines. Details: [docs/TX_INHIBIT.md — Shared USB CAT + RTS/DTR](docs/TX_INHIBIT.md#shared-usb-cat--rtsdtr-what-operators-actually-do).
 
-When inhibit is active, the status area may show something like **TX INHIBITED**.  
-The radio should **not** key even if WSJT-X is in a TX cycle.
+### What you should see when held
 
-More detail: [docs/WIMS_TX_INHIBIT.md](docs/WIMS_TX_INHIBIT.md).
+- A red status-bar badge: **`TX INHIBITED`** or **`TX INHIBITED — held by …`**.
+- The radio **must not key** (no RF) even if WSJT-X is in a TX cycle and audio is still playing.
+
+Default inhibit UDP port is **22372** (if free). Design (gate + KEY agent): [docs/TX_INHIBIT.md](docs/TX_INHIBIT.md).
+
+### Optional local inhibit test
+
+With this build running and PTT set as above, use the helper **shipped next to the app**:
+
+```text
+bin\wsjtx.exe
+bin\inhibit-spacebar.exe
+```
+
+1. Run **`bin\inhibit-spacebar.exe`** (same install folder as `wsjtx.exe`).
+2. **Hold Space** → red **TX INHIBITED** badge; attempt TX (dummy load) — radio stays unkeyed.
+3. **Release Space** → after hang, badge clears; normal PTT works. Short taps simulate CW (adaptive hang).
+4. **q** or **Esc** to quit the helper. Space follows KEY **level** (down while pressed).
+
+Default UDP target is `127.0.0.1:22372`. Day-to-day multi-op uses a real **KEY agent**; this helper is a bench stand-in. See [docs/TX_INHIBIT.md](docs/TX_INHIBIT.md).
 
 ---
 
 ## How do I know I have the right program?
 
-1. You started the copy you just installed (not the old Start-menu stock WSJT-X by mistake).
-2. **Help → About** shows version **3.0.x** matching the release you downloaded.
-3. Normal FT8/FT4 decode and (with correct settings) transmit work as with stock WSJT-X.
+1. You started **this** install’s `bin\wsjtx.exe` (or its Start-menu shortcut), not stock WSJT-X from SourceForge/ARRL.
+2. **Help → About** shows **wsjtx-inhibit** and base version **3.0.x** (mainline + TX Inhibit). The main window title starts with **wsjtx-inhibit**.
+3. Normal FT8/FT4 decode works; with RTS/DTR PTT, TX keys the radio when **not** inhibited.
+4. During a hold (KEY agent or the smoke test above), the red **TX INHIBITED** badge appears and the radio does not key.
 
 ---
 
@@ -117,7 +143,12 @@ More detail: [docs/WIMS_TX_INHIBIT.md](docs/WIMS_TX_INHIBIT.md).
 | SmartScreen blocks the `.exe` | More info → Run anyway (if you trust this repo) |
 | Antivirus quarantines the file | Restore from quarantine or add an exception for the download; report false positive if needed |
 | Program starts but no radio control | Same as stock WSJT-X: CAT port, baud, driver, cable |
-| Inhibit never holds TX | PTT must be **RTS or DTR** on the inhibit-capable path; CAT-PTT-only is not gated |
+| Error about opening a COM port / “TX Inhibit: cannot open …” | Wrong `COMx`, permissions, or another program already owns the port — close the other app or pick the correct COM |
+| PTT never keys at all after install | Check **PTT method** is RTS/DTR and **PTT port** is a real `COMx` (**not** the special value “CAT”). Confirm USB SEND / PC KEYING and wiring |
+| Radio keys when the program opens the COM | DTR/RTS polarity or another app forcing the line — see [shared USB CAT + RTS/DTR](docs/TX_INHIBIT.md#shared-usb-cat--rtsdtr-what-operators-actually-do) |
+| CAT flaky after enabling RTS PTT | Handshake must be **None**; radio must not use RTS for CAT flow control |
+| Inhibit never holds TX | Need RTS/DTR on a real serial PTT port; **CAT-only PTT is not gated**. Confirm hold packets reach port **22372** (or the port your interlock was told) |
+| Radio still keys during inhibit | Radio **VOX** may still key from audio — turn VOX off; confirm you are not using a second PTT path |
 | “I can’t find Linux files here” | Correct — this page is Windows only. See [INSTALL.md](INSTALL.md) |
 
 ---

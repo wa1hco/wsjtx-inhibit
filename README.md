@@ -1,5 +1,12 @@
 # Weak Signal Communication Software
 
+> **This repository is [wsjtx-inhibit](https://github.com/wa1hco/wsjtx-inhibit)** —  
+> WSJT-X mainline plus a **TX Inhibit** feature for multi-op / same-band stations.  
+> **Operators / testers:** start at **[INSTALL.md](INSTALL.md)** and download packages from  
+> **[Releases → Assets](https://github.com/wa1hco/wsjtx-inhibit/releases)** (not from this source tree).  
+> Project overview: **[README.INHIBIT.md](README.INHIBIT.md)**.  
+> The text below is the upstream WSJT-X program description (unchanged).
+
 ## Programs
 *WSJT-X*, *MAP65*, and *QMAP* are open-source, multi-platform programs designed for weak-signal digital communication by amateur radio. *WSJT-X* works with a standard SSB transceiver, while *MAP65* and *QMAP* use wideband SDR-style hardware. The programs are open source, free of charge, and licensed under the GNU General Public License.
 

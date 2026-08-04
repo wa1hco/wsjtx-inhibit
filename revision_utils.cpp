@@ -100,8 +100,10 @@ QString version (bool include_patch)
 
 QString program_title (QString const& revision)
 {
-  QString id {QCoreApplication::applicationName () + "   v" + QCoreApplication::applicationVersion ()};
-  return id + " " + revision ;
+  // Window title: identify the inhibit branch while keeping mainline version.
+  QString id {QStringLiteral ("wsjtx-inhibit   v")
+              + QCoreApplication::applicationVersion ()};
+  return id + " " + revision;
 }
 
 QString http_user_agent ()
@@ -113,5 +115,5 @@ QString http_user_agent ()
     + QSysInfo::currentCpuArchitecture () + "; "
     + QString {"rv:%1"}.arg (QSysInfo::kernelVersion ()) + ")"};
 
-  return QString {"WSJT-X/" + version () + "_" + revision ()}.simplified () + " " + platform;
+  return QString {"wsjtx-inhibit/" + version () + "_" + revision ()}.simplified () + " " + platform;
 }

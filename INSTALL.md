@@ -2,7 +2,7 @@
 
 **You are an operator / tester.** You do not need to build anything from source.
 
-**wsjtx-inhibit** is a modified **WSJT-X** with a **TX Inhibit** feature for multi-op and same-band stations (for example with [WIMS](https://github.com/wa1hco/WIMS)). It is **not** an official WSJT-X / ARRL release.
+**wsjtx-inhibit** is a modified **WSJT-X** with a **TX Inhibit** feature for multi-op and same-band stations. A separate **KEY agent** (or the Spacebar test helper) sends hold packets when a priority radio is keyed. It is **not** an official WSJT-X / ARRL release.
 
 ---
 
@@ -46,10 +46,10 @@ You never need to compile code or install a tool called “NSIS.” The Windows 
 
 | File name looks like | What to do |
 |----------------------|------------|
-| **`something-win64.exe`** | **Recommended.** Double-click to install (like other Windows programs). |
-| **`something-windows-x86_64.zip`** | Unzip to a folder, then run `bin\wsjtx.exe` (no installer). |
+| **`wsjtx-inhibit-…-win64.exe`** (or any `…-win64.exe`) | **Recommended.** Double-click to install (like other Windows programs). |
+| **`wsjtx-inhibit-…-windows-x86_64.zip`** (or any Windows `…zip`) | Unzip to a folder, then run `bin\wsjtx.exe` (no installer). |
 
-Filenames may still contain `mainline-wims` from an older project name. That is still **wsjtx-inhibit**.
+Example release: **[wsjtx-inhibit-rc1](https://github.com/wa1hco/wsjtx-inhibit/releases/tag/wsjtx-inhibit-rc1)** (`wsjtx-inhibit-rc1-win64.exe` / `…-windows-x86_64.zip`).
 
 ### Short install (`.exe`)
 
@@ -63,9 +63,21 @@ Filenames may still contain `mainline-wims` from an older project name. That is 
 
 Set callsign, radio, audio as usual under **File → Settings**.
 
-**For TX Inhibit testing**, set **PTT method** to **RTS** or **DTR** on a USB serial PTT port (not CAT-PTT only). Details: [docs/WIMS_TX_INHIBIT.md](docs/WIMS_TX_INHIBIT.md).
+**For TX Inhibit testing** (required checklist):
 
-Confirm: **Help → About** shows version **3.0.x** from this project.
+1. **PTT method** = **RTS** or **DTR** (not **CAT** method, not **VOX** alone).
+2. **PTT port** = a real serial device (`COMx` on Windows, `/dev/ttyUSBx` on Linux) — **not** the special list value **CAT**.  
+   That COM may be the **same** as the CAT port (shared USB CAT + RTS/DTR — valid and common) or a separate PTT adapter.
+3. Wire RTS or DTR to the radio’s PTT/SEND (or use the radio’s USB SEND / PC KEYING map). Turn **radio VOX off** for tests so only the key line can key the rig.
+4. When a hold is active, the **status bar** shows a red **TX INHIBITED** badge. Software sequencing/audio may continue; the **physical PTT line** stays low.
+
+**Shared radio USB (CAT + RTS/DTR on one COM):** Valid on Icom / Elecraft / Yaesu and similar. Use **Handshake = None**, map the line to SEND/PTT (not flow control), and let only one app drive the modem lines. Brand menus and pitfalls:  
+[docs/TX_INHIBIT.md — Shared USB CAT + RTS/DTR](docs/TX_INHIBIT.md#shared-usb-cat--rtsdtr-what-operators-actually-do).
+
+Design (gate + KEY agent): [docs/TX_INHIBIT.md](docs/TX_INHIBIT.md).  
+Windows/Linux step-by-step: [INSTALL-WINDOWS.md](INSTALL-WINDOWS.md), [INSTALL-LINUX.md](INSTALL-LINUX.md).
+
+**Confirm you launched this build:** start the copy you just installed. **Help → About** shows **wsjtx-inhibit** and base version **3.0.x** (mainline + TX Inhibit). The main window title also starts with **wsjtx-inhibit**.
 
 ---
 
@@ -127,33 +139,89 @@ If there is no `.pkg` in Assets, macOS is not available on that release.
 
 ## 5. What TX Inhibit is (one paragraph)
 
-WSJT-X sequencing and audio stay the same. When another operator or interlock software says “hold,” this build can **stop the radio from keying** on the **RTS/DTR PTT line** within milliseconds. That is **not** the same as **Halt Tx** (which aborts the QSO sequence).
+WSJT-X sequencing and audio stay the same. When a KEY agent (or the Spacebar helper) says “hold,” this build can **stop the radio from keying** on the **RTS/DTR PTT line** within milliseconds. That is **not** the same as **Halt Tx** (which aborts the QSO sequence). Holds arrive as short UDP messages (default port **22372**); they expire unless refreshed. Local CTS KEY sensing is **not** used in this build (see [docs/TX_INHIBIT.md](docs/TX_INHIBIT.md) §5).
 
 ---
 
-## 6. Test inhibit without WIMS (spacebar tester)
+## 6. Test inhibit with the Spacebar helper
 
-Need to verify TX Inhibit without full multi-op software?
+You can exercise TX Inhibit **without** a full multi-op system by sending hold datagrams that simulate an SSB/CW **KEY** line: **Space held** = KEY down (keepalives), **Space released** = hang then release.
 
-| Platform | How |
-|----------|-----|
-| **Windows** | Run **`inhibit_spacebar.exe`** from the install `bin\` folder (or Start menu **TX Inhibit Spacebar Tester**). No Python. |
-| Linux / dev | Optional: `python3 tools/inhibit_spacebar_gui.py` |
+### What you need
 
-1. Start this build with **PTT method = RTS or DTR**.  
-2. Open the spacebar tester → **hold SPACE** (or hold the button).  
-3. WSJT-X should show **TX INHIBITED**; release to clear.
+| Item | Notes |
+|------|--------|
+| **wsjtx-inhibit** running | Installed from Releases; **PTT method = RTS or DTR** on a real serial port (see checklist above) |
+| **A Spacebar helper** | **`bin/inhibit-spacebar`** (Windows: `bin\inhibit-spacebar.exe`) next to `wsjtx` — shipped with the install. Or Python: `tools/send_inhibit_hold.py`. |
 
-Details: [tools/README-INHIBIT-TESTER.md](tools/README-INHIBIT-TESTER.md).
+### `inhibit-spacebar` (recommended — same folder as the app)
+
+Installed with the package (portable ZIP / installer stage):
+
+```text
+…\bin\wsjtx.exe
+…\bin\inhibit-spacebar.exe      ← Windows
+…/bin/wsjtx
+…/bin/inhibit-spacebar          ← Linux
+```
+
+1. Start **wsjtx-inhibit** with **PTT = RTS or DTR** on a real serial port.
+2. Run **`bin\inhibit-spacebar.exe`** (or `./bin/inhibit-spacebar`) from that install.
+3. **Hold Space** → KEY down (hold + keepalives). Red **TX INHIBITED** badge; radio stays unkeyed (dummy load recommended).
+4. **Release Space** → hang (adaptive by default), then release; badge clears.
+5. Key short elements on Space to experiment with **adaptive hang** (CW-style); long hold ≈ SSB.
+6. **q** or **Esc** → release and quit.
+
+Space follows KEY **level** (down while pressed). Default target: `127.0.0.1:22372`. Detail: [docs/TX_INHIBIT.md §6](docs/TX_INHIBIT.md#6-testing-inhibit-locally).
+
+### Python — `tools/send_inhibit_hold.py`
+
+From a git clone (stdlib only — no pip packages):
+
+```bash
+# Linux / macOS (Linux needs /dev/input access for Space level)
+python3 tools/send_inhibit_hold.py --interactive
+
+# Windows (if "python" is on PATH)
+python tools\send_inhibit_hold.py --interactive
+```
+
+Same **level** Spacebar behaviour as `inhibit-spacebar`. Optional flags:
+
+```bash
+python3 tools/send_inhibit_hold.py -i --station SSB-TEST --host 127.0.0.1 --port 22372
+```
+
+| Flag | Purpose |
+|------|---------|
+| `-i` / `--interactive` | Spacebar KEY **level** + hang |
+| `--station NAME` | Text shown in the badge (`held by …`) |
+| `--host` / `--port` | Seat address (default `127.0.0.1:22372`) |
+| `--fixed-hang-ms N` | Fixed hang after KEY up (disable adaptive) |
+
+One-shot hold (no Spacebar loop):
+
+```bash
+python3 tools/send_inhibit_hold.py --ttl-ms 3000 --station TEST   # hold ~3 s
+python3 tools/send_inhibit_hold.py --ttl-ms 0                     # explicit release
+```
+
+Script on GitHub: [tools/send_inhibit_hold.py](https://github.com/wa1hco/wsjtx-inhibit/blob/main/tools/send_inhibit_hold.py).
+
+### Production use
+
+Day-to-day multi-op use is a **KEY agent**: a program that reads the priority radio’s KEY line and sends the same hold/keepalive/release datagrams (see [docs/TX_INHIBIT.md](docs/TX_INHIBIT.md) §3). The Spacebar helpers are **bench stand-ins** for that agent.
 
 ---
 
 ## 7. Problems and feedback
 
+Please include:
+
 - Installer / SmartScreen / antivirus issues  
-- Radio and PTT method (RTS/DTR port?)  
-- Whether FT8 works like normal WSJT-X  
-- Whether inhibit holds and releases correctly  
+- OS, rig, and **PTT method + PTT port** (exact `COMx` / `/dev/tty…`)  
+- Whether normal FT8 receive/TX worked  
+- Whether the red **TX INHIBITED** badge appeared and whether the radio keyed or not  
 
 Report here: [https://github.com/wa1hco/wsjtx-inhibit/issues](https://github.com/wa1hco/wsjtx-inhibit/issues)  
 Do **not** report this fork to the official WSJT-X project as a stock bug.

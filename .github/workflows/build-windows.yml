@@ -232,6 +232,7 @@ jobs:
           test -f "${WORKSPACE}/stage-main/bin/qmap.exe"
           test -f "${WORKSPACE}/stage-main/bin/wsjtx.exe"
           test -f "${WORKSPACE}/stage-main/bin/jt9.exe"
+          test -f "${WORKSPACE}/stage-main/bin/inhibit-spacebar.exe"
           bash .github/scripts/audit-staged-dll-imports-windows.sh \
             "${WORKSPACE}/stage-main/bin" \
             "${WORKSPACE}/stage-main/bin/map65.exe" \

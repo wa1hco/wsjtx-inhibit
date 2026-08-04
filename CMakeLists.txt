@@ -1803,6 +1803,14 @@ generate_version_info (wsjtx_app_version_VERSION_RESOURCES
 add_executable (wsjtx_app_version AppVersion/AppVersion.cpp ${wsjtx_app_version_VERSION_RESOURCES})
 target_link_libraries (wsjtx_app_version wsjt_qt)
 
+# TX Inhibit local test helper — installed as bin/inhibit-spacebar(.exe) next to wsjtx.
+add_executable (inhibit-spacebar tools/inhibit-spacebar/main.cpp)
+target_link_libraries (inhibit-spacebar Qt5::Core Qt5::Network)
+# Console subsystem on Windows (keyboard Spacebar test).
+if (WIN32)
+  set_target_properties (inhibit-spacebar PROPERTIES WIN32_EXECUTABLE OFF)
+endif ()
+
 generate_version_info (message_aggregator_VERSION_RESOURCES
   NAME message_aggregator
   BUNDLE ${PROJECT_BUNDLE_NAME}
@@ -1868,6 +1876,12 @@ install (TARGETS udp_daemon message_aggregator wsjtx_app_version
   )
 
 install (TARGETS jt9 wsprd fmtave fcal fmeasure
+  RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT runtime
+  BUNDLE DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT runtime
+  )
+
+# KEY-agent stand-in for local TX Inhibit tests (next to wsjtx.exe in bin/).
+install (TARGETS inhibit-spacebar
   RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT runtime
   BUNDLE DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT runtime
   )
