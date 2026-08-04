@@ -1,12 +1,15 @@
 /*
- * inhibit_spacebar.c — Windows GUI TX Inhibit tester for wsjtx-inhibit
+ * inhibit_spacebar.c — Windows GUI Key-agent style TX Inhibit tester
  *
- * Native .exe (system DLLs only). Protocol matches TxInhibitLogic.hpp.
+ * Emulates WIMS SSB/CW Key-agent over UDP (same protocol as the gate):
+ *   KEY-down  → hold + keepalives
+ *   KEY-up    → WIMS adaptive hang (still keepalives), then ttl_ms=0
  *
- * SPACE  = hold while down (keepalive), release on key-up
- * Button = TOGGLE click (on / off) — reliable for mouse users
- * "Send release" / Escape = force clear
+ * Adaptive hang (inhibit.py adaptive_hang_s):
+ *   dit-like (<=200 ms) → hang = 8×dit, clamped 200–1000 ms
+ *   long KEY (>=750 ms) or non-dit → hang = 20 ms
  *
+ * SPACE / big button = KEY (press-and-hold). Force RELEASE skips hang.
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
@@ -34,13 +37,9 @@ enum {
   IDC_COUNTERS,
   IDC_HINT,
   IDT_KEEPALIVE = 1,
-  IDT_UI = 2
+  IDT_UI = 2,
+  IDT_HANG = 3
 };
-
-#ifndef BN_PUSHED
-#define BN_PUSHED 2
-#define BN_UNPUSHED 3
-#endif
 
 #define DEFAULT_HOST "127.0.0.1"
 #define DEFAULT_PORT 22372
@@ -48,6 +47,16 @@ enum {
 #define DEFAULT_KA_MS 200
 #define TTL_MIN 100
 #define TTL_MAX 30000
+
+/* WIMS adaptive hang constants (same as TxInhibitLogic.hpp) */
+#define LONG_HANG_MS 20
+#define ADAPTIVE_DITS 8
+#define ADAPTIVE_HANG_MIN_MS 200
+#define ADAPTIVE_HANG_MAX_MS 1000
+#define LONG_CLOSURE_MS 750
+#define DIT_MAX_MS 200
+#define CLOSURE_DEBOUNCE_MS 20
+#define CLOSURE_WINDOW 8
 
 static HWND g_hwnd;
 static HWND g_hold_btn;
@@ -57,9 +66,15 @@ static HWND g_counters;
 static SOCKET g_sock = INVALID_SOCKET;
 static int g_seq;
 static int g_holds, g_releases, g_keepalives, g_errors;
-static int g_holding;     /* UDP hold active (keepalives running) */
-static int g_space_down;  /* physical space currently down */
+static int g_udp_active;   /* sending holds/keepalives to the gate */
+static int g_key_down;     /* physical KEY (space/button) down */
+static int g_in_hang;      /* KEY up, still hanging before release */
 static ULONGLONG g_deadline_ms;
+static ULONGLONG g_key_down_at;
+static ULONGLONG g_hang_until;
+static int g_last_hang_ms;
+static int g_closure_ms[CLOSURE_WINDOW];
+static int g_closure_count;
 
 static void set_text(HWND h, const char *s) {
   if (h) SetWindowTextA(h, s ? s : "");
@@ -95,11 +110,50 @@ static void sanitize_token(char *s) {
   *w = 0;
 }
 
-/* ttl_ms_arg: 0 = release; nonzero = use UI TTL field (hold/keepalive) */
+static void push_closure_ms(int duration_ms) {
+  int i;
+  if (duration_ms < CLOSURE_DEBOUNCE_MS)
+    return;
+  if (g_closure_count < CLOSURE_WINDOW) {
+    g_closure_ms[g_closure_count++] = duration_ms;
+    return;
+  }
+  for (i = 1; i < CLOSURE_WINDOW; i++)
+    g_closure_ms[i - 1] = g_closure_ms[i];
+  g_closure_ms[CLOSURE_WINDOW - 1] = duration_ms;
+}
+
+/* Same rules as TxInhibit::adaptive_hang_ms / WIMS adaptive_hang_s */
+static int adaptive_hang_ms(void) {
+  int i, last, min_dit, hang;
+  int have_dit = 0;
+  if (g_closure_count <= 0)
+    return LONG_HANG_MS;
+  last = g_closure_ms[g_closure_count - 1];
+  if (last >= LONG_CLOSURE_MS)
+    return LONG_HANG_MS;
+  min_dit = 0;
+  for (i = 0; i < g_closure_count; i++) {
+    int c = g_closure_ms[i];
+    if (c > 0 && c <= DIT_MAX_MS) {
+      if (!have_dit || c < min_dit) {
+        min_dit = c;
+        have_dit = 1;
+      }
+    }
+  }
+  if (!have_dit)
+    return LONG_HANG_MS;
+  hang = ADAPTIVE_DITS * min_dit;
+  if (hang < ADAPTIVE_HANG_MIN_MS) hang = ADAPTIVE_HANG_MIN_MS;
+  if (hang > ADAPTIVE_HANG_MAX_MS) hang = ADAPTIVE_HANG_MAX_MS;
+  return hang;
+}
+
 static int send_datagram(HWND hwnd, int ttl_ms_arg, int is_keepalive) {
   char host[128], station[64], band[32], portstr[32];
   char payload[512];
-  char status[288];
+  char status[320];
   struct sockaddr_in addr;
   int port, ttl_ms, n, sent;
 
@@ -166,91 +220,168 @@ static int send_datagram(HWND hwnd, int ttl_ms_arg, int is_keepalive) {
   if (ttl_ms == 0) {
     g_releases++;
     g_deadline_ms = 0;
-    snprintf(status, sizeof status, "RELEASE sent → %s:%d  seq=%d", host, port, g_seq);
+    snprintf(status, sizeof status, "RELEASE → %s:%d  seq=%d", host, port, g_seq);
   } else if (is_keepalive) {
     g_keepalives++;
     g_deadline_ms = GetTickCount64() + (ULONGLONG)ttl_ms;
-    snprintf(status, sizeof status, "KEEPALIVE → %s:%d  seq=%d", host, port, g_seq);
+    if (g_in_hang) {
+      int hang_left = (int)(g_hang_until - GetTickCount64());
+      if (hang_left < 0) hang_left = 0;
+      snprintf(status, sizeof status,
+               "HANG keepalive → %s:%d  hang left %d ms (hang was %d ms)",
+               host, port, hang_left, g_last_hang_ms);
+    } else {
+      snprintf(status, sizeof status, "KEEPALIVE → %s:%d  seq=%d", host, port, g_seq);
+    }
   } else {
     g_holds++;
     g_deadline_ms = GetTickCount64() + (ULONGLONG)ttl_ms;
-    snprintf(status, sizeof status, "HOLD → %s:%d  seq=%d  ttl=%d",
-             host, port, g_seq, ttl_ms);
+    snprintf(status, sizeof status, "HOLD (KEY down) → %s:%d  ttl=%d",
+             host, port, ttl_ms);
   }
   set_text(g_status, status);
   return 1;
 }
 
 static void update_counters(void) {
-  char b[320];
+  char b[400];
   ULONGLONG now = GetTickCount64();
-  int rem = 0;
-  if (g_deadline_ms > now)
-    rem = (int)(g_deadline_ms - now);
+  const char *st;
+  int hang_left = 0;
 
-  if (g_deadline_ms && rem > 0) {
+  if (g_key_down)
+    st = "KEY-DOWN";
+  else if (g_in_hang)
+    st = "HANG";
+  else if (g_udp_active)
+    st = "UDP-ACTIVE";
+  else
+    st = "idle";
+
+  if (g_in_hang && g_hang_until > now)
+    hang_left = (int)(g_hang_until - now);
+
+  if (g_in_hang) {
     snprintf(b, sizeof b,
-             "state=%s   seq=%d   holds=%d   ka=%d   releases=%d   err=%d   "
-             "deadman in %d ms",
-             g_holding ? "HOLDING" : "idle", g_seq, g_holds, g_keepalives,
-             g_releases, g_errors, rem);
+             "state=%s   hang=%d ms left (applied %d)   seq=%d   "
+             "holds=%d ka=%d rel=%d err=%d   closures=%d",
+             st, hang_left, g_last_hang_ms, g_seq, g_holds, g_keepalives,
+             g_releases, g_errors, g_closure_count);
   } else {
     snprintf(b, sizeof b,
-             "state=%s   seq=%d   holds=%d   ka=%d   releases=%d   err=%d",
-             g_holding ? "HOLDING" : "idle", g_seq, g_holds, g_keepalives,
-             g_releases, g_errors);
+             "state=%s   seq=%d   holds=%d ka=%d rel=%d err=%d   closures=%d",
+             st, g_seq, g_holds, g_keepalives, g_releases, g_errors,
+             g_closure_count);
   }
   set_text(g_counters, b);
 }
 
-static void set_holding_ui(int holding) {
-  if (holding) {
-    set_text(g_hold_btn, "INHIBITING — click again or release SPACE to clear");
+static void set_key_ui(void) {
+  if (g_key_down) {
+    set_text(g_hold_btn, "KEY DOWN — release SPACE / mouse for adaptive hang");
+  } else if (g_in_hang) {
+    set_text(g_hold_btn, "HANG — keepalives until hang ends, then release");
   } else {
-    set_text(g_hold_btn, "Click to INHIBIT (toggle)  |  hold SPACE");
+    set_text(g_hold_btn, "Hold SPACE or mouse = KEY (adaptive hang on release)");
   }
 }
 
-static void stop_keepalive_timer(HWND hwnd) {
-  KillTimer(hwnd, IDT_KEEPALIVE);
+static void stop_timer(HWND hwnd, UINT id) {
+  KillTimer(hwnd, id);
 }
 
 static void start_keepalive_timer(HWND hwnd) {
   int ka = get_int_field(hwnd, IDC_KEEPALIVE, DEFAULT_KA_MS);
   if (ka < 50) ka = 50;
   if (ka > 2000) ka = 2000;
-  stop_keepalive_timer(hwnd);
+  stop_timer(hwnd, IDT_KEEPALIVE);
   SetTimer(hwnd, IDT_KEEPALIVE, (UINT)ka, NULL);
 }
 
-static void start_hold(HWND hwnd) {
-  if (g_holding) return;
-  if (!send_datagram(hwnd, 1, 0))
+/* KEY-down: start UDP hold + keepalives (Key-agent assert). */
+static void key_down(HWND hwnd) {
+  if (g_key_down)
     return;
-  g_holding = 1;
-  set_holding_ui(1);
-  start_keepalive_timer(hwnd);
+  /* Cancel any hang-in-progress: KEY is down again */
+  stop_timer(hwnd, IDT_HANG);
+  g_in_hang = 0;
+  g_key_down = 1;
+  g_key_down_at = GetTickCount64();
+  if (!g_udp_active) {
+    if (!send_datagram(hwnd, 1, 0)) {
+      g_key_down = 0;
+      return;
+    }
+    g_udp_active = 1;
+    start_keepalive_timer(hwnd);
+  } else {
+    /* already hanging with UDP — refresh hold */
+    send_datagram(hwnd, 1, 0);
+  }
+  set_key_ui();
   update_counters();
 }
 
-/* Always stop keepalives and send release (idempotent). */
-static void end_hold(HWND hwnd) {
-  int was = g_holding;
-  g_holding = 0;
-  stop_keepalive_timer(hwnd);
-  /* Send release even if we thought we were idle (clears stuck gate). */
+static void finish_release(HWND hwnd) {
+  stop_timer(hwnd, IDT_KEEPALIVE);
+  stop_timer(hwnd, IDT_HANG);
+  g_udp_active = 0;
+  g_in_hang = 0;
+  g_key_down = 0;
   send_datagram(hwnd, 0, 0);
-  set_holding_ui(0);
-  if (!was)
-    set_text(g_status, "RELEASE sent (was already idle in tester)");
+  set_key_ui();
   update_counters();
 }
 
-static void toggle_hold(HWND hwnd) {
-  if (g_holding)
-    end_hold(hwnd);
-  else
-    start_hold(hwnd);
+/* KEY-up: measure closure, adaptive hang, then release (Key-agent). */
+static void key_up(HWND hwnd) {
+  int dur, hang;
+  ULONGLONG now;
+  char msg[160];
+
+  if (!g_key_down)
+    return;
+  g_key_down = 0;
+  now = GetTickCount64();
+  dur = (int)(now - g_key_down_at);
+  if (dur < 0) dur = 0;
+  push_closure_ms(dur);
+  hang = adaptive_hang_ms();
+  g_last_hang_ms = hang;
+
+  if (!g_udp_active) {
+    /* never got a hold out — nothing to hang */
+    set_key_ui();
+    update_counters();
+    return;
+  }
+
+  if (hang <= 0) {
+    finish_release(hwnd);
+    return;
+  }
+
+  g_in_hang = 1;
+  g_hang_until = now + (ULONGLONG)hang;
+  /* keep keepalives during hang so gate deadman does not expire early */
+  start_keepalive_timer(hwnd);
+  stop_timer(hwnd, IDT_HANG);
+  SetTimer(hwnd, IDT_HANG, (UINT)hang, NULL);
+  snprintf(msg, sizeof msg,
+           "KEY up after %d ms → adaptive hang %d ms (then RELEASE)",
+           dur, hang);
+  set_text(g_status, msg);
+  set_key_ui();
+  update_counters();
+}
+
+/* Immediate clear — no hang (Escape / Force RELEASE). */
+static void force_release(HWND hwnd) {
+  g_key_down = 0;
+  g_in_hang = 0;
+  stop_timer(hwnd, IDT_HANG);
+  finish_release(hwnd);
+  set_text(g_status, "Force RELEASE (no hang)");
 }
 
 static int is_edit_focus(HWND hwnd) {
@@ -273,6 +404,28 @@ static HWND add_edit(HWND p, int id, int x, int y, int w, int h, const char *t) 
                          WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL,
                          x, y, w, h, p, (HMENU)(intptr_t)id,
                          GetModuleHandle(NULL), NULL);
+}
+
+static WNDPROC g_old_btn_proc;
+
+static LRESULT CALLBACK HoldBtnProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+  HWND parent = GetParent(hwnd);
+  switch (msg) {
+  case WM_LBUTTONDOWN:
+    SetCapture(hwnd);
+    key_down(parent);
+    break;
+  case WM_LBUTTONUP:
+    if (GetCapture() == hwnd)
+      ReleaseCapture();
+    key_up(parent);
+    break;
+  case WM_CAPTURECHANGED:
+    if ((HWND)lParam != hwnd && g_key_down)
+      key_up(parent);
+    break;
+  }
+  return CallWindowProcA(g_old_btn_proc, hwnd, msg, wParam, lParam);
 }
 
 static void layout(HWND hwnd) {
@@ -304,25 +457,27 @@ static void layout(HWND hwnd) {
   SendMessage(c, WM_SETFONT, (WPARAM)font, TRUE);
   y += eh + gap + 4;
 
-  /* BS_NOTIFY: we only use BN_CLICKED for toggle (mouse). Space is separate. */
   g_hold_btn = CreateWindowA(
-      "BUTTON", "Click to INHIBIT (toggle)  |  hold SPACE",
-      WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON | BS_NOTIFY,
+      "BUTTON", "Hold SPACE or mouse = KEY (adaptive hang on release)",
+      WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON,
       x, y, 480, 72, hwnd, (HMENU)(intptr_t)IDC_HOLD_BTN,
       GetModuleHandle(NULL), NULL);
   SendMessage(g_hold_btn, WM_SETFONT, (WPARAM)font, TRUE);
+  g_old_btn_proc = (WNDPROC)SetWindowLongPtrA(
+      g_hold_btn, GWLP_WNDPROC, (LONG_PTR)HoldBtnProc);
   y += 80;
 
-  c = CreateWindowA("BUTTON", "Force RELEASE now",
+  c = CreateWindowA("BUTTON", "Force RELEASE now (skip hang)",
                     WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON,
-                    x, y, 200, 28, hwnd, (HMENU)(intptr_t)IDC_RELEASE_BTN,
+                    x, y, 240, 28, hwnd, (HMENU)(intptr_t)IDC_RELEASE_BTN,
                     GetModuleHandle(NULL), NULL);
   SendMessage(c, WM_SETFONT, (WPARAM)font, TRUE);
   y += 36;
 
   add_label(hwnd, x, y, 480, eh, "Status");
   y += eh;
-  g_status = CreateWindowA("STATIC", "IDLE — click button to toggle, or hold SPACE",
+  g_status = CreateWindowA("STATIC",
+                           "IDLE — press SPACE = KEY down; release = adaptive hang then clear",
                            WS_CHILD | WS_VISIBLE | SS_LEFT,
                            x, y, 480, eh + 4, hwnd, (HMENU)(intptr_t)IDC_STATUS,
                            GetModuleHandle(NULL), NULL);
@@ -347,9 +502,9 @@ static void layout(HWND hwnd) {
 
   c = CreateWindowA(
       "STATIC",
-      "wsjtx-inhibit: PTT=RTS/DTR. Mouse = click to arm, click again to clear. "
-      "SPACE = hold only while pressed. Force RELEASE if stuck. Escape = release. "
-      "If badge says local KEY line, CTS on that COM is asserted (floating pin).",
+      "Key-agent simulation (WIMS adaptive hang): short press (dit) → hang ~8xdit; "
+      "long press (>=750 ms) → hang 20 ms; then UDP release. Force RELEASE skips hang. "
+      "Same hang rules as CTS KEY inside wsjtx-inhibit and the SSB/CW agent.",
       WS_CHILD | WS_VISIBLE | SS_LEFT,
       x, y, 480, eh * 4, hwnd, (HMENU)(intptr_t)IDC_HINT,
       GetModuleHandle(NULL), NULL);
@@ -362,79 +517,65 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
   switch (msg) {
   case WM_CREATE:
     layout(hwnd);
-    SetTimer(hwnd, IDT_UI, 100, NULL);
+    SetTimer(hwnd, IDT_UI, 50, NULL);
     return 0;
 
-  case WM_COMMAND: {
-    int id = LOWORD(wParam);
-    int code = HIWORD(wParam);
-    if (id == IDC_HOLD_BTN && code == BN_CLICKED) {
-      /* Ignore BN_CLICKED synthesized from SPACE when we handle space ourselves:
-         if space is down, space path owns hold state. */
-      if (!g_space_down)
-        toggle_hold(hwnd);
-      return 0;
-    }
-    if (id == IDC_RELEASE_BTN && code == BN_CLICKED) {
-      g_space_down = 0;
-      end_hold(hwnd);
+  case WM_COMMAND:
+    if (LOWORD(wParam) == IDC_RELEASE_BTN && HIWORD(wParam) == BN_CLICKED) {
+      force_release(hwnd);
       return 0;
     }
     break;
-  }
 
   case WM_TIMER:
     if (wParam == IDT_KEEPALIVE) {
-      if (g_holding) {
-        if (!send_datagram(hwnd, 1, 1)) {
-          /* keep trying; user can Force RELEASE */
-        }
+      if (g_udp_active && (g_key_down || g_in_hang)) {
+        send_datagram(hwnd, 1, 1);
         update_counters();
       } else {
-        stop_keepalive_timer(hwnd);
+        stop_timer(hwnd, IDT_KEEPALIVE);
       }
+    } else if (wParam == IDT_HANG) {
+      stop_timer(hwnd, IDT_HANG);
+      if (g_in_hang && !g_key_down)
+        finish_release(hwnd);
     } else if (wParam == IDT_UI) {
-      update_counters();
+      /* poll hang end in case timer granularity is coarse */
+      if (g_in_hang && !g_key_down && GetTickCount64() >= g_hang_until)
+        finish_release(hwnd);
+      else
+        update_counters();
     }
     return 0;
 
   case WM_DESTROY:
-    g_holding = 0;
-    stop_keepalive_timer(hwnd);
-    /* best-effort release so we don't leave WSJT stuck */
-    send_datagram(hwnd, 0, 0);
-    KillTimer(hwnd, IDT_UI);
+    force_release(hwnd);
+    stop_timer(hwnd, IDT_UI);
     PostQuitMessage(0);
     return 0;
   }
   return DefWindowProcA(hwnd, msg, wParam, lParam);
 }
 
-/* SPACE: press-and-hold (not toggle). Filtered before DispatchMessage. */
 static int filter_keys(MSG *m) {
   if (!g_hwnd) return 0;
 
   if (m->message == WM_KEYDOWN && m->wParam == VK_ESCAPE) {
-    g_space_down = 0;
-    end_hold(g_hwnd);
+    force_release(g_hwnd);
     return 1;
   }
 
   if (m->message == WM_KEYDOWN && m->wParam == VK_SPACE) {
     if (is_edit_focus(g_hwnd)) return 0;
-    if (!(m->lParam & (1 << 30))) { /* ignore autorepeat */
-      g_space_down = 1;
-      start_hold(g_hwnd);
-    }
-    return 1; /* swallow so focused button does not also "click" */
+    if (!(m->lParam & (1 << 30)))
+      key_down(g_hwnd);
+    return 1;
   }
 
   if (m->message == WM_KEYUP && m->wParam == VK_SPACE) {
-    if (is_edit_focus(g_hwnd) && !g_space_down) return 0;
-    if (g_space_down) {
-      g_space_down = 0;
-      end_hold(g_hwnd);
-    }
+    if (is_edit_focus(g_hwnd) && !g_key_down) return 0;
+    if (g_key_down)
+      key_up(g_hwnd);
     return 1;
   }
   return 0;
@@ -473,9 +614,9 @@ int WINAPI WinMain(HINSTANCE hi, HINSTANCE hp, LPSTR cmd, int show) {
 
   g_hwnd = CreateWindowExA(
       0, wc.lpszClassName,
-      "wsjtx-inhibit — Spacebar TX Inhibit Tester",
+      "wsjtx-inhibit — Key-agent (spacebar) tester",
       WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
-      CW_USEDEFAULT, CW_USEDEFAULT, 530, 480,
+      CW_USEDEFAULT, CW_USEDEFAULT, 530, 500,
       NULL, NULL, hi, NULL);
   if (!g_hwnd) {
     MessageBoxA(NULL, "CreateWindow failed", "inhibit_spacebar", MB_ICONERROR);

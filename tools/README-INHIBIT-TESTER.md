@@ -12,21 +12,28 @@ Also on the Start menu as **TX Inhibit Spacebar Tester** (NSIS install).
 
 1. Start **wsjtx-inhibit** with **PTT method = RTS or DTR**.
 2. Run **`inhibit_spacebar.exe`** (from install `bin\`).
-3. **Click** the big button → inhibit; **click again** → clear (toggle).  
-   Or **hold SPACE** while pressed; release space to clear.
-4. If stuck: **Force RELEASE now** or Escape.
+3. **Hold SPACE** (or hold the big button) = KEY down → UDP hold + keepalives.
+4. **Release** SPACE/button = KEY up → **WIMS adaptive hang** (still keepalives),
+   then UDP release (`ttl_ms: 0`).
+5. If stuck: **Force RELEASE now** (skips hang) or Escape.
 
 No Python, no PowerShell, no extra runtime — only Windows system libraries.
 
-| Action | Packet |
-|--------|--------|
-| Button **click** | Toggle hold on/off |
-| Space **down** | Hold + keepalives (`ttl_ms` default 600) |
-| Space **up** / Force RELEASE / Escape | Release (`ttl_ms: 0`) |
+### Adaptive hang (same rules as WIMS agent + WSJT CTS KEY)
 
-If the WSJT-X badge says **local KEY line**, CTS on that COM port is asserted
-(often a floating pin). The gate ignores CTS until it has seen CTS idle (low)
-after open.
+| KEY-down duration | Hang after KEY-up |
+|-------------------|-------------------|
+| Dit-like ≤ 200 ms | 8 × dit, clamped 200–1000 ms |
+| Long KEY ≥ 750 ms | **20 ms** |
+| Mid / non-dit | **20 ms** |
+
+Status shows `HANG` and hang milliseconds remaining.
+
+| Action | Behavior |
+|--------|----------|
+| Space / mouse **down** | KEY-down → hold + keepalives |
+| Space / mouse **up** | Adaptive hang, then release |
+| Force RELEASE / Escape | Immediate release (no hang) |
 
 ## Build (developers)
 
