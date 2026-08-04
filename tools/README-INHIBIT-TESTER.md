@@ -11,17 +11,22 @@ C:\WSJT\wsjtx\bin\inhibit_spacebar.exe
 Also on the Start menu as **TX Inhibit Spacebar Tester** (NSIS install).
 
 1. Start **wsjtx-inhibit** with **PTT method = RTS or DTR**.
-2. Run **`inhibit_spacebar.exe`**.
-3. Hold **SPACE** (or hold the big button) → WSJT-X shows **TX INHIBITED**.
-4. Release → clear.
+2. Run **`inhibit_spacebar.exe`** (from install `bin\`).
+3. **Click** the big button → inhibit; **click again** → clear (toggle).  
+   Or **hold SPACE** while pressed; release space to clear.
+4. If stuck: **Force RELEASE now** or Escape.
 
 No Python, no PowerShell, no extra runtime — only Windows system libraries.
 
 | Action | Packet |
 |--------|--------|
-| Space / button **down** | Hold + keepalives (`ttl_ms` default 600) |
-| Space / button **up** | Release (`ttl_ms: 0`) |
-| Escape / close | Force release |
+| Button **click** | Toggle hold on/off |
+| Space **down** | Hold + keepalives (`ttl_ms` default 600) |
+| Space **up** / Force RELEASE / Escape | Release (`ttl_ms: 0`) |
+
+If the WSJT-X badge says **local KEY line**, CTS on that COM port is asserted
+(often a floating pin). The gate ignores CTS until it has seen CTS idle (low)
+after open.
 
 ## Build (developers)
 
