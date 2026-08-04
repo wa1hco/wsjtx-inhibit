@@ -1,27 +1,29 @@
-# Windows install system — wsjtx-mainline-wims
+# Windows install system — wsjtx-inhibit
 
 This repository is the **source of truth** for the Windows build of
-**WSJT-X mainline + WIMS low-latency TX Inhibit** (product name:
-`wsjtx-mainline-wims`).
+**WSJT-X + TX Inhibit** (product name: `wsjtx-inhibit`).
 
 ## What operators install
 
 | Artifact | How you get it | Notes |
 |----------|----------------|-------|
-| **NSIS installer** `wsjtx-<ver>-win64.exe` | [GitHub Releases](https://github.com/wa1hco/wsjtx-mainline-wims/releases) | Preferred for seats |
+| **NSIS installer** `wsjtx-<ver>-win64.exe` | [GitHub Releases](https://github.com/wa1hco/wsjtx-inhibit/releases) | Preferred for seats |
 | **Portable stage ZIP** | Same Releases, or local `scripts/windows` | Unzip and run `bin\wsjtx.exe` |
 | **Build from source** | This repo + MSYS2 | See [docs/BUILDING.md](docs/BUILDING.md) |
 
 Releases are produced by [`.github/workflows/release.yml`](.github/workflows/release.yml)
 when a tag matching `build/v*` is pushed.
 
-## Low-latency TX Inhibit (included)
+## TX Inhibit (included)
 
-Every Windows build from `main` includes the in-process **TxInhibit gate**:
+Every Windows build from `main` includes the in-process **TxInhibit** path:
 
 - UDP hold/keepalive on port **22372** (or ephemeral if busy)
 - Physical PTT = RTS/DTR intent ∧ ¬inhibit (milliseconds, not Halt Tx)
 - See [docs/WIMS_TX_INHIBIT.md](docs/WIMS_TX_INHIBIT.md)
+
+[WIMS](https://github.com/wa1hco/WIMS) is one multi-seat consumer; any
+co-band interlock agent can use the same protocol.
 
 ## Publish a Windows (and multi-platform) release
 
@@ -34,9 +36,9 @@ git push origin build/v3.0.2-rc1
 
 CI builds Hamlib, WSJT-X, runs tests, packages **NSIS** for Windows, and
 attaches installers to the GitHub Release. That Release page is the install
-system front door for WIMS seats.
+system front door for seats.
 
-## Local MSYS2 stage (developers / this VM)
+## Local MSYS2 stage (developers)
 
 Prerequisites: MSYS2 MINGW64 toolchain, Qt5, FFTW, Boost, OmniRig, Hamlib
 prefix with **both** `libhamlib-4.dll` **and** `rigctl.exe` installed
@@ -55,6 +57,9 @@ cmake --build /c/src/wsjtx-prefix/build -j$(nproc)
 cmake --install /c/src/wsjtx-prefix/build --prefix /c/src/wsjtx-prefix/stage
 ```
 
+(Local source path may still be `C:\src\wsjtx-wims` on existing build VMs;
+the **product** name is `wsjtx-inhibit`.)
+
 Or use the helper scripts:
 
 | Script | Purpose |
@@ -63,20 +68,20 @@ Or use the helper scripts:
 | [`scripts/windows/Install-FromStage.ps1`](scripts/windows/Install-FromStage.ps1) | Copy stage → install dir + desktop shortcut |
 | [`scripts/windows/Package-PortableZip.ps1`](scripts/windows/Package-PortableZip.ps1) | Zip stage for distribution |
 
-## Seat layout (WIMS)
+## Seat layout
 
 Typical multi-seat Windows install:
 
 ```
-C:\WSJT\wsjtx-mainline-wims\   ← this product (not stock WSJT-X)
+C:\WSJT\wsjtx-inhibit\   ← this product (not stock WSJT-X)
   bin\wsjtx.exe
   bin\jt9.exe
   bin\rigctl-wsjtx.exe
   ...
 ```
 
-WIMS launcher scripts should point at **this** `wsjtx.exe`, not the
-stock SourceForge build, so the low-latency inhibit thread is present.
+Launchers should point at **this** `wsjtx.exe`, not the stock SourceForge
+build, so the inhibit path is present.
 
 ## Versioning
 
@@ -89,4 +94,3 @@ stock SourceForge build, so the low-latency inhibit thread is present.
 ## Not official WSJT-X
 
 GPL-3 same as upstream. Not an ARRL / WSJT Development Group release.
-For multi-instance contest use with [WIMS](https://github.com/wa1hco/WIMS).

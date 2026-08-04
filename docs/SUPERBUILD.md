@@ -7,12 +7,12 @@ There is a second packaging form you will see online called a **superbuild**.
 ## Application tree (this repo)
 
 ```
-wsjtx-wims/          ← you are here
+wsjtx-inhibit/       ← you are here
   CMakeLists.txt     ← builds wsjtx, jt9, wsprd, …
   Configuration.cpp
   widgets/
   Transceiver/
-  TxInhibit/         ← WIMS gate
+  TxInhibit/         ← TX Inhibit
   Network/
   lib/               ← Fortran decoder
   …
@@ -54,14 +54,14 @@ wsjtx-3.1.0/                 ← superbuild root
 
 So:
 
-| Concept | Superbuild | This repo (`wsjtx-wims`) |
+| Concept | Superbuild | This repo (`wsjtx-inhibit`) |
 |---------|------------|---------------------------|
 | Role | Build *orchestrator* + source bundles | The actual WSJT-X program sources |
 | Contains `widgets/mainwindow.cpp` | Only after extract, under `build/…` | Yes, at the root |
 | Hamlib | Built as an ExternalProject | You supply via `CMAKE_PREFIX_PATH` |
 | Good for | Distro packages, “one tarball builds all” | Day-to-day development, CI, patches |
 
-## Why WIMS uses the application tree
+## Why this project uses the application tree
 
 The TX Inhibit work is a small set of C++ files and hooks inside the program.
 Diffing, reviewing, and rebasing those changes is far simpler against the
@@ -77,5 +77,5 @@ The local Improved drop used for analysis was:
 
 Its extracted application sources were also published as
 [wa1hco/wsjtx-improved-wims](https://github.com/wa1hco/wsjtx-improved-wims).
-**This repo (`wsjtx-wims`) is based on official mainline**, not Improved, so the
+**This repo (`wsjtx-inhibit`) is based on official mainline**, not Improved, so the
 inhibit patch can be offered cleanly to either lineage.

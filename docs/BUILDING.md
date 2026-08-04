@@ -1,4 +1,4 @@
-# Building wsjtx-wims (Linux & Windows)
+# Building wsjtx-inhibit (Linux & Windows)
 
 This is the **application** CMake tree (see [SUPERBUILD.md](SUPERBUILD.md)).
 The official project’s CI under `.github/workflows/` is preserved and is the
@@ -43,7 +43,7 @@ sudo apt-get install -y build-essential cmake gfortran \
   libusb-1.0-0-dev libudev-dev libreadline-dev portaudio19-dev \
   autoconf automake libtool pkg-config
 
-cd /path/to/wsjtx-wims
+cd /path/to/wsjtx-inhibit
 cmake -S . -B build \
   -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_PREFIX_PATH="$HOME/hamlib-prefix"
@@ -82,7 +82,7 @@ git push origin build/v3.0.2-rc1
 ```
 
 `release.yml` builds all platforms and attaches installers/archives to a
-GitHub Release. Those are the “download for testing” binaries for WIMS seats.
+GitHub Release. Those are the “download for testing” binaries for multi-op seats.
 
 ## Verify TX Inhibit after build
 

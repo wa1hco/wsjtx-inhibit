@@ -7,5 +7,5 @@ This tree is based on official **WSJT-X** from:
 - Tag: v3.0.2
 - Message: fix(livecq): report companion app versions
 
-WIMS-specific changes land in later commits on this repository
-(`wa1hco/wsjtx-wims`), not in the official project.
+TX Inhibit and related changes land in later commits on this repository
+(`wa1hco/wsjtx-inhibit`), not in the official project.

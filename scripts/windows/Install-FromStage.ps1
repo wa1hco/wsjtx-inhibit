@@ -1,11 +1,11 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-  Install a built stage tree as the seat-local wsjtx-mainline-wims product.
+  Install a built stage tree as the seat-local wsjtx-inhibit product.
 #>
 param(
   [string]$StageDir = "C:\src\wsjtx-prefix\stage",
-  [string]$InstallDir = "C:\WSJT\wsjtx-mainline-wims",
+  [string]$InstallDir = "C:\WSJT\wsjtx-inhibit",
   [switch]$DesktopShortcut,
   [switch]$Force
 )
@@ -38,12 +38,12 @@ if (-not (Test-Path $installed)) { throw "Install incomplete: $installed missing
 
 if ($DesktopShortcut) {
   $desk = [Environment]::GetFolderPath("Desktop")
-  $lnkPath = Join-Path $desk "WSJT-X Mainline WIMS.lnk"
+  $lnkPath = Join-Path $desk "WSJT-X Inhibit.lnk"
   $w = New-Object -ComObject WScript.Shell
   $s = $w.CreateShortcut($lnkPath)
   $s.TargetPath = $installed
   $s.WorkingDirectory = (Join-Path $InstallDir "bin")
-  $s.Description = "WSJT-X mainline + WIMS low-latency TX Inhibit"
+  $s.Description = "WSJT-X + TX Inhibit"
   $s.Save()
   Write-Host "Desktop shortcut: $lnkPath"
 }

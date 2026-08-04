@@ -7,7 +7,7 @@ param(
   [string]$StageDir = "C:\src\wsjtx-prefix\stage",
   [string]$OutDir = "C:\src\wsjtx-prefix\dist",
   [string]$Version = "3.0.2-wims-dev",
-  [string]$Product = "wsjtx-mainline-wims"
+  [string]$Product = "wsjtx-inhibit"
 )
 
 $ErrorActionPreference = "Stop"
@@ -35,7 +35,7 @@ if (-not (Test-Path $destDll)) {
 @"
 # $Product $Version (portable Windows x86_64)
 
-WSJT-X mainline + WIMS low-latency TX Inhibit gate.
+WSJT-X + TX Inhibit.
 
 ## Run
 1. Unzip anywhere (e.g. C:\WSJT\$Product).
@@ -43,7 +43,7 @@ WSJT-X mainline + WIMS low-latency TX Inhibit gate.
 3. Settings → Radio: PTT method RTS (or DTR) on dedicated USB-serial for inhibit.
 
 See INSTALL-WINDOWS.md and docs/WIMS_TX_INHIBIT.md in the source repo:
-https://github.com/wa1hco/wsjtx-mainline-wims
+https://github.com/wa1hco/wsjtx-inhibit
 
 Not an official WSJT-X release. GPL-3.
 "@ | Set-Content -Path (Join-Path $staging "README-PORTABLE.txt") -Encoding UTF8

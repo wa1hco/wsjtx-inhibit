@@ -1,7 +1,7 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-  Build wsjtx-mainline-wims stage install under MSYS2 MINGW64.
+  Build wsjtx-inhibit stage install under MSYS2 MINGW64.
 
 .DESCRIPTION
   Expects Hamlib already installed to -HamlibPrefix (with rigctl.exe in bin).
