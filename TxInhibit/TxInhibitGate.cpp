@@ -24,28 +24,37 @@ qint64 TxInhibitGate::now_ms () const
 void TxInhibitGate::start_listening ()
 {
   stopped_ = false;
-  ensure_udp ();
+  // On bind failure ensure_udp emits lineError once; gate still applies intent
+  // as a pin filter but never receives holds. Non-fatal for CAT/PTT.
+  (void) ensure_udp ();
 }
 
-void TxInhibitGate::ensure_udp ()
+bool TxInhibitGate::ensure_udp ()
 {
-  if (udp_ || stopped_)
+  if (udp_)
     {
-      return;
+      return true;
+    }
+  if (stopped_)
+    {
+      return false;
     }
   udp_ = new QUdpSocket (this);
   // Prefer well-known port 22372 so KEY agents can use a fixed default.
+  // ShareAddress|ReuseAddressHint lets multiple local WSJT-X stations share 22372;
+  // which process receives a given datagram is OS-dependent — one WSJT-X station per
+  // host (or exclusive bind) is preferred for multi-op.
   QHostAddress const any4 {QHostAddress::AnyIPv4};
   if (!udp_->bind (any4, TxInhibit::default_gate_port,
                    QUdpSocket::ShareAddress | QUdpSocket::ReuseAddressHint))
     {
       if (!udp_->bind (any4, quint16 (0)))
         {
-          Q_EMIT lineError (QStringLiteral ("TX Inhibit: UDP bind failed: %1")
-                            .arg (udp_->errorString ()));
+          QString const err = udp_->errorString ();
           udp_->deleteLater ();
           udp_ = nullptr;
-          return;
+          Q_EMIT lineError (QStringLiteral ("TX Inhibit: UDP bind failed: %1").arg (err));
+          return false;
         }
     }
   bound_port_ = udp_->localPort ();
@@ -55,11 +64,12 @@ void TxInhibitGate::ensure_udp ()
   if (!timer_)
     {
       timer_ = new QTimer (this);
-      // Deadman expiry; UDP assert is event-driven.
+      // hold_timeout_ms poll; UDP hold packets are event-driven.
       timer_->setInterval (20);
       QObject::connect (timer_, &QTimer::timeout, this, &TxInhibitGate::tick);
       timer_->start ();
     }
+  return true;
 }
 
 void TxInhibitGate::set_intent (bool on)
@@ -70,11 +80,6 @@ void TxInhibitGate::set_intent (bool on)
     }
   intent_ = on;
   apply_line ();
-}
-
-void TxInhibitGate::set_hold_test (bool hold)
-{
-  hold_test_ = hold;
 }
 
 void TxInhibitGate::shutdown (bool emit_pin)
@@ -111,7 +116,7 @@ void TxInhibitGate::shutdown (bool emit_pin)
 
 void TxInhibitGate::on_udp_ready ()
 {
-  if (!udp_ || hold_test_ || stopped_)
+  if (!udp_ || stopped_)
     {
       return;
     }
@@ -143,7 +148,7 @@ void TxInhibitGate::apply_line ()
     {
       return;
     }
-  // Sole policy: radiate = intent ∧ ¬UDP hold.
+  // Sole policy: assert PTT ⇔ want_tx and not hold.
   bool const radiate = intent_ && !logic_.line_inhibited (now_ms ());
   if (radiate == last_radiate_)
     {
@@ -162,6 +167,8 @@ void TxInhibitGate::emit_state_if_changed ()
     {
       last_emitted_inhibited_ = inh;
       last_badge_ = badge;
-      Q_EMIT inhibitChanged (inh, badge);
+      Q_EMIT inhibitChanged (inh, badge
+                             , logic_.hold_rx (), logic_.release_rx ()
+                             , logic_.expiries (), logic_.invalid ());
     }
 }

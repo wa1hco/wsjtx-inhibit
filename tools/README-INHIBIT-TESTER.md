@@ -1,56 +1,39 @@
-# TX Inhibit spacebar tester
+# KEY agent stand-ins (TX Inhibit)
 
-## Windows (operators — preferred)
+**Design authority:** [docs/TX_INHIBIT.md §3](../docs/TX_INHIBIT.md)  
+(Hold sender + KEYing monitor, hang vs hold timeout, race rules)
 
-**`inhibit_spacebar.exe`** ships **in the install** next to `wsjtx.exe`:
+## Program name
 
-```text
-C:\WSJT\wsjtx\bin\inhibit_spacebar.exe
-```
+| Name | Role |
+|------|------|
+| **`inhibit-spacebar`** | **Canonical.** Cross-platform console KEY agent; installed as `bin/inhibit-spacebar` next to `wsjtx`. |
+| `inhibit_spacebar` | Windows-only GUI (underscore); same protocol; optional alternate binary. |
+| `send_inhibit_hold.py` | Python stand-in (dev / scripted tests). |
 
-Also on the Start menu as **TX Inhibit Spacebar Tester** (NSIS install).
+Prefer **`inhibit-spacebar`** in docs and scripts.
 
-1. Start **wsjtx-inhibit** with **PTT method = RTS or DTR**.
-2. Run **`inhibit_spacebar.exe`** (from install `bin\`).
-3. **Hold SPACE** (or hold the big button) = KEY down → UDP hold + keepalives.
-4. **Release** SPACE/button = KEY up → **WIMS adaptive hang** (still keepalives),
-   then UDP release (`ttl_ms: 0`).
-5. If stuck: **Force RELEASE now** (skips hang) or Escape.
-
-No Python, no PowerShell, no extra runtime — only Windows system libraries.
-
-### Adaptive hang (same rules as WIMS agent + WSJT CTS KEY)
-
-| KEY-down duration | Hang after KEY-up |
-|-------------------|-------------------|
-| Dit-like ≤ 200 ms | 8 × dit, clamped 200–1000 ms |
-| Long KEY ≥ 750 ms | **20 ms** |
-| Mid / non-dit | **20 ms** |
-
-Status shows `HANG` and hang milliseconds remaining.
-
-| Action | Behavior |
-|--------|----------|
-| Space / mouse **down** | KEY-down → hold + keepalives |
-| Space / mouse **up** | Adaptive hang, then release |
-| Force RELEASE / Escape | Immediate release (no hang) |
-
-## Build (developers)
-
-Windows/MinGW or MSVC, via main CMake tree (`WIN32` only):
+## Build / install
 
 ```text
-tools/inhibit_spacebar/   → target inhibit_spacebar → bin/inhibit_spacebar.exe
+tools/inhibit-spacebar/main.cpp  →  target inhibit-spacebar  →  bin/inhibit-spacebar
+tools/inhibit_spacebar/          →  target inhibit_spacebar  →  bin/inhibit_spacebar.exe  (Windows GUI)
 ```
 
-Standalone MinGW:
+## Behaviour (canonical tool)
+
+**KEY key = grave/backtick `` ` ``** (not Space — avoids false holds while typing).
+
+1. **KEY assert** (`` ` `` down) → **hold** immediately (`ttl_ms` = hold_timeout_ms, default 600) + keepalives ~200 ms.  
+2. **KEYing monitor** classifies break-in CW vs continuous KEY; measures dit if break-in.  
+3. **KEY open** → hang:  
+   - **Break-in CW:** hang = **1.5 × word gap** (= 10.5 × dit), clamp ~315–1260 ms (≈40–10 WPM).  
+   - **Continuous** (long mark / SSB / non-break-in): hang = **0** → **release hold** immediately.  
+4. Hang done → **stop keepalives**, then **`ttl_ms: 0`** (no race).  
 
 ```bash
-gcc -O2 -mwindows -o inhibit_spacebar.exe inhibit_spacebar.c \
-  -lws2_32 -lcomctl32 -luser32 -lgdi32
+inhibit-spacebar --host 127.0.0.1 --port 22372 --station TEST-KEY --ttl-ms 600
+inhibit-spacebar --fixed-hang-ms 0    # force hang 0 (continuous-style)
 ```
 
-## Optional: Python (maintainers)
-
-`inhibit_spacebar_gui.py` and `send_inhibit_hold.py` remain for Linux dev or scripting.
-They are **not** required for Windows operator testing.
+Requires **Enable TX Inhibit** and RTS/DTR on the WSJT-X station under test.

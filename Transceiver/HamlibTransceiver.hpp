@@ -21,8 +21,9 @@ public:
 
   explicit HamlibTransceiver (logger_type *, unsigned model_number, TransceiverFactory::ParameterPack const&,
                               QObject * parent = nullptr);
+  // PTT-only helper used under DXLab/HRD/OmniRig wrappers (no CAT model).
   explicit HamlibTransceiver (logger_type *, TransceiverFactory::PTTMethod ptt_type, QString const& ptt_port,
-                              QObject * parent = nullptr);
+                              bool enable_tx_inhibit = false, QObject * parent = nullptr);
   ~HamlibTransceiver ();
 
 private:
@@ -46,7 +47,7 @@ private:
   bool do_pwr_;
   bool do_pwr2_;
   bool do_swr_;
-  // True when operator chose RTS/DTR — enable optional TX Inhibit pin filter.
+  // True when Settings "Enable TX Inhibit" is on and PTT method is RTS/DTR.
   bool use_tx_inhibit_ = false;
   TxInhibitGate * inhibit_gate_ = nullptr;
 

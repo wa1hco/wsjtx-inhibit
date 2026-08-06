@@ -87,31 +87,32 @@ Click **OK**. Try receive first, then a careful TX test (dummy load recommended)
 
 ## Settings for TX Inhibit testing
 
-Inhibit only gates the **physical serial PTT key line** (RTS or DTR). It does **not** stop CAT-only PTT, and it is **not** the same as **Halt Tx**.
+**TX Inhibit** only decides whether this **WSJT-X station** (app, PC, radio, antenna) may **assert PTT** (RTS or DTR). It does **not** stop CAT-only PTT, and it is **not** **Halt Tx**.
 
 ### Required radio settings
 
 1. **File → Settings → Radio**
 2. **PTT method** = **RTS** or **DTR**  
-   - Do **not** use **CAT** as the PTT *method* for inhibit tests.  
+   - Do **not** use **CAT** as the PTT *method* for TX Inhibit tests.  
    - Do **not** rely on **VOX** alone.
-3. **PTT port** = a real **`COMx`** (not the special list value **CAT**).  
+3. **Enable TX Inhibit** = checked (default is **off** — stock PTT until you opt in).
+4. **PTT port** = a real **`COMx`** (not the special list value **CAT**).  
    - **Same COM as CAT** is valid and common (radio USB CAT + RTS/DTR).  
    - A **separate** PTT COM is also fine if you use an external keyline adapter.
-4. Wire **RTS** or **DTR** to the radio’s PTT / SEND, or use the radio’s **USB SEND** / **PC KEYING** map on that COM.
-5. On the radio, turn **VOX off** for the test so only the key line can key the transmitter.
-6. **Shared USB CAT + RTS/DTR checklist:** **Handshake = None**; radio menu assigns the line to SEND/PTT (not flow control); only one program drives the modem lines. Details: [docs/TX_INHIBIT.md — Shared USB CAT + RTS/DTR](docs/TX_INHIBIT.md#shared-usb-cat--rtsdtr-what-operators-actually-do).
+5. Wire **RTS** or **DTR** to the radio’s PTT / SEND, or use the radio’s **USB SEND** / **PC KEYING** map on that COM.
+6. On the radio, turn **VOX off** for the test so only the key line can key the transmitter.
+7. **Shared USB CAT + RTS/DTR checklist:** **Handshake = None**; radio menu assigns the line to SEND/PTT (not flow control); only one program drives the modem lines. Details: [docs/TX_INHIBIT.md — Shared USB CAT + RTS/DTR](docs/TX_INHIBIT.md#shared-usb-cat--rtsdtr-what-operators-actually-do).
 
-### What you should see when held
+### What you should see when the KEY agent says not to transmit
 
-- A red status-bar badge: **`TX INHIBITED`** or **`TX INHIBITED — held by …`**.
-- The radio **must not key** (no RF) even if WSJT-X is in a TX cycle and audio is still playing.
+- Red status-bar badge: **`TX INHIBITED`** or **`TX INHIBITED — held by …`**.
+- The WSJT-X station **must not assert PTT** (no RF) even if WSJT-X is in a TX cycle and audio is still playing.
 
-Default inhibit UDP port is **22372** (if free). Design (gate + KEY agent): [docs/TX_INHIBIT.md](docs/TX_INHIBIT.md).
+Default UDP port is **22372** (if free). Design: [docs/TX_INHIBIT.md](docs/TX_INHIBIT.md).
 
-### Optional local inhibit test
+### Optional local test
 
-With this build running and PTT set as above, use the helper **shipped next to the app**:
+With this build running and settings as above, use the helper **next to the app**:
 
 ```text
 bin\wsjtx.exe
@@ -119,11 +120,11 @@ bin\inhibit-spacebar.exe
 ```
 
 1. Run **`bin\inhibit-spacebar.exe`** (same install folder as `wsjtx.exe`).
-2. **Hold Space** → red **TX INHIBITED** badge; attempt TX (dummy load) — radio stays unkeyed.
-3. **Release Space** → after hang, badge clears; normal PTT works. Short taps simulate CW (adaptive hang).
-4. **q** or **Esc** to quit the helper. Space follows KEY **level** (down while pressed).
+2. **Space down** → red **TX INHIBITED**; attempt TX (dummy load) — WSJT-X station does not assert PTT.
+3. **Space up** → after hang, badge clears; normal PTT works. Short taps simulate CW (adaptive hang).
+4. **q** or **Esc** to quit. Space follows KEY **level**.
 
-Default UDP target is `127.0.0.1:22372`. Day-to-day multi-op uses a real **KEY agent**; this helper is a bench stand-in. See [docs/TX_INHIBIT.md](docs/TX_INHIBIT.md).
+Default UDP target is `127.0.0.1:22372`. Day-to-day multi-op uses a real **KEY agent** (tells WSJT-X stations not to transmit); this helper is a bench stand-in. See [docs/TX_INHIBIT.md](docs/TX_INHIBIT.md).
 
 ---
 
@@ -131,8 +132,8 @@ Default UDP target is `127.0.0.1:22372`. Day-to-day multi-op uses a real **KEY a
 
 1. You started **this** install’s `bin\wsjtx.exe` (or its Start-menu shortcut), not stock WSJT-X from SourceForge/ARRL.
 2. **Help → About** shows **wsjtx-inhibit** and base version **3.0.x** (mainline + TX Inhibit). The main window title starts with **wsjtx-inhibit**.
-3. Normal FT8/FT4 decode works; with RTS/DTR PTT, TX keys the radio when **not** inhibited.
-4. During a hold (KEY agent or the smoke test above), the red **TX INHIBITED** badge appears and the radio does not key.
+3. Normal FT8/FT4 decode works; with RTS/DTR PTT and no agent hold, the WSJT-X station **asserts PTT** on TX.
+4. When the KEY agent (or smoke test) says not to transmit, the red **TX INHIBITED** badge appears and the WSJT-X station does not **assert PTT**.
 
 ---
 
@@ -147,8 +148,8 @@ Default UDP target is `127.0.0.1:22372`. Day-to-day multi-op uses a real **KEY a
 | PTT never keys at all after install | Check **PTT method** is RTS/DTR and **PTT port** is a real `COMx` (**not** the special value “CAT”). Confirm USB SEND / PC KEYING and wiring |
 | Radio keys when the program opens the COM | DTR/RTS polarity or another app forcing the line — see [shared USB CAT + RTS/DTR](docs/TX_INHIBIT.md#shared-usb-cat--rtsdtr-what-operators-actually-do) |
 | CAT flaky after enabling RTS PTT | Handshake must be **None**; radio must not use RTS for CAT flow control |
-| Inhibit never holds TX | Need RTS/DTR on a real serial PTT port; **CAT-only PTT is not gated**. Confirm hold packets reach port **22372** (or the port your interlock was told) |
-| Radio still keys during inhibit | Radio **VOX** may still key from audio — turn VOX off; confirm you are not using a second PTT path |
+| TX Inhibit never stops PTT | Need **Enable TX Inhibit**, RTS/DTR on a real serial PTT port; **CAT-only PTT is not filtered**. Confirm agent UDP reaches port **22372** |
+| Radio still keys while TX INHIBITED | Radio **VOX** may still key from audio — turn VOX off; confirm you are not using a second PTT path |
 | “I can’t find Linux files here” | Correct — this page is Windows only. See [INSTALL.md](INSTALL.md) |
 
 ---
@@ -170,7 +171,7 @@ How Windows packages are produced and published:
 - Local MSYS2 stage builds: [docs/BUILDING.md](docs/BUILDING.md), `scripts/windows/`.
 - Product should be launched from **this** install’s `bin\wsjtx.exe` so the inhibit code is present.
 
-Typical multi-seat layout:
+Typical multi-station layout:
 
 ```text
 C:\WSJT\wsjtx-inhibit\

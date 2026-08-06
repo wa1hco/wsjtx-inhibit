@@ -1,15 +1,15 @@
 /*
- * inhibit_spacebar.c — Windows GUI Key-agent style TX Inhibit tester
+ * inhibit_spacebar.c — Windows GUI KEY-agent tester (legacy binary name)
  *
- * Emulates WIMS SSB/CW Key-agent over UDP (same protocol as the gate):
- *   KEY-down  → hold + keepalives
- *   KEY-up    → WIMS adaptive hang (still keepalives), then ttl_ms=0
+ * Preferred/console name: inhibit-spacebar (tools/inhibit-spacebar/main.cpp).
+ * This Win32 GUI remains for mouse/SPACE GUI operators.
  *
- * Adaptive hang (inhibit.py adaptive_hang_s):
- *   dit-like (<=200 ms) → hang = 8×dit, clamped 200–1000 ms
- *   long KEY (>=750 ms) or non-dit → hang = 20 ms
+ * KEY agent (docs/TX_INHIBIT.md §3):
+ *   Hold sender: KEY-down → hold (ttl=hold_timeout) + keepalives ~200 ms;
+ *                EOT → stop keepalives, then ttl_ms=0.
+ *   Hang: break-in ≈ 1.5×word gap (10.5×dit); continuous KEY (long mark) → 0.
  *
- * SPACE / big button = KEY (press-and-hold). Force RELEASE skips hang.
+ * SPACE / big button = KEY. Force RELEASE skips hang.
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
@@ -48,12 +48,11 @@ enum {
 #define TTL_MIN 100
 #define TTL_MAX 30000
 
-/* WIMS adaptive hang constants (same as TxInhibitLogic.hpp) */
-#define LONG_HANG_MS 20
-#define ADAPTIVE_DITS 8
-#define ADAPTIVE_HANG_MIN_MS 200
-#define ADAPTIVE_HANG_MAX_MS 1000
-#define LONG_CLOSURE_MS 750
+/* Hang = 1.5 × word gap = 10.5 × dit (docs/TX_INHIBIT.md §3.4); WPM 10..40 */
+#define HANG_DIT_MULT 10.5
+#define HANG_MIN_MS 315
+#define HANG_MAX_MS 1260
+#define CONTINUOUS_MARK_MS 500
 #define DIT_MAX_MS 200
 #define CLOSURE_DEBOUNCE_MS 20
 #define CLOSURE_WINDOW 8
@@ -123,15 +122,15 @@ static void push_closure_ms(int duration_ms) {
   g_closure_ms[CLOSURE_WINDOW - 1] = duration_ms;
 }
 
-/* Same rules as TxInhibit::adaptive_hang_ms / WIMS adaptive_hang_s */
+/* Break-in: hang = 1.5×word gap = 10.5×dit. Continuous long mark: hang 0. */
 static int adaptive_hang_ms(void) {
   int i, last, min_dit, hang;
   int have_dit = 0;
   if (g_closure_count <= 0)
-    return LONG_HANG_MS;
+    return 0;
   last = g_closure_ms[g_closure_count - 1];
-  if (last >= LONG_CLOSURE_MS)
-    return LONG_HANG_MS;
+  if (last >= CONTINUOUS_MARK_MS)
+    return 0; /* non-break-in CW / SSB */
   min_dit = 0;
   for (i = 0; i < g_closure_count; i++) {
     int c = g_closure_ms[i];
@@ -143,10 +142,10 @@ static int adaptive_hang_ms(void) {
     }
   }
   if (!have_dit)
-    return LONG_HANG_MS;
-  hang = ADAPTIVE_DITS * min_dit;
-  if (hang < ADAPTIVE_HANG_MIN_MS) hang = ADAPTIVE_HANG_MIN_MS;
-  if (hang > ADAPTIVE_HANG_MAX_MS) hang = ADAPTIVE_HANG_MAX_MS;
+    return 0;
+  hang = (int)(HANG_DIT_MULT * (double)min_dit + 0.5);
+  if (hang < HANG_MIN_MS) hang = HANG_MIN_MS;
+  if (hang > HANG_MAX_MS) hang = HANG_MAX_MS;
   return hang;
 }
 
@@ -565,14 +564,14 @@ static int filter_keys(MSG *m) {
     return 1;
   }
 
-  if (m->message == WM_KEYDOWN && m->wParam == VK_SPACE) {
+  if (m->message == WM_KEYDOWN && m->wParam == VK_OEM_3) { /* ` grave */
     if (is_edit_focus(g_hwnd)) return 0;
     if (!(m->lParam & (1 << 30)))
       key_down(g_hwnd);
     return 1;
   }
 
-  if (m->message == WM_KEYUP && m->wParam == VK_SPACE) {
+  if (m->message == WM_KEYUP && m->wParam == VK_OEM_3) {
     if (is_edit_focus(g_hwnd) && !g_key_down) return 0;
     if (g_key_down)
       key_up(g_hwnd);
@@ -614,7 +613,7 @@ int WINAPI WinMain(HINSTANCE hi, HINSTANCE hp, LPSTR cmd, int show) {
 
   g_hwnd = CreateWindowExA(
       0, wc.lpszClassName,
-      "wsjtx-inhibit — Key-agent (spacebar) tester",
+      "wsjtx-inhibit — Key-agent (grave ` KEY) tester",
       WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
       CW_USEDEFAULT, CW_USEDEFAULT, 530, 500,
       NULL, NULL, hi, NULL);

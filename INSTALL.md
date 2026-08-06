@@ -2,7 +2,7 @@
 
 **You are an operator / tester.** You do not need to build anything from source.
 
-**wsjtx-inhibit** is a modified **WSJT-X** with a **TX Inhibit** feature for multi-op and same-band stations. A separate **KEY agent** (or the Spacebar test helper) sends hold packets when a priority radio is keyed. It is **not** an official WSJT-X / ARRL release.
+**wsjtx-inhibit** is a modified **WSJT-X** with **TX Inhibit** for multi-op and same-band stations. A **WSJT-X station** is one digi position (this app, PC, radio, antenna). A **KEY agent** (or the Spacebar test helper) **tells WSJT-X stations not to transmit** when a priority radio is keyed. It is **not** an official WSJT-X / ARRL release.
 
 ---
 
@@ -66,15 +66,16 @@ Set callsign, radio, audio as usual under **File → Settings**.
 **For TX Inhibit testing** (required checklist):
 
 1. **PTT method** = **RTS** or **DTR** (not **CAT** method, not **VOX** alone).
-2. **PTT port** = a real serial device (`COMx` on Windows, `/dev/ttyUSBx` on Linux) — **not** the special list value **CAT**.  
+2. **Enable TX Inhibit** = checked (Settings → Radio; default is **off**).
+3. **PTT port** = a real serial device (`COMx` on Windows, `/dev/ttyUSBx` on Linux) — **not** the special list value **CAT**.  
    That COM may be the **same** as the CAT port (shared USB CAT + RTS/DTR — valid and common) or a separate PTT adapter.
-3. Wire RTS or DTR to the radio’s PTT/SEND (or use the radio’s USB SEND / PC KEYING map). Turn **radio VOX off** for tests so only the key line can key the rig.
-4. When a hold is active, the **status bar** shows a red **TX INHIBITED** badge. Software sequencing/audio may continue; the **physical PTT line** stays low.
+4. Wire RTS or DTR to the radio’s PTT/SEND (or use the radio’s USB SEND / PC KEYING map). Turn **radio VOX off** for tests so only the key line can key the rig.
+5. When the KEY agent has said **not to transmit**, the **status bar** shows a red **TX INHIBITED** badge. Software sequencing/audio may continue; this WSJT-X station does not **assert PTT**.
 
 **Shared radio USB (CAT + RTS/DTR on one COM):** Valid on Icom / Elecraft / Yaesu and similar. Use **Handshake = None**, map the line to SEND/PTT (not flow control), and let only one app drive the modem lines. Brand menus and pitfalls:  
 [docs/TX_INHIBIT.md — Shared USB CAT + RTS/DTR](docs/TX_INHIBIT.md#shared-usb-cat--rtsdtr-what-operators-actually-do).
 
-Design (gate + KEY agent): [docs/TX_INHIBIT.md](docs/TX_INHIBIT.md).  
+Design (TX Inhibit + KEY agent): [docs/TX_INHIBIT.md](docs/TX_INHIBIT.md).  
 Windows/Linux step-by-step: [INSTALL-WINDOWS.md](INSTALL-WINDOWS.md), [INSTALL-LINUX.md](INSTALL-LINUX.md).
 
 **Confirm you launched this build:** start the copy you just installed. **Help → About** shows **wsjtx-inhibit** and base version **3.0.x** (mainline + TX Inhibit). The main window title also starts with **wsjtx-inhibit**.
@@ -139,20 +140,20 @@ If there is no `.pkg` in Assets, macOS is not available on that release.
 
 ## 5. What TX Inhibit is (one paragraph)
 
-WSJT-X sequencing and audio stay the same. When a KEY agent (or the Spacebar helper) says “hold,” this build can **stop the radio from keying** on the **RTS/DTR PTT line** within milliseconds. That is **not** the same as **Halt Tx** (which aborts the QSO sequence). Holds arrive as short UDP messages (default port **22372**); they expire unless refreshed. Local CTS KEY sensing is **not** used in this build (see [docs/TX_INHIBIT.md](docs/TX_INHIBIT.md) §5).
+WSJT-X sequencing and audio stay the same. When a KEY agent (or the Spacebar helper) **tells the WSJT-X station not to transmit**, this build does not **assert PTT** (RTS/DTR) within milliseconds. That is **not** **Halt Tx** (which aborts the QSO sequence). Those requests arrive as short UDP messages (default port **22372**); they expire unless refreshed. Local CTS KEY sensing is **not** used (see [docs/TX_INHIBIT.md](docs/TX_INHIBIT.md) §5).
 
 ---
 
-## 6. Test inhibit with the Spacebar helper
+## 6. Test TX Inhibit with the KEY helper (`inhibit-spacebar`)
 
-You can exercise TX Inhibit **without** a full multi-op system by sending hold datagrams that simulate an SSB/CW **KEY** line: **Space held** = KEY down (keepalives), **Space released** = hang then release.
+You can exercise TX Inhibit **without** a full multi-op system by simulating a priority **KEY** line. Use the **grave/backtick** key (**`**, left of **1** on US keyboards)—**not Space**—so normal typing does not false-trigger holds.
 
 ### What you need
 
 | Item | Notes |
 |------|--------|
-| **wsjtx-inhibit** running | Installed from Releases; **PTT method = RTS or DTR** on a real serial port (see checklist above) |
-| **A Spacebar helper** | **`bin/inhibit-spacebar`** (Windows: `bin\inhibit-spacebar.exe`) next to `wsjtx` — shipped with the install. Or Python: `tools/send_inhibit_hold.py`. |
+| **wsjtx-inhibit** running | **PTT = RTS/DTR**, **Enable TX Inhibit** on (see checklist above) |
+| **KEY helper** | **`bin/inhibit-spacebar`** next to `wsjtx`, or Python `tools/send_inhibit_hold.py` |
 
 ### `inhibit-spacebar` (recommended — same folder as the app)
 
@@ -165,21 +166,21 @@ Installed with the package (portable ZIP / installer stage):
 …/bin/inhibit-spacebar          ← Linux
 ```
 
-1. Start **wsjtx-inhibit** with **PTT = RTS or DTR** on a real serial port.
+1. Start **wsjtx-inhibit** with **PTT = RTS or DTR**, **Enable TX Inhibit** checked, real serial port.
 2. Run **`bin\inhibit-spacebar.exe`** (or `./bin/inhibit-spacebar`) from that install.
-3. **Hold Space** → KEY down (hold + keepalives). Red **TX INHIBITED** badge; radio stays unkeyed (dummy load recommended).
-4. **Release Space** → hang (adaptive by default), then release; badge clears.
-5. Key short elements on Space to experiment with **adaptive hang** (CW-style); long hold ≈ SSB.
-6. **q** or **Esc** → release and quit.
+3. Hold the **grave** key (`` ` ``, left of 1) → **assert KEY**. Red **TX INHIBITED**. **Not Space.**
+4. Release grave → hang then **release hold**; badge clears.
+5. Short taps ≈ break-in CW; long hold ≈ continuous / SSB.
+6. **q** or **Esc** → **release hold** and quit.
 
-Space follows KEY **level** (down while pressed). Default target: `127.0.0.1:22372`. Detail: [docs/TX_INHIBIT.md §6](docs/TX_INHIBIT.md#6-testing-inhibit-locally).
+Default target: `127.0.0.1:22372`. Detail: [docs/TX_INHIBIT.md §6](docs/TX_INHIBIT.md#6-testing-locally).
 
 ### Python — `tools/send_inhibit_hold.py`
 
 From a git clone (stdlib only — no pip packages):
 
 ```bash
-# Linux / macOS (Linux needs /dev/input access for Space level)
+# Linux / macOS (Linux --global style needs /dev/input for grave KEY)
 python3 tools/send_inhibit_hold.py --interactive
 
 # Windows (if "python" is on PATH)
@@ -196,21 +197,21 @@ python3 tools/send_inhibit_hold.py -i --station SSB-TEST --host 127.0.0.1 --port
 |------|---------|
 | `-i` / `--interactive` | Spacebar KEY **level** + hang |
 | `--station NAME` | Text shown in the badge (`held by …`) |
-| `--host` / `--port` | Seat address (default `127.0.0.1:22372`) |
+| `--host` / `--port` | WSJT-X station address (default `127.0.0.1:22372`) |
 | `--fixed-hang-ms N` | Fixed hang after KEY up (disable adaptive) |
 
 One-shot hold (no Spacebar loop):
 
 ```bash
 python3 tools/send_inhibit_hold.py --ttl-ms 3000 --station TEST   # hold ~3 s
-python3 tools/send_inhibit_hold.py --ttl-ms 0                     # explicit release
+python3 tools/send_inhibit_hold.py --ttl-ms 0                     # release
 ```
 
 Script on GitHub: [tools/send_inhibit_hold.py](https://github.com/wa1hco/wsjtx-inhibit/blob/main/tools/send_inhibit_hold.py).
 
 ### Production use
 
-Day-to-day multi-op use is a **KEY agent**: a program that reads the priority radio’s KEY line and sends the same hold/keepalive/release datagrams (see [docs/TX_INHIBIT.md](docs/TX_INHIBIT.md) §3). The Spacebar helpers are **bench stand-ins** for that agent.
+Day-to-day multi-op use is a **KEY agent**: senses the priority KEY and tells WSJT-X stations not to transmit (UDP keepalives + **release hold**; see [docs/TX_INHIBIT.md](docs/TX_INHIBIT.md) §3). Spacebar helpers are **bench stand-ins**.
 
 ---
 

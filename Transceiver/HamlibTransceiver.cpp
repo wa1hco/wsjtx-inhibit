@@ -412,10 +412,11 @@ rmode_t HamlibTransceiver::impl::map_mode (MODE mode) const
 
 HamlibTransceiver::HamlibTransceiver (logger_type * logger,
                                       TransceiverFactory::PTTMethod ptt_type, QString const& ptt_port,
-                                      QObject * parent)
+                                      bool enable_tx_inhibit, QObject * parent)
   : PollingTransceiver {logger, 0, parent}
-  , use_tx_inhibit_ {TransceiverFactory::PTT_method_DTR == ptt_type
-                     || TransceiverFactory::PTT_method_RTS == ptt_type}
+  , use_tx_inhibit_ {enable_tx_inhibit
+                     && (TransceiverFactory::PTT_method_DTR == ptt_type
+                         || TransceiverFactory::PTT_method_RTS == ptt_type)}
   , m_ {logger}
 {
   if (!m_->rig_)
@@ -466,8 +467,9 @@ HamlibTransceiver::HamlibTransceiver (logger_type * logger,
                                       TransceiverFactory::ParameterPack const& params,
                                       QObject * parent)
   : PollingTransceiver {logger, params.poll_interval, parent}
-  , use_tx_inhibit_ {TransceiverFactory::PTT_method_DTR == params.ptt_type
-                     || TransceiverFactory::PTT_method_RTS == params.ptt_type}
+  , use_tx_inhibit_ {params.enable_tx_inhibit
+                     && (TransceiverFactory::PTT_method_DTR == params.ptt_type
+                         || TransceiverFactory::PTT_method_RTS == params.ptt_type)}
   , m_ {logger, model_number, params}
 {
   if (!m_->rig_)
@@ -904,9 +906,10 @@ void HamlibTransceiver::start_tx_inhibit_gate ()
            this, &Transceiver::tx_inhibit_changed);
   connect (inhibit_gate_, &TxInhibitGate::portBound,
            this, &Transceiver::tx_inhibit_port_bound);
+  // UDP bind problems are non-fatal: keep stock intent→pin path, log only.
   connect (inhibit_gate_, &TxInhibitGate::lineError,
            this, [this] (QString const& msg) {
-             Q_EMIT failure (msg);
+             CAT_TRACE (msg);
            });
   inhibit_gate_->start_listening ();
   CAT_TRACE ("TX Inhibit gate listening (pin filter on do_ptt)");
@@ -1302,7 +1305,11 @@ void HamlibTransceiver::do_poll ()
         }
     }
 
-  if (RIG_PTT_NONE != m_->rig_->state.pttport.type.ptt && rig_get_function_ptr (m_->model_, RIG_FUNCTION_GET_PTT))
+  // Under TX Inhibit, software PTT follows WSJT-X intent (do_ptt), not the
+  // physical pin (which is held low during a KEY-agent hold). Skip GET_PTT.
+  if (!inhibit_gate_
+      && RIG_PTT_NONE != m_->rig_->state.pttport.type.ptt
+      && rig_get_function_ptr (m_->model_, RIG_FUNCTION_GET_PTT))
   {
     ptt_t p;
     auto rc = rig_get_ptt (m_->rig_.data (), RIG_VFO_CURR, &p);

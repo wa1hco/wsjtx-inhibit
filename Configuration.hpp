@@ -387,14 +387,16 @@ public:
   // the "Emulate Split" mode requires PTT information to coordinate
   // frequency changes.
   //
-  // When PTT method is DTR or RTS, HamlibTransceiver may install a TX
-  // Inhibit pin filter (physical PTT = intent ∧ ¬UDP hold). Sequencing
+  // When PTT is DTR/RTS and TX Inhibit is enabled, HamlibTransceiver may
+  // install a pin filter (assert PTT ⇔ want_tx and not hold). Sequencing
   // and CAT remain stock; Configuration does not drive RTS/DTR itself.
   Q_SLOT void transceiver_ptt (bool = true);
 
-  // TX inhibit: true for RTS/DTR seats with an open rig (gate in HamlibTransceiver).
+  // Settings: Enable TX Inhibit. Default false.
+  bool enable_tx_inhibit () const;
+  // True when a UDP listen port is bound for KEY-agent blocks.
   bool tx_inhibit_gate_active () const;
-  // Bound UDP inhibit listen port (0 if not active).
+  // Bound UDP block listen port (0 if not active).
   quint16 tx_inhibit_port () const;
 //  Q_SLOT void transceiver_tune (bool = true);
 
@@ -483,9 +485,11 @@ public:
   // the fault condition has been rectified or is transient.
   Q_SIGNAL void transceiver_failure (QString const& reason) const;
 
-  // TX inhibit gate state changed (status-bar badge + InhibitStatus).
-  // source is empty when open; otherwise badge text ("TX INHIBITED — …").
-  Q_SIGNAL void tx_inhibit_changed (bool inhibited, QString const& source) const;
+  // TX Inhibit block level changed (status-bar badge + InhibitStatus).
+  // source empty when clear; otherwise badge text ("TX INHIBITED — …").
+  Q_SIGNAL void tx_inhibit_changed (bool inhibited, QString const& source
+                                    , quint32 hold_rx, quint32 release_rx
+                                    , quint32 expiries, quint32 invalid) const;
   Q_SIGNAL void tx_inhibit_port_changed (quint16 port) const;
 
   // signal announces audio devices are being enumerated

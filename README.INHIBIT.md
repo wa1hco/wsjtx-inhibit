@@ -2,9 +2,9 @@
 
 **Repository:** https://github.com/wa1hco/wsjtx-inhibit  
 
-WSJT-X mainline plus **TX Inhibit**: co-band stations stop **radiating** within milliseconds when a **KEY agent** reports that a priority radio is keyed, **without** aborting FT8 sequencing (Halt Tx ends the QSO sequence; inhibit only holds PTT).
+WSJT-X mainline plus **TX Inhibit**: when a **KEY agent** **tells WSJT-X stations not to transmit** (priority radio keyed), co-band stations (app + PC + network + radio + antenna; may be remote go-boxes) will not **assert PTT** within milliseconds — **without** aborting FT8 sequencing (Halt Tx ends the QSO; TX Inhibit only filters whether to **assert PTT**).
 
-A KEY agent is any program that senses the priority KEY line and sends the UDP hold protocol documented in [docs/TX_INHIBIT.md](docs/TX_INHIBIT.md).
+A KEY agent senses the priority KEY and sends the UDP protocol in [docs/TX_INHIBIT.md](docs/TX_INHIBIT.md).
 
 ---
 
@@ -16,7 +16,7 @@ A KEY agent is any program that senses the priority KEY line and sends the UDP h
 | **[Releases](https://github.com/wa1hco/wsjtx-inhibit/releases)** | **Download** the `.exe`, `.zip`, AppImage, `.deb`, `.rpm` (see **Assets** on a release) |
 | [INSTALL-WINDOWS.md](INSTALL-WINDOWS.md) | Windows step-by-step |
 | [INSTALL-LINUX.md](INSTALL-LINUX.md) | Linux step-by-step |
-| [docs/TX_INHIBIT.md](docs/TX_INHIBIT.md) | Gate behaviour, KEY agent design, UDP protocol, smoke test |
+| [docs/TX_INHIBIT.md](docs/TX_INHIBIT.md) | Glossary, WSJT-X station behaviour, KEY agent, UDP protocol, smoke test |
 
 **Important:** Install files live under each release’s **Assets** list. They are not loose files inside the source code folders. If your OS is missing from Assets, that package was not published on that release.
 

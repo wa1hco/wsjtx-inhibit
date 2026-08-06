@@ -82,7 +82,7 @@ git push origin build/v3.0.2-rc1
 ```
 
 `release.yml` builds all platforms and attaches installers/archives to a
-GitHub Release. Those are the “download for testing” binaries for multi-op seats.
+GitHub Release. Those are the “download for testing” binaries for multiple WSJT-X stations.
 
 ## Verify TX Inhibit after build
 

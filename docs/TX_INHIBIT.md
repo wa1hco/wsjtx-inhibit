@@ -1,237 +1,386 @@
 # TX Inhibit and KEY agent
 
-This document is the **design authority for this repository**: how
-**wsjtx-inhibit** gates PTT, and how a **KEY agent** drives that gate.
+Design authority for this repository: how **wsjtx-inhibit** implements
+**TX Inhibit**, and how a **KEY agent** drives it.
 
 **Operators (install / Spacebar test):** [INSTALL.md](../INSTALL.md)  
-**Code:** `TxInhibit/`, `Configuration.cpp` (PTT handoff), status-bar badge in
-`widgets/mainwindow.cpp`
+**Code map:** §7
+
+---
+
+## Glossary
+
+| Term | Meaning |
+|------|---------|
+| **WSJT-X station** | One digi position: this app + PC + network + radio + antenna (CAT/PTT). Multi-op has several. May be an unattended go-box, remote from the priority SSB/CW station and KEY agent. |
+| **TX Inhibit** | Product / feature name (Settings, badge, this build). |
+| **want_tx** | Software wants to transmit (FT8 sequence, “Enable Tx”, audio path). |
+| **hold** | KEY agent has told WSJT-X stations not to transmit (UDP timed request active). |
+| **assert PTT** / **release PTT** | Physical PTT line active / inactive (RTS/DTR as configured). Same pattern for KEY: **assert KEY** / **release KEY**. |
+| **release hold** | Explicit end of the hold: UDP packet with `ttl_ms: 0`. Current algorithm ends holds this way (not by waiting for WSJT-X station hold timeout alone). |
+| **hang** / anti-chatter (KEY agent only) | After last KEY open, how long break-in CW keeps renewing hold before **release hold**. **1.5 × word gap** at measured WPM (≥ 10 WPM). Non-break-in CW / SSB: hang **0** (release on KEY open). Not in the WSJT-X station; no wire field. |
+| **hold timeout** / `hold_timeout_ms` (WSJT-X station / TX Inhibit) | **Safety** timer only: how long the station keeps a hold without a new packet. Wire `ttl_ms` (~500–600 ms); keepalives ~200 ms. Not hang; not CW speed. |
+| **deadman** | Agent stops without finishing hang and **release hold** (crash, kill, path loss). The WSJT-X station **hold timeout** then ends the hold. |
+| **TxInhibit module** | Code under `TxInhibit/` plus the pin filter in `HamlibTransceiver`. |
+
+**Core equation**
+
+```text
+assert PTT  ⇔  want_tx  and  not hold
+```
+
+The KEY agent **tells WSJT-X stations not to transmit**; while a hold is active, the
+WSJT-X station will not **assert PTT** even if `want_tx` is true.
+
+**Two different timers — different purpose, different time scale**
+
+| Timer | Where | Purpose | Typical scale |
+|-------|--------|---------|----------------|
+| **Hang** (anti-chatter) | KEY agent (KEYing monitor) | Break-in CW: keep hold across gaps; EOT after KEY open **&gt; 1.5× word gap**. Non-break-in / SSB: hang 0, EOT on KEY open. | **1.5 × 7 dits** at measured WPM (see §3.4). |
+| **Hold timeout** | WSJT-X station only | Survive **loss of hold messages**. | **`hold_timeout_ms` ≈ 500–600 ms**; renew **~200 ms**. Independent of WPM. |
+
+These are not interchangeable. Hang is CW/operator policy. Hold timeout is
+UDP reliability / fail-open safety.
+
+**History vs current algorithm.** Early designs leaned on timers alone to drop
+the hold. The **current** algorithm **explicitly ends** the hold with
+**release hold** (`ttl_ms: 0`) when agent hang finishes. Station
+`hold_timeout_ms` is only the safety path (including deadman).
+
+**Not the same as radio “TX Inhibit” menus.** Many rigs latch inhibit until
+PTT drops. Sequencing continues (unlike **Halt Tx**).
+
+Wire format: JSON fields `tx_inhibit`, `ttl_ms`, … (§4). No hang field.
 
 ---
 
 ## 1. Roles
 
-| Role | Where it runs | Job |
-|------|----------------|-----|
-| **wsjtx-inhibit (gate)** | On the WSJT-X seat PC | Owns RTS/DTR PTT to *this* radio. Holds the line low when inhibited. |
-| **KEY agent** | On the PC (or process) that can see the **priority** radio’s KEY/PTT sense | Watches that KEY line; while the priority station is transmitting (plus hang), sends **hold** UDP datagrams to every gate that must stay quiet. |
-| **Bench helper** | Same PC as the seat (or LAN) | `bin/inhibit-spacebar` (next to `wsjtx`) or `tools/send_inhibit_hold.py`. Same datagrams; no hardware KEY. |
+| Role | Where | Job |
+|------|--------|-----|
+| **WSJT-X station** (wsjtx-inhibit) | App + PC + network + radio + antenna (may be remote go-box) | When TX Inhibit is enabled and PTT is RTS/DTR: apply the equation (when may this station **assert PTT**). |
+| **KEY agent** | Process that sees the priority radio’s KEY (often near SSB/CW / WIMS server) | While KEY is asserted (and during agent **hang** after **release KEY**), sends hold keepalives; when hang finishes, **releases hold** (`ttl_ms: 0`). |
+| **Bench helper** | Same PC or LAN | **`inhibit-spacebar`** (canonical KEY-agent stand-in) or `tools/send_inhibit_hold.py`. |
 
-The gate does not need to know which product implements the KEY agent. Any
-program that speaks the UDP protocol below is a valid agent.
+Any program that speaks §4 is a valid KEY agent.
 
 ```text
-  Priority radio (SSB/CW, …)
-           │ KEY / amp-key / PTT sense
-           ▼
-      ┌───────────┐     hold / keepalive / release (UDP)
-      │ KEY agent │ ─────────────────────────────────────┐
-      └───────────┘                                      │
-                                                         ▼
-                                              ┌────────────────────┐
-  WSJT-X intent ──► │  wsjtx-inhibit gate │ ── RTS/DTR ──► radio PTT
-                    │  radiate = intent    │
-                    │         ∧ ¬inhibit   │
-                    └────────────────────┘
+  Priority radio
+       │ KEY sense
+       ▼
+  ┌───────────┐     “don’t transmit” / keepalive / release hold (UDP)
+  │ KEY agent │ ────────────────────────────────────────────────────┐
+  └───────────┘                                                     │
+                                                                    ▼
+  want_tx ──► │  TxInhibit filter  │ ── RTS/DTR ──► radio PTT
+              │  assert PTT ⇔        │
+              │    want_tx and not hold │
+              └────────────────────┘
 ```
 
-Inhibit source is **UDP only** (KEY agent or local bench helper). Local CTS KEY
-on the PTT dongle is **out of this build** (§5).
+The hold request is **UDP only**. Local CTS KEY on the WSJT-X station PTT dongle is
+**out of this build** (§5).
 
 ---
 
-## 2. Gate behaviour (this program)
+## 2. WSJT-X station behaviour (this program)
 
-- **WSJT-X sequencing and audio stay the same.** Inhibit only forces the
-  **physical PTT key line** low.
-- Line equation: **`RTS or DTR = intent ∧ ¬inhibit`**.
-- Inhibit is true when an unexpired **UDP hold** is active (KEY agent or test tool).
-- Default UDP listen port: **22372** (IPv4). If that port is busy, the gate binds
-  an **ephemeral** port and reports it (status path / `InhibitStatus` for tools
-  that care). Prefer leaving 22372 free on the seat.
+A **WSJT-X station** is one digi position: this program, PC, network, radio, and antenna
+(CAT/PTT path). It may be unattended (e.g. a go-box) and remote from the priority
+SSB/CW station and the KEY agent host.
+
+- **Opt-in.** Settings → Radio → **Enable TX Inhibit**. Default **off**
+  (stock WSJT-X PTT). Requires **PTT method** = RTS or DTR.
+- **Sequencing and audio stay the same.** TX Inhibit only decides whether the
+  WSJT-X station may **assert PTT** when the KEY agent has said not to transmit.
+- **Equation:** `assert PTT ⇔ want_tx and not hold`.
+- **hold** is active while an unexpired **hold timeout** is set (KEY agent or
+  test tool).
+- Default listen port: **22372** (IPv4). If busy, an **ephemeral** port is
+  used (status-bar tooltip / `InhibitStatus`). Prefer free 22372. Total bind
+  failure is **non-fatal**: CAT/PTT continue; hold requests are not received.
 - Status bar (red): `TX INHIBITED` or `TX INHIBITED — held by <station>`.
 
-### WSJT-X PTT source setup (summary)
+### Setup summary
 
 1. **PTT method** = **RTS** or **DTR**.
-2. **PTT port** = a real serial device (`COMx` / `/dev/ttyUSBx`).  
-   That may be the **same** COM as CAT (shared USB CAT + RTS/DTR — a normal
-   radio setup) or a separate PTT adapter.  
-   The list entry **`CAT`** means OmniRig-style proxy; the gate needs a real
-   device name it can open (same name as CAT is fine).
-3. Wire RTS or DTR → radio PTT/SEND (or use the radio’s USB SEND / PC KEYING map).
-   Leave radio **VOX** off for clean tests.
-4. Point the KEY agent at this seat’s host and inhibit port (usually `22372`).
+2. **Enable TX Inhibit** = checked.
+3. **PTT port** = real serial device (`COMx` / `/dev/ttyUSBx`), same COM as
+   CAT if shared, or a separate PTT adapter. List value **CAT** is OmniRig-style
+   proxy only — Hamlib still needs a real device name for RTS/DTR.
+4. Wire RTS/DTR → radio PTT/SEND (or USB SEND / PC KEYING). Radio **VOX** off
+   for clean tests.
+5. Point the KEY agent at this WSJT-X station host:port (usually `22372`).
 
-### Shared USB CAT + RTS/DTR (what operators actually do)
+### Shared USB CAT + RTS/DTR
 
-Many modern contest/digital radios expose **one USB cable** that provides:
+Many contest radios expose **one USB** with CAT on a virtual COM and
+**RTS/DTR** mappable to PTT. Shared COM is normal when Handshake is **None**
+and the radio maps the line to SEND/PTT (not flow control).
 
-- a **virtual COM port** for CAT, and  
-- the same port’s **RTS** and/or **DTR** modem lines, which the radio can map to **PTT / CW / FSK**.
+**Implementation:** Hamlib owns the serial port (one fd for shared CAT+PTT).
+The TxInhibit module does **not** open a second serial handle. It only
+filters whether `do_ptt` may **assert PTT**.
 
-**Shared COM is a valid configuration.** Operators routinely run CAT and RTS/DTR
-PTT on that one port (especially Icom, Elecraft, Digirig, and many Yaesu USB
-rigs). N1MM and similar loggers document that **CAT control and DTR/RTS PTT on
-one port are compatible** when the radio is **not** using RTS for hardware
-handshaking.
+Also common: CAT-only PTT (not filtered by TX Inhibit), or a second keyline
+path when several apps share the station.
 
-**Implementation note (wsjtx-inhibit):** the gate does **not** open the serial
-port. Hamlib owns CAT and RTS/DTR as stock (shared COM uses one fd). Inhibit
-is a **pin filter** inside `HamlibTransceiver::do_ptt`:
+#### Brands (USB RTS/DTR → radio PTT?)
 
-`physical PTT = software intent ∧ ¬UDP hold`
+| Brand | USB RTS/DTR can key TX? | Notes |
+|-------|-------------------------|--------|
+| **Icom** (7300, 7610, 705, …) | **Yes** | **USB SEND** = RTS or DTR (PTT). |
+| **Elecraft** (K3S, K4, …) | **Yes** | USB RTS/DTR → PTT / KEY / FSK. |
+| **Yaesu** (FTDX10, FT-710, …) | **Yes (usual)** | **PC KEYING** = RTS/DTR; CAT RTS handshake **OFF**. |
+| **Kenwood** (TS-590SG, …) | **Usually no on built-in USB** | Hardware PTT often ACC; external USB-serial common. |
+| **FlexRadio** | **Not classic USB SEND** | Virtual COM / SmartSDR models differ. |
 
-Hold is private to the gate (UDP KEY agent + deadman). Main sequencing and
-Fake It are unchanged.
+#### Common setup problems
 
-They also commonly use **CAT PTT only** (no RTS/DTR) for casual FT8, or a
-**second path** (WinKeyer, ACC jack, DigiRig, dedicated USB-serial) when several
-programs must share the station cleanly.
+| Symptom | Cause | Try |
+|---------|--------|-----|
+| Flaky CAT / stuck TX | RTS used as handshake | Handshake **None**; radio SEND not flow control |
+| Keys on port open | Polarity / forced DTR-RTS | Check logger forced lines; try other modem line |
+| “Worked yesterday” | Another app owns COM | One owner; restart after other apps close |
+| Test PTT OK, no RF | Often audio/mode | DATA mode, levels, power meter |
+| CW key instead of PTT | Icom USB Keying vs USB SEND | PTT → **USB SEND** |
+| Port-open TX blip | Driver toggles DTR/RTS | Known with some USB-serial chips |
+| Multi-app contest mess | Two apps key same lines | Logger digi / port-handoff rules |
+| “TX Inhibit never stops PTT” | CAT-only PTT, or feature off | **Enable TX Inhibit** + RTS/DTR |
 
-For **wsjtx-inhibit**, set **PTT method** = RTS or DTR and **PTT port** = that
-**same real COM name** as CAT (not the special list entry “CAT”). The gate
-drives the modem line; CAT still uses the rig’s serial path with
-**Handshake = None**.
-
-#### Which brands map USB RTS/DTR to radio PTT?
-
-| Brand (typical contest HF) | RTS/DTR on radio USB can key TX? | Notes |
-|----------------------------|----------------------------------|--------|
-| **Icom** (7300, 7610, 705, 9700, …) | **Yes** | Menu **USB SEND / Keying**: assign **USB SEND** = RTS or DTR (PTT); optional CW/RTTY keying on the other line. |
-| **Elecraft** (K3S, K4, …) | **Yes** | Menu assigns USB (or USB-PC1/PC2) **RTS/DTR** → **PTT / KEY / FSK**. |
-| **Yaesu** (FTDX10, FTDX101, FT-710, FT-991A, …) | **Yes (usual)** | **PC KEYING** = RTS or DTR; set **CAT RTS** (flow control) **OFF** so RTS is not used as handshake. |
-| **Kenwood** (TS-590SG, TS-890S, …) | **Usually no on built-in USB** | USB is mainly **CAT commands**; hardware PTT is typically **ACC/mic**. External USB-serial → ACC is the usual hardware path. |
-| **FlexRadio** (6400/6600/…) | **Not radio USB** | SmartSDR may watch a **PC virtual COM** RTS/DTR and then software-key the radio. Physical PTT is RCA/ACC, not classic “USB SEND”. |
-
-#### Common setup problems (reports from the field)
-
-| Symptom / pitfall | What is going wrong | What to try |
-|-------------------|---------------------|-------------|
-| Flaky CAT, stuck TX, or PTT never works | **RTS used as flow control** (handshake) instead of keying | App: **Handshake = None**. Radio: disable CAT RTS handshake; enable **USB SEND** / **PC KEYING** for PTT. |
-| Radio keys when software opens the port | DTR/RTS **polarity** or “always on” | Check OmniRig / logger RTS/DTR forced state; radio USB SEND assignment; try the other line (RTS vs DTR). |
-| “Worked yesterday, PTT dead today” | **Another program** changed COM line settings (FLDIGI, second logger, flrig) | One owner of the COM, or a proper port broker; restart seat software after other apps close the port. |
-| Test CAT green, Test PTT “works” but no RF / no audio | Often **not** an RTS bug | DATA mode, USB sound device, levels; confirm TX light vs actual RF. |
-| Wrong digi mode or CW key instead of PTT | Icom **USB Keying (CW/RTTY)** vs **USB SEND** mixed up | PTT → **USB SEND** = RTS or DTR; leave CW/RTTY keying off unless you need them. |
-| Port open blips TX | OS/driver toggles DTR/RTS on open | Known with some USB-serial chips and Linux defaults; dedicated PTT adapter + correct polarity helps. |
-| Multi-app contest station fails | N1MM vs digi program **who owns PTT** | Follow logger “Digi” / port-handoff rules; don’t double-key the same lines from two apps. |
-| “Inhibit never holds” | Seat uses **PTT method = CAT** only | Gate only gates RTS/DTR. Switch to **RTS/DTR** on a real serial port the gate opens. |
-
-#### Configuration options for **wsjtx-inhibit** seats
+#### WSJT-X station options
 
 | Option | Notes |
 |--------|--------|
-| **Same USB COM for CAT + RTS/DTR** | **Supported / normal** on Icom, Elecraft, Yaesu when menus match the checklist below. |
-| **Separate USB-serial for PTT only** | Also fine — DigiRig keyline, second dongle → ACC/SEND, multi-app split. |
-| **CAT PTT only** | Will not be inhibit-gated. Switch to RTS/DTR on a real serial port. |
-| **Kenwood / Flex** | Plan on **external** keyline or Flex’s virtual-PTT model. |
+| Same USB COM for CAT + RTS/DTR | Supported when menus match checklist |
+| Separate USB-serial for PTT | Fine |
+| CAT PTT only | Not filtered — use RTS/DTR for TX Inhibit |
+| Kenwood / Flex | Plan external keyline or Flex’s model |
 
-**Operator checklist for one USB cable (shared CAT + RTS/DTR):**
+**Shared-cable checklist**
 
-1. Handshake **None** in the app (RTS must not be CAT flow control).  
-2. Radio menu: this line = **USB SEND** / **PC KEYING** / PTT, not flow control.  
-3. WSJT-X **PTT method** = **RTS** or **DTR** (not CAT method).  
-4. **PTT port** = the same real `COMx` / tty as CAT (not the special list value “CAT”).  
-5. Only **one** program drives that COM’s modem lines at a time.  
-6. Confirm with **Test PTT** *and* RF/ALC (or TX light + power meter), not only “CAT green.”
+1. Handshake **None**.  
+2. Radio: line = USB SEND / PC KEYING / PTT, not flow control.  
+3. **PTT method** = RTS or DTR.  
+4. **Enable TX Inhibit** checked.  
+5. **PTT port** = same real COM as CAT (not list value “CAT”).  
+6. One program owns the modem lines.  
+7. Confirm with **Test PTT** and RF/ALC, not only “CAT green.”
 
 ---
 
-## 3. KEY agent (generic design)
+## 3. KEY agent
 
-A **KEY agent** is a small program whose only job is:
+The KEY agent reads the priority **KEY** line and runs **two parallel state
+machines** that meet only at **end of transmission**.
 
-1. **Sense** whether the priority station’s KEY is closed (transmitting or about to).
-2. **Hold the band** for every WSJT-X seat that must stay quiet: send UDP
-   **hold** datagrams, and **refresh** them often enough that the gate’s
-   **deadman** does not fire while the priority station is still keyed (§3.1).
-3. **Release** the band after KEY has been open long enough (**hang**), by
-   sending `ttl_ms: 0` (or simply stopping keepalives and letting deadman expire
-   — explicit release is preferred for clean UX).
+| State machine | On KEY assert (start) | Ongoing | End of transmission |
+|---------------|----------------------|---------|---------------------|
+| **Hold sender** | Send **hold** immediately with `ttl_ms` = **hold_timeout_ms** (~500–600 ms safety window) | **Keepalives** ~every 200 ms while hold is active | On signal from KEYing monitor: send **release hold** (`ttl_ms: 0`) |
+| **KEYing monitor** | Start KEY timing assessment | Classify break-in CW vs continuous KEY (non-break-in CW / SSB); measure CW speed if break-in | Decide **when** the KEY sequence is over; signal Hold sender to release |
 
-### 3.1 TTL, keepalive, and deadman
+Hold sender does **not** guess CW. KEYing monitor does **not** send UDP.
+Only Hold sender emits packets; only KEYing monitor decides release timing.
 
-These three terms describe how a hold stays armed without a permanent connection:
+### 3.1 Two timers (again): hang vs hold timeout
 
-| Term | Who sets it | Meaning |
-|------|-------------|---------|
-| **TTL** (`ttl_ms` in the JSON) | KEY agent, in each hold packet | **Time-to-live:** how long this hold remains valid from the moment the **gate receives** the packet. Example: `ttl_ms: 600` means “treat the band as held for 600 ms from now.” `ttl_ms: 0` means **release**. Allowed non-zero range: 100…30000 ms. |
-| **Keepalive** | KEY agent, while KEY is still closed (and during hang) | A **repeat hold** packet with a fresh `ttl_ms`, sent on a short period (typically every ≤ 200 ms). Each keepalive **re-arms** the gate’s deadline. |
-| **Deadman** | Gate, automatically | If no new hold/keepalive arrives before the current deadline, the gate **clears the hold by itself** so a crashed agent cannot leave the seat inhibited forever. |
+| | **Hang (anti-chatter)** | **Hold timeout (safety)** |
+|--|-------------------------|---------------------------|
+| Owner | KEY agent (KEYing monitor) | WSJT-X station (from each hold packet) |
+| Purpose | CW **break-in**: keep hold across element/letter gaps so co-band PTT does not chatter | Survive **lost hold UDP**; fail-open if agent dies |
+| Sized by | **1.5 × word gap** at measured CW speed (≥ 10 WPM) | Keepalive period + margin (**~500–600 ms**); renew **~200 ms** |
+| On wire | No | Yes: `ttl_ms` = `hold_timeout_ms` |
+| End of hold | Monitor says EOT → Hold sender sends `ttl_ms: 0` | No packet before timeout |
 
-**How they fit together**
+Do **not** size hang from hold timeout, or hold timeout from WPM.
+
+### 3.2 KEY classes and when transmission ends
+
+| KEY class | What KEY looks like | Hang after KEY open | End of transmission (EOT) |
+|-----------|---------------------|---------------------|---------------------------|
+| **Break-in CW** | KEY opens between dits/dahs (element / letter gaps visible) | **1.5 × word gap** at measured WPM (WPM from 10 upward) | KEY stays **open** longer than hang (i.e. longer than 1.5× word gap) |
+| **Non-break-in CW** | KEY continuous for whole send (no gaps on KEY sense) | **0** | **Immediately** on **release KEY** |
+| **SSB** (and similar) | KEY continuous for whole send | **0** | **Immediately** on **release KEY** |
+
+KEYing monitor classifies the stream, then uses that class for EOT. On EOT it
+signals Hold sender → **release hold** (`ttl_ms: 0`). That packet may fire
+**before** the first keepalive would have been scheduled (short continuous KEY).
+
+### 3.3 Morse timing baseline (Paris)
+
+| Quantity | Units (dits) | Time at W WPM |
+|----------|--------------|---------------|
+| Dit | 1 | \(T_\mathrm{dit} = 1200 / W\) ms |
+| Dah | 3 | \(3\,T_\mathrm{dit}\) |
+| Element gap (dit–dah inside a letter) | 1 | \(T_\mathrm{dit}\) |
+| Letter gap | 3 | \(3\,T_\mathrm{dit}\) |
+| **Word gap** | **7** | \(7\,T_\mathrm{dit}\) |
+| **Hang (break-in)** | **1.5 × word gap = 10.5** | \(1.5 \times 7\,T_\mathrm{dit} = 10.5\,T_\mathrm{dit}\) |
+
+### 3.4 Timelines by WPM — break-in vs non-break-in
+
+#### Morse unit times and hang (break-in)
+
+| WPM | Dit (ms) | Element gap (ms) | Letter gap (ms) | Word gap (ms) | Hang = 1.5× word gap (ms) |
+|-----|----------|------------------|-----------------|---------------|---------------------------|
+| 10 | 120 | 120 | 360 | 840 | **1260** |
+| 20 | 60 | 60 | 180 | 420 | **630** |
+| 30 | 40 | 40 | 120 | 280 | **420** |
+| 40 | 30 | 30 | 90 | 210 | **315** |
+
+Compare to **hold timeout ~500–600 ms** and **keepalive ~200 ms** (fixed safety
+path, same at all WPM): hang at 10–20 WPM is **longer** than one hold timeout;
+at 30–40 WPM hang is **shorter**. That is fine — keepalives re-arm hold timeout
+during hang; hang is not the safety timer.
+
+#### Break-in CW — example KEY open/close pattern
 
 ```text
-  Agent KEY down  →  send hold (ttl_ms = 600)
-  Agent (while held) → send keepalive every ~200 ms (each with ttl_ms = 600)
-  Gate               → deadline = time_of_last_hold + ttl_ms
-  If agent goes silent → deadline passes → deadman clears inhibit
-  Agent KEY up (+ hang) → send release (ttl_ms = 0)  [preferred]
+  KEY:  █ █   █ █ █     █ …     (dits/dahs; opens between elements)
+  hold: |---- active, keepalives every ~200 ms ----|
+  on open longer than hang (1.5× word gap) → release hold (ttl_ms: 0)
 ```
 
-The gate only stores the deadline from `ttl_ms` and expires it (deadman). Hang
-is agent policy (§3.3).
+#### Non-break-in CW / SSB — continuous KEY
 
-### 3.2 Inputs the agent may use
+```text
+  KEY:  ████████████████████████    (no opens until the operator is done)
+  hold: |-- active --|
+  on first KEY open → hang = 0 → release hold (ttl_ms: 0) immediately
+```
+
+#### Hold active duration (from first KEY assert to release hold)
+
+**Break-in CW** (hang after last element):
+
+| Content (approx. Morse units) | 10 WPM | 20 WPM | 30 WPM | 40 WPM | Then hang (1.5× word) |
+|-------------------------------|--------|--------|--------|--------|------------------------|
+| Min assess **A** / **N** (5 u) | 0.60 s | 0.30 s | 0.20 s | 0.15 s | + hang table above |
+| **QRZ** (37 u) | 4.44 s | 2.22 s | 1.48 s | 1.11 s | + hang |
+| **THANK YOU** (85 u) | 10.2 s | 5.10 s | 3.40 s | 2.55 s | + hang |
+
+Hold stays up for **message time + hang**, then **`ttl_ms: 0`**.
+
+**Non-break-in CW / SSB** (same RF duration if continuous KEY for whole text):
+
+| Content | KEY-down duration (same unit totals if continuous) | Hang | Release |
+|---------|-----------------------------------------------------|------|---------|
+| As short as **QRZ** (~1.1–4.4 s by WPM if it were Morse-length) | One continuous KEY of that length (or whatever the operator holds) | **0** | On KEY open: **`ttl_ms: 0` immediately** |
+| **thank you** (~2.6–10 s Morse-equivalent if continuous) | Continuous KEY | **0** | Immediate **`ttl_ms: 0`** |
+
+### 3.5 Assessing KEY type and CW speed
+
+KEYing monitor runs **in parallel** with Hold sender (hold is already on).
+
+**Break-in CW assessment** needs visible structure:
+
+| Need to observe | Why |
+|-----------------|-----|
+| At least one **dit** | Short mark |
+| At least one **dah** | Long mark (~3× dit) |
+| At least one **element gap** (KEY open ~1 dit while still in character) | Proves break-in (gaps exist) |
+
+Minimum Morse pattern with dit + gap + dah: **A** (`·-`) or **N** (`-·`) = **5** dit units.
+
+| WPM | Max time to first assess-ready (5 units) |
+|-----|------------------------------------------|
+| 10 | **600 ms** |
+| 20 | **300 ms** |
+| 30 | **200 ms** |
+| 40 | **150 ms** |
+
+That is well under a full **QRZ** or **thank you**, and under the first
+keepalive interval in the slowest case only at 10 WPM (600 ms vs 200 ms
+keepalive — assessment can finish after a few keepalives; hold was already
+sent at t = 0).
+
+**Non-break-in CW / SSB:** KEY has **no gaps** until the end. Monitor never
+sees element gaps → classify continuous → hang = 0 → EOT on first KEY open.
+
+#### Distinguishability (QRZ … thank you)
+
+| Observation during a short call | Break-in CW | Non-break-in CW / SSB |
+|--------------------------------|-------------|------------------------|
+| KEY opens of ~1–3 dits **during** the send | Yes (many) | **No** |
+| KEY open ≥ hang (1.5× word gap) **before** EOT | No (that *is* EOT) | First open **is** EOT |
+| Continuous KEY for entire “QRZ” / “thank you” | No | Yes |
+
+Even **QRZ** at 40 WPM (~1.1 s of Morse structure) contains many element and
+letter gaps — clearly break-in. A continuous KEY of similar length with **zero**
+internal opens is clearly non-break-in / SSB. No reliance on hold timeout for
+this classification.
+
+### 3.6 Hold sender ↔ KEYing monitor (including race rules)
+
+```text
+  KEY assert
+      │
+      ├─► Hold sender:  send hold (ttl_ms = hold_timeout_ms) immediately
+      │                 schedule keepalives ~200 ms while hold_active
+      │
+      └─► KEYing monitor: sample KEY edges; classify; measure WPM if break-in
+                          decide EOT (hang rules above)
+                                │
+                                ▼
+                          signal Hold sender: END_HOLD
+                                │
+                                ▼
+                          Hold sender: stop keepalives, then send ttl_ms: 0
+```
+
+**Release may precede the first keepalive.** Example: non-break-in KEY down
+50 ms then up → hold at t = 0, release hold at t ≈ 50 ms; no keepalive sent.
+
+**No race between keepalive and `ttl_ms: 0`:**
+
+1. **Single sender path** — one goroutine/thread/queue owns all UDP hold
+   packets (keepalive and release).
+2. On **END_HOLD**: set `hold_active = false`, **cancel** pending keepalive
+   timer/work, **then** enqueue **release hold** (`ttl_ms: 0`).
+3. Keepalive loop must check `hold_active` **before** each send; after
+   END_HOLD, no further `ttl_ms > 0` packets.
+4. Optional belt-and-suspenders: ignore keepalives after a local release
+   generation counter increments.
+
+Never “fire keepalive and release concurrently” on two threads without
+ordering. A late keepalive after `ttl_ms: 0` would re-arm the WSJT-X station
+hold timeout and look like a stuck hold.
+
+### 3.7 Agent inputs
 
 | Input | Notes |
 |-------|--------|
-| USB-serial **CTS** (or other modem pin) | Common: KEY contact → opto/interface → CTS. Event-driven wait where the driver supports it; else short poll. |
-| Parallel / GPIO / other sense | Implementation detail of the agent. |
-| Manual / test UI | Spacebar **level** — `inhibit-spacebar` or `tools/send_inhibit_hold.py --interactive`. |
+| USB-serial **CTS** (or other pin) | KEY → interface → CTS; event-driven if possible |
+| GPIO / other | Agent-specific |
+| Manual / test | Grave/backtick **`** KEY — `inhibit-spacebar` / `tools/send_inhibit_hold.py --interactive` |
 
-The agent owns **debounce and hang** for its KEY input. The gate only applies
-TTL / deadman to UDP messages.
+Debounce and **hang** (anti-chatter) live in the agent. The WSJT-X station applies only
+**hold timeout** (safety) so a **deadman** cannot leave a hold stuck forever.
 
-### 3.3 Why hang lives in the agent
-
-CW and semi-break-in KEY lines open between elements and words. If the agent
-released on every open edge, WSJT-X seats would unlock between dits — bad for
-the one-signal-per-band rule and hard on PTT relays.
-
-**Hang:** after KEY opens, the agent **keeps sending hold keepalives** until the
-line has been continuously open for the hang time, then sends **release**.
-
-Sizing is an agent policy. A useful experiment (see **§6** `inhibit-spacebar`):
-
-- Short KEY closures (CW elements) → estimate dit, hang ≈ **8×dit** (clamped).  
-- Long KEY closures (SSB-style) → short debounce hang only.
-
-While the agent wants the band held, datagrams must arrive often enough that
-`ttl_ms` does not expire (deadman must not fire during the transmission).
-
-### 3.4 Targets
-
-The agent is configured with one or more **gate endpoints**:
+### 3.8 Targets
 
 ```text
 host:port   e.g.  192.168.1.40:22372
 ```
 
-Unicast UDP is enough for a small multi-op. Each gate parses independently.
-Multiple agents can send to the same gate; the gate keeps a **single** hold
-deadline (last valid hold wins; any valid release clears).
-
-Wire format and field rules: **§4**. Bench stand-ins: `bin/inhibit-spacebar`
-or `tools/send_inhibit_hold.py`.
+Unicast UDP is enough for small multi-op. Each WSJT-X station parses independently.
+Multiple agents → same WSJT-X station: **one** hold timeout (last valid hold wins; any valid
+release clears).
 
 ---
 
-## 4. UDP protocol (gate ↔ agent)
+## 4. UDP protocol (WSJT-X station ↔ agent)
 
-**Transport:** UDP, payload = UTF-8 JSON object, max **512** bytes.
-
-**Well-known port:** **22372** (gate listens; agent sends).
-
-### Fields
+**Transport:** UDP, UTF-8 JSON, max **512** bytes.  
+**Port:** **22372** (WSJT-X station listens; agent sends).
 
 | Field | Type | Required | Meaning |
 |-------|------|----------|---------|
 | `tx_inhibit` | int | yes | Protocol id; must be **1** |
-| `ttl_ms` | int | yes | Hold lifetime in ms, or **0** = release. If non-zero: 100…30000 |
-| `station` | string | recommended | Shown on badge (`held by …`) |
-| `band` | string | optional | Informational (gate does not filter by band today) |
-| `seq` | number | optional | Agent sequence; informational |
+| `ttl_ms` | int | yes | **hold_timeout_ms**: hold lifetime from receipt, or **0** = **release hold**. Non-zero: 100…30000. Not agent hang. |
+| `station` | string | recommended | Badge (`held by …`) |
+| `band` | string | optional | Informational (not filtered today) |
+| `seq` | number | optional | Informational |
 
 ### Hold (and keepalive — same shape)
 
@@ -239,110 +388,90 @@ or `tools/send_inhibit_hold.py`.
 {"tx_inhibit":1,"ttl_ms":600,"station":"ROY-222-SSB","band":"222","seq":1}
 ```
 
-Each hold **re-arms** the deadline to `now + ttl_ms` (last packet wins).
+Re-arms the WSJT-X station **hold timeout** to `now + ttl_ms` (last packet wins).
+Keepalives are the same shape; they refresh the hold timeout while KEY is asserted
+or agent hang is still running.
 
-### Release
+### Release hold (normal end)
 
 ```json
 {"tx_inhibit":1,"ttl_ms":0,"station":"ROY-222-SSB","band":"222","seq":2}
 ```
 
-### Deadman
+Sent when agent hang finishes after **release KEY** (or on operator quit).
+**This is how a healthy agent ends the hold.** Do not rely on WSJT-X station timeout as
+the normal path.
 
-If no new hold arrives before the deadline, the gate clears inhibit by itself.
-Agents must keepalive for long transmissions.
+### Hold timeout (WSJT-X station) and deadman
+
+If no hold packet arrives before the **hold timeout**, the WSJT-X station ends the hold
+anyway. That is the **hold timeout** path for a **deadman** (hang not managed)
+or other silence — not the preferred end of a normal transmission.
 
 ### Invalid packets
 
-Malformed JSON, wrong `tx_inhibit`, bad `ttl_ms`, or oversized payload: **ignored**
-(no state change). Counters exist in logic for diagnostics.
+Malformed JSON, wrong `tx_inhibit`, bad `ttl_ms`, oversized: **ignored**.
 
 ---
 
 ## 5. Local CTS KEY — not in this build
 
-**Decision:** keep **CTS out of wsjtx-inhibit** for now. The seat binary stays
-simple: **UDP hold only** + RTS/DTR drive.
+**Decision:** no CTS in the WSJT-X station binary. **UDP hold only** + RTS/DTR PTT.
 
-**Why:** On real COM ports, CTS is often floating or driven by something the
-operator cannot control. Field testing showed **intermittent, uncontrollable
-inhibits** when the gate polled CTS. That is worse than requiring a KEY agent
-(or Spacebar helper) on UDP.
+**Why:** floating/driven CTS caused intermittent false hold. Worse than
+requiring a KEY agent (or Spacebar helper) on UDP.
 
-**Two-radio idea** (SSB KEY → CTS, digi PTT ← RTS on the same USB-serial) is
-attractive on paper, but until CTS is **opt-in** and safe:
-
-- Use a **KEY agent** (own sense path or second dongle) → UDP.  
-- Or run **`inhibit-spacebar`** / agent on the same PC (localhost UDP).
-
-**If CTS returns later:** require an explicit **Settings** enable (default off),
-document polarity/idle, and never sample CTS unless the operator turns it on.
+Until CTS is opt-in and safe: KEY agent → UDP, or localhost helper.
 
 ---
 
-## 6. Testing inhibit locally
+## 6. Testing locally
 
-You can exercise the gate on one PC **without** a real KEY agent or multi-op
-setup. Run wsjtx-inhibit with RTS/DTR on a real serial port, then send the same
-UDP hold packets a KEY agent would send (default target **127.0.0.1:22372**).
+Enable TX Inhibit, RTS/DTR on a real serial port, then send the same UDP a KEY
+agent would (default **127.0.0.1:22372**). Expect red **TX INHIBITED**; WSJT-X station
+does not **assert PTT** while hold is active.
 
-Expect a red **TX INHIBITED** badge; radio PTT stays low during hold.
+### `inhibit-spacebar` (canonical KEY-agent stand-in)
 
-### `inhibit-spacebar` (ships next to `wsjtx`)
+**Name:** `inhibit-spacebar` (hyphen) — installed next to `wsjtx`.  
+Windows GUI alternate: `inhibit_spacebar` (underscore); prefer the hyphen name in docs.
 
-Built and installed with the app as:
+Implements §3 (Hold sender + KEYing monitor) in-process:
 
-| Platform | Path in the install / portable tree |
-|----------|-------------------------------------|
-| **Windows** | `bin\inhibit-spacebar.exe` (same folder as `bin\wsjtx.exe`) |
-| **Linux** | `bin/inhibit-spacebar` (or on `PATH` as `inhibit-spacebar`) |
-
-KEY-agent stand-in only: sends hold/keepalive/release UDP.
+| Platform | Path |
+|----------|------|
+| **Windows** | `bin\inhibit-spacebar.exe` |
+| **Linux** | `bin/inhibit-spacebar` |
 
 | Action | Effect |
 |--------|--------|
-| **Space held down** | KEY **down** — hold + keepalives |
-| **Space released** | KEY **up** — **hang** (adaptive or fixed), then release (`ttl_ms: 0`) |
-| **q** or **Esc** | Release immediately and quit |
+| **` (grave) down** | **assert KEY** → hold (`ttl_ms`=hold_timeout) + keepalives |
+| **` up** | KEY open → hang per §3.2, then **release hold** (`ttl_ms: 0`) after hang |
+| **q** / **Esc** | cancel keepalives, **release hold**, quit |
 
-**CW on Spacebar:** short presses are treated as CW elements. Hang is **adaptive**
-by default: estimate a dit from short closures, hang ≈ **8×dit** (clamped
-200–1000 ms). Long presses (≥ 500 ms, SSB-style) use a short debounce hang only.
+**KEY key is grave/backtick `` ` ``** (left of `1` on US keyboards) — **not Space**, so normal typing does not false-trigger holds.
 
-Typical use:
-
-1. Start **wsjtx-inhibit** with PTT = RTS or DTR on a real serial port.  
-2. Run **`bin\inhibit-spacebar.exe`** (or `inhibit-spacebar` on Linux) from the
-   same install tree.  
-3. **Hold Space** — badge **TX INHIBITED**; radio stays unkeyed.  
-4. **Release Space** — after hang, badge clears; normal PTT works.  
-5. Key dits/dahs on Space to see hang/dit estimates printed on the console.
-
-Defaults: host `127.0.0.1`, port **22372**, station `TEST-SSB`. Options:
+Hang policy (default): break-in **1.5× word gap** from measured dit; continuous
+KEY (long mark) **hang = 0**. Override with `--fixed-hang-ms`.
 
 ```text
-inhibit-spacebar --host 127.0.0.1 --port 22372 --station TEST-SSB --ttl-ms 600
-inhibit-spacebar --fixed-hang-ms 500
+inhibit-spacebar --host 127.0.0.1 --port 22372 --station TEST-KEY --ttl-ms 600
+inhibit-spacebar --fixed-hang-ms 0
 ```
 
-If the gate bound an ephemeral port instead of 22372, pass that `--port` or free
-22372 and restart wsjtx-inhibit.
+If the WSJT-X station bound an ephemeral port, pass that `--port`.
 
-**Linux note:** Space level uses `/dev/input` (may need group `input`).  
-**Windows:** Space level via `GetAsyncKeyState`.
+**Linux:** default KEY = this terminal only; `--global-keys` needs group `input`.
 
 ### Python: `tools/send_inhibit_hold.py`
 
-Same protocol and Space **level** behaviour. From a source checkout:
-
 ```bash
 python3 tools/send_inhibit_hold.py --interactive
-
 python3 tools/send_inhibit_hold.py --ttl-ms 3000 --station TEST
 python3 tools/send_inhibit_hold.py --ttl-ms 0
 ```
 
-Operator-oriented install checklist: [INSTALL.md §6](../INSTALL.md#6-test-inhibit-with-the-spacebar-helper).
+Operator checklist: [INSTALL.md §6](../INSTALL.md#6-test-inhibit-with-the-spacebar-helper).
 
 ---
 
@@ -350,9 +479,23 @@ Operator-oriented install checklist: [INSTALL.md §6](../INSTALL.md#6-test-inhib
 
 | Piece | Location |
 |-------|----------|
-| Parse + deadline + badge text | `TxInhibit/TxInhibitLogic.hpp` |
-| UDP + serial RTS/DTR + thread | `TxInhibit/TxInhibitGate.{hpp,cpp}` |
-| Steal RTS/DTR from hamlib; `set_intent` | `Configuration.cpp` `open_rig` / `transceiver_ptt` |
-| Status-bar badge | `widgets/mainwindow.cpp` |
-| Optional UDP `InhibitStatus` telemetry | `Network/NetworkMessage.hpp`, `MessageClient` |
-| KEY-agent stand-in | `bin/inhibit-spacebar`; `tools/send_inhibit_hold.py` |
+| Parse, hold timeout, badge, counters (pure) | `TxInhibit/TxInhibitLogic.hpp` |
+| UDP listen, hold timeout, want_tx mix | `TxInhibit/TxInhibitGate.{hpp,cpp}` (no serial) |
+| Pin filter: `do_ptt` → want_tx → assert PTT / release PTT | `Transceiver/HamlibTransceiver.cpp` |
+| Settings **Enable TX Inhibit** + signals | `Configuration.{hpp,cpp,ui}` |
+| Status badge + `InhibitStatus` | `widgets/mainwindow.cpp` |
+| MessageClient type 17 | `Network/NetworkMessage.hpp`, `MessageClient` |
+| KEY-agent stand-in | **`inhibit-spacebar`** (`tools/inhibit-spacebar/`); `send_inhibit_hold.py` |
+
+**Maintainer notes (algorithm)**
+
+- Hamlib alone owns serial/CAT and may **assert PTT** / **release PTT** (RTS/DTR).
+  TxInhibit never opens a second serial handle.
+- With TX Inhibit active, software PTT state follows **want_tx**, not the pin
+  reading (poll must not treat “**release PTT** while hold” as “not want_tx”).
+- Normal hold end is **release hold** (`ttl_ms: 0`) after agent hang.
+  Fail-open: a **deadman** still ends via the WSJT-X station **hold timeout**.
+- Agent **hang** is not implemented in the WSJT-X station; WSJT-X station only has **hold timeout**.
+- UDP bind failure is logged and non-fatal; stock PTT continues.
+- Identifier names in code may still say gate/hold/block/intent; align in a
+  later code pass. This document is the language target.

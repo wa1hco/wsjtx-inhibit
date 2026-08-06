@@ -4369,7 +4369,7 @@ void MainWindow::createStatusBar()                           //createStatusBar
   tx_status_label.setFrameStyle (QFrame::Panel | QFrame::Sunken);
   statusBar()->addWidget (&tx_status_label);
 
-  // TX Inhibit badge — hidden until a hold is active.
+  // TX Inhibit badge — hidden until KEY agent has said not to transmit.
   inhibit_status_label.setAlignment (Qt::AlignHCenter);
   inhibit_status_label.setMinimumSize (QSize {160, 18});
   inhibit_status_label.setStyleSheet ("QLabel{color: #ffffff; background-color: #cc0000; font-weight: bold}");
@@ -4377,7 +4377,9 @@ void MainWindow::createStatusBar()                           //createStatusBar
   statusBar()->addWidget (&inhibit_status_label);
   inhibit_status_label.hide ();
   connect (&m_config, &Configuration::tx_inhibit_changed, this,
-           [this] (bool inhibited, QString const& source) {
+           [this] (bool inhibited, QString const& source
+                   , quint32 hold_rx, quint32 release_rx
+                   , quint32 expiries, quint32 invalid) {
              if (inhibited)
                {
                  inhibit_status_label.setText (source.isEmpty ()
@@ -4393,7 +4395,19 @@ void MainWindow::createStatusBar()                           //createStatusBar
                {
                  m_messageClient->inhibit_status (
                    m_config.tx_inhibit_port (), inhibited, source,
-                   0, 0, 0, 0);
+                   hold_rx, release_rx, expiries, invalid);
+               }
+           });
+  connect (&m_config, &Configuration::tx_inhibit_port_changed, this,
+           [this] (quint16 port) {
+             if (port)
+               {
+                 inhibit_status_label.setToolTip (
+                   tr ("TX Inhibit: UDP listen port %1 (KEY agent: do not transmit)").arg (port));
+               }
+             else
+               {
+                 inhibit_status_label.setToolTip ({});
                }
            });
 

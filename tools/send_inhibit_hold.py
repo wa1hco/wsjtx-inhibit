@@ -3,9 +3,8 @@
 
 Protocol and KEY-agent design: docs/TX_INHIBIT.md
 
-Spacebar is a *level* (press = KEY down, release = KEY up + hang), so you can
-key CW-style to exercise adaptive hang. Windows uses GetAsyncKeyState via
-ctypes; Linux prefers /dev/input (group 'input').
+Grave/backtick ` is KEY *level* (not Space). Windows: VK_OEM_3; Linux: KEY_GRAVE
+(/dev/input; may need group input).
 
   python3 tools/send_inhibit_hold.py --interactive
   python3 tools/send_inhibit_hold.py --ttl-ms 3000 --station TEST
@@ -24,13 +23,13 @@ import sys
 import time
 
 DEFAULT_PORT = 22372
-DEFAULT_TTL_MS = 600
+DEFAULT_TTL_MS = 600  # hold_timeout_ms (safety), not hang
 KEEPALIVE_S = 0.2
-HANG_DEBOUNCE_S = 0.08
-HANG_MIN_S = 0.2
-HANG_MAX_S = 1.0
-HANG_DIT_MULT = 8.0
-LONG_CLOSURE_S = 0.5
+# Hang = 1.5 × word gap = 10.5 × dit (docs/TX_INHIBIT.md §3.4); WPM ~10..40
+HANG_MIN_S = 0.315
+HANG_MAX_S = 1.260
+HANG_DIT_MULT = 10.5
+CONTINUOUS_MARK_S = 0.5  # non-break-in / SSB → hang 0
 
 
 def encode(station: str, band: str, seq: int, ttl_ms: int) -> bytes:
@@ -62,10 +61,11 @@ class HangPolicy:
         self.dit_s = 0.0
 
     def hang_s_for_closure(self, closure_s: float) -> float:
+        """Break-in: 1.5×word gap from dit estimate. Continuous KEY: 0."""
         if closure_s <= 0:
-            return HANG_DEBOUNCE_S
-        if closure_s >= LONG_CLOSURE_S:
-            return HANG_DEBOUNCE_S
+            return 0.0
+        if closure_s >= CONTINUOUS_MARK_S:
+            return 0.0  # non-break-in CW / SSB
         if self.dit_s <= 0:
             self.dit_s = closure_s
         else:
@@ -79,8 +79,8 @@ def _space_level_win() -> bool | None:
         import ctypes
     except ImportError:
         return None
-    VK_SPACE = 0x20
-    return bool(ctypes.windll.user32.GetAsyncKeyState(VK_SPACE) & 0x8000)
+    VK_OEM_3 = 0xC0  # US keyboard `~ (grave)
+    return bool(ctypes.windll.user32.GetAsyncKeyState(VK_OEM_3) & 0x8000)
 
 
 def _quit_win() -> bool:
@@ -149,8 +149,8 @@ def _space_level_linux() -> bool | None:
         fcntl.ioctl(_evdev_fd, req, buf)
     except OSError:
         return None
-    # KEY_SPACE = 57
-    bit = 57
+    # KEY_GRAVE = 41 (backtick / left quote)
+    bit = 41
     return bool(buf[bit // 8] & (1 << (bit % 8)))
 
 
@@ -189,7 +189,7 @@ def interactive(args: argparse.Namespace) -> None:
     level = space_down()
     if level is None:
         print(
-            "No Space level reader on this platform (need Windows or Linux "
+            "No KEY (grave/`) level reader on this platform (need Windows or Linux "
             "/dev/input). Use the built inhibit-spacebar binary, or fix input access.",
             file=sys.stderr,
         )
@@ -197,8 +197,8 @@ def interactive(args: argparse.Namespace) -> None:
 
     print(
         f"Interactive KEY (level) → {args.host}:{args.port}\n"
-        f"  Spacebar  = KEY level (press = hold, release = hang then free)\n"
-        f"  Key CW on Space to train adaptive hang\n"
+        f"  grave/`  = KEY level (press = hold, release = hang then free)\n"
+        f"  (not Space — typing won't false-trigger)\n"
         f"  Ctrl-C    = quit\n"
         f"  station={args.station!r}  ttl_ms={args.ttl_ms}  "
         f"hang={'fixed '+str(fixed_hang)+'ms' if use_fixed else 'adaptive'}\n",
@@ -274,7 +274,7 @@ def main() -> None:
         "-i",
         "--interactive",
         action="store_true",
-        help="Spacebar KEY level + adaptive hang",
+        help="Grave/` KEY level + hang (docs §3)",
     )
     p.add_argument(
         "--fixed-hang-ms",

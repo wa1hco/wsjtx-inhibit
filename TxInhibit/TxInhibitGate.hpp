@@ -2,21 +2,21 @@
 #define TX_INHIBIT_GATE_HPP__
 
 // ---------------------------------------------------------------------------
-// TX Inhibit gate — pin filter for RTS/DTR PTT
+// TxInhibit module — UDP listen + want_tx mix for RTS/DTR PTT
 //
-// Concept (intentionally small):
+//   assert PTT  ⇔  want_tx  and  not hold
 //
-//   physical PTT  =  WSJT-X intent  ∧  ¬ UDP hold
+// • want_tx arrives from HamlibTransceiver::do_ptt() via set_intent().
+// • Hold is private (UDP keepalives + hold_timeout_ms safety timeout).
+//   CW anti-chatter hang lives only in the KEY agent; normal end is
+//   release hold (ttl_ms: 0). See docs/TX_INHIBIT.md §3.
+// • No serial I/O here. Hamlib owns CAT and RTS/DTR; this only decides
+//   whether to assert PTT or release PTT on the pin.
+// • WSJT-X station = this WSJT-X station (app + PC + radio + antenna).
 //
-// • Intent arrives only from HamlibTransceiver::do_ptt() via set_intent().
-// • Hold state is private (UDP KEY agent + deadman timer).
-// • This class does NOT open a serial port. Hamlib owns CAT and RTS/DTR;
-//   the gate only decides whether rig_set_ptt may assert the line.
+// Child of HamlibTransceiver on the transceiver thread (stock CAT order).
 //
-// Lives as a child of HamlibTransceiver on the transceiver thread so
-// set_intent and pin apply share that thread (stock CAT/Fake It order).
-//
-// Design authority: docs/TX_INHIBIT.md
+// Design authority / glossary: docs/TX_INHIBIT.md
 // SPDX-License-Identifier: GPL-3.0-or-later
 // ---------------------------------------------------------------------------
 
@@ -38,8 +38,7 @@ public:
   ~TxInhibitGate () override;
 
 public slots:
-  // Bind UDP + start deadman timer (call once after construction on the
-  // transceiver thread).
+  // Bind UDP + start hold-timeout poll timer (once on transceiver thread).
   void start_listening ();
 
   // WSJT-X TX intent from do_ptt(on). Does not take "hold" as an argument;
@@ -51,21 +50,21 @@ public slots:
   // closed Hamlib or will set the pin itself). Safe to call more than once.
   void shutdown (bool emit_pin = true);
 
-  // When true, ignore KEY-agent UDP (future UI test hold).
-  void set_hold_test (bool hold);
-
 signals:
   // Ask HamlibTransceiver to call rig_set_ptt (radiate true/false).
   // Same thread (DirectConnection) when parent is HamlibTransceiver.
   void physicalPtt (bool radiate);
 
-  // Queued to GUI: status-bar badge.
-  void inhibitChanged (bool inhibited, QString const& source);
+  // Queued to GUI: status-bar badge + optional InhibitStatus counters.
+  void inhibitChanged (bool inhibited, QString const& source
+                       , quint32 hold_rx, quint32 release_rx
+                       , quint32 expiries, quint32 invalid);
 
   // Bound UDP port (22372 or ephemeral).
   void portBound (quint16 port);
 
-  // Operator-visible problems (UDP bind, etc.).
+  // Non-fatal operator-visible problems (e.g. total UDP bind failure).
+  // Callers must not treat this as a rig CAT/PTT failure.
   void lineError (QString const& message);
 
 private slots:
@@ -73,7 +72,8 @@ private slots:
   void tick ();
 
 private:
-  void ensure_udp ();
+  // Returns true if UDP is listening (preferred or ephemeral port).
+  bool ensure_udp ();
   void apply_line ();
   void emit_state_if_changed ();
   qint64 now_ms () const;
@@ -82,7 +82,6 @@ private:
   QUdpSocket * udp_ {nullptr};
   QTimer * timer_ {nullptr};
   bool intent_ {false};
-  bool hold_test_ {false};
   bool last_radiate_ {false};
   bool last_emitted_inhibited_ {false};
   bool stopped_ {false};         // after shutdown: no further pin emits

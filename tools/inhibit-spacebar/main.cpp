@@ -1,11 +1,18 @@
-// inhibit-spacebar — KEY-agent stand-in for local TX Inhibit tests.
+// inhibit-spacebar — KEY-agent stand-in for TX Inhibit (docs/TX_INHIBIT.md §3)
 //
-// Spacebar is a *level* (press = KEY down, release = KEY up + hang).
-// Same JSON UDP protocol as docs/TX_INHIBIT.md.
+// Canonical name: inhibit-spacebar (installed as bin/inhibit-spacebar next to
+// wsjtx). Implements two cooperating roles on one rare KEY line:
 //
-// Linux default: keys from *this terminal only* (stdin raw mode) so other
-// windows do not false-trigger. Use --global-keys for /dev/input system-wide.
-// Windows: GetAsyncKeyState is system-wide; --console-only uses console input.
+//   KEY stand-in key: left quote / grave accent `  (not Space — typing
+//   spaces must not false-trigger holds).
+//
+//   Hold sender   — hold immediately (ttl_ms = hold_timeout_ms), keepalives
+//                   ~200 ms, release with ttl_ms=0 (cancel keepalives first).
+//   KEYing monitor — classify break-in CW vs continuous KEY (non-break-in /
+//                   SSB); measure dit; hang = 1.5× word gap (break-in only);
+//                   EOT signals Hold sender to release.
+//
+// KEY level: press = assert, release = open (gap or EOT).
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -46,15 +53,22 @@
 namespace {
 
 static int const kDefaultPort = 22372;
-static int const kDefaultTtlMs = 600;
+// hold_timeout_ms (wire ttl_ms) — safety on lost hold packets, not hang.
+static int const kDefaultHoldTimeoutMs = 600;
 static int const kKeepaliveMs = 200;
 
-// Adaptive hang (optional; KEY agent policy — docs/TX_INHIBIT.md §3.3).
-static int const kHangDebounceMs = 80;
-static int const kHangMinMs = 200;
-static int const kHangMaxMs = 1000;
-static double const kHangDitMult = 8.0;
-static int const kLongClosureMs = 500;
+// Hang = 1.5 × word gap; word gap = 7 dits → hang = 10.5 × dit (Paris).
+// WPM 10..40 ⇒ dit 120..30 ms ⇒ hang 1260..315 ms (docs/TX_INHIBIT.md §3.4).
+static double const kHangWordGapMult = 1.5;
+static int const kWordGapDits = 7;
+static int const kHangMinMs = 315;   // ~40 WPM
+static int const kHangMaxMs = 1260;  // ~10 WPM
+// Continuous KEY (SSB / non-break-in): no element gaps → hang 0.
+// Marks longer than this without short gaps are treated as continuous.
+static int const kContinuousMarkMs = 500;
+// Element gap upper bound while still "in character/word" (before hang EOT).
+// Letter gap = 3 dits; use up to ~5 dits as "still break-in" open.
+static double const kMaxIntraTxGapDits = 5.0;
 
 QByteArray encode_hold (QString const& station, QString const& band,
                         qint64 seq, int ttl_ms)
@@ -72,13 +86,19 @@ QByteArray encode_hold (QString const& station, QString const& band,
   return body;
 }
 
-// --- Space level readers ---------------------------------------------------
+// --- KEY level readers (grave/backtick ` — rare key, not Space) ------------
+// Linux: KEY_GRAVE. Windows: VK_OEM_3 (US `~ key). Stdin: '`' (or '~').
 
 enum class InputMode
 {
   StdinTerminal,  // only keys typed into this terminal (has "focus")
   GlobalKeys      // system-wide keyboard (evdev / GetAsyncKeyState)
 };
+
+static bool is_key_char (unsigned char c)
+{
+  return c == '`' || c == '~'; // grave / shifted grave on many layouts
+}
 
 #if defined (Q_OS_LINUX) || defined (Q_OS_UNIX)
 
@@ -110,7 +130,7 @@ bool setup_stdin_raw ()
       return false;
     }
   termios raw = g_term_saved;
-  // Input only: non-canonical, no echo, so Space/q/Esc arrive as bytes when
+  // Input only: non-canonical, no echo, so `/q/Esc arrive as bytes when
   // this TTY has focus. Do NOT use cfmakeraw() — it clears c_oflag/OPOST so
   // '\n' is not mapped to CR+LF and QTextStream lines fail to wrap/return.
   raw.c_lflag &= static_cast<tcflag_t> (~(ICANON | ECHO | ECHOE | ECHOK | ECHONL | ISIG));
@@ -147,9 +167,9 @@ void poll_stdin_keys ()
       for (ssize_t i = 0; i < n; ++i)
         {
           unsigned char c = buf[i];
-          if (c == ' ' || c == 0x00)
+          if (is_key_char (c))
             {
-              // Space press (tty has no release event) — sticky until hang policy
+              // Grave press (tty has no release event) — sticky hold synthesised
               g_stdin_space = true;
             }
           else if (c == 'q' || c == 'Q' || c == 0x1b || c == 3 /* Ctrl-C */)
@@ -160,25 +180,10 @@ void poll_stdin_keys ()
     }
 }
 
-// Sticky space for stdin: true after press until clear_stdin_space() after hang.
-// For level-style KEY we need press=start and a synthetic up after a short
-// "held" window OR require --global-keys for true level. With tty we simulate
-// KEY-down while space was recently pressed and user keeps it held by... we
-// can't know hold length without release.
-//
-// Better stdin approach: on press, KEY down; we cannot see release on all
-// terminals. Use a simple rule:
-//   - space byte → KEY down edge if not already down
-//   - after no space byte for debounce while "down", treat as KEY up
-// That doesn't work without autorepeat.
-//
-// Use termios + track last space press time; if space is held, many terminals
-// send autorepeat. So:
-//   - any space byte → key_down = true, refresh last_space_ms
-//   - if key_down && (now - last_space_ms) > 80ms with no new space → KEY up
-// Autorepeat typically 30–50ms after delay. 120ms idle → up works for momentary
-// and holds while autorepeat continues.
-
+// Degraded stdin KEY (only if /dev/input unavailable): TTY has no release.
+// Use a *short* sticky window (~2 polls) so short taps are not forced to 120ms.
+// Long holds need autorepeat (or use EVIOCGKEY). Prefer open_evdev_keyboard().
+static int const kStdinStickyMs = 25;
 static qint64 g_last_space_byte_ms = -1;
 
 bool space_down_stdin (qint64 now_ms)
@@ -190,9 +195,9 @@ bool space_down_stdin (qint64 now_ms)
       g_last_space_byte_ms = now_ms;
       return true;
     }
-  if (g_last_space_byte_ms >= 0 && (now_ms - g_last_space_byte_ms) < 120)
+  if (g_last_space_byte_ms >= 0 && (now_ms - g_last_space_byte_ms) < kStdinStickyMs)
     {
-      return true; // held (initial or autorepeat)
+      return true;
     }
   g_last_space_byte_ms = -1;
   return false;
@@ -257,7 +262,8 @@ bool open_evdev_keyboard ()
           unsigned long keybits[(KEY_MAX + 8 * sizeof (long) - 1) / (8 * sizeof (long))] = {};
           if (ioctl (fd, EVIOCGBIT (EV_KEY, sizeof (keybits)), keybits) == 0)
             {
-              if (!test_bit (KEY_SPACE, keybits))
+              // Prefer keyboard that has grave/backtick (KEY_GRAVE).
+              if (!test_bit (KEY_GRAVE, keybits))
                 {
                   ::close (fd);
                   continue;
@@ -272,12 +278,14 @@ bool open_evdev_keyboard ()
   return false;
 }
 
+// True KEY *level* via kernel key state (no 120ms sticky). Call often.
 bool space_down_evdev ()
 {
   if (g_evdev_fd < 0 && !open_evdev_keyboard ())
     {
       return false;
     }
+  // Drain queue so EVIOCGKEY reflects current state
   input_event ev {};
   while (read (g_evdev_fd, &ev, sizeof (ev)) == static_cast<ssize_t> (sizeof (ev)))
     {
@@ -287,7 +295,7 @@ bool space_down_evdev ()
     {
       return false;
     }
-  int const bit = KEY_SPACE;
+  int const bit = KEY_GRAVE; // left quote / backtick `
   return (keybits[bit / (8 * sizeof (long))] >> (bit % (8 * sizeof (long)))) & 1UL;
 }
 
@@ -315,7 +323,8 @@ static bool g_console_only = false;
 
 bool space_down_global ()
 {
-  return (GetAsyncKeyState (VK_SPACE) & 0x8000) != 0;
+  // US/PC keyboard: VK_OEM_3 is the `~ key (left of 1). Rare in normal typing.
+  return (GetAsyncKeyState (VK_OEM_3) & 0x8000) != 0;
 }
 
 bool quit_requested_global ()
@@ -324,7 +333,7 @@ bool quit_requested_global ()
     || (GetAsyncKeyState (VK_ESCAPE) & 0x8000) != 0;
 }
 
-// Console focus: only count Space when this console is foreground.
+// Console focus: only count KEY when this console is foreground.
 bool space_down_console ()
 {
   HWND con = GetConsoleWindow ();
@@ -347,39 +356,166 @@ bool quit_requested_console ()
 
 #endif
 
-// --- adaptive hang ---------------------------------------------------------
+// --- KEYing monitor (docs/TX_INHIBIT.md §3.2–3.5) ---------------------------
 
-class HangPolicy
+enum class KeyClass
+{
+  Unknown,      // not yet classified this transmission
+  BreakInCw,    // saw short KEY opens (element/letter gaps)
+  Continuous    // long mark, no short gaps → non-break-in CW / SSB
+};
+
+// Tracks KEY edges; decides hang (ms) when KEY opens (may be gap or EOT).
+class KeyingMonitor
 {
 public:
-  int hang_ms_for_closure (int closure_ms)
+  void reset_transmission ()
   {
-    if (closure_ms <= 0)
+    key_class_ = KeyClass::Unknown;
+    dit_ms_ = 0.0;
+    mark_open_ = false;
+    mark_start_ms_ = -1;
+    gap_start_ms_ = -1;
+  }
+
+  // KEY assert edge
+  void on_key_assert (qint64 now_ms)
+  {
+    if (gap_start_ms_ >= 0)
       {
-        return kHangDebounceMs;
+        int gap = static_cast<int> (now_ms - gap_start_ms_);
+        on_gap_closed (gap);
+        gap_start_ms_ = -1;
       }
-    if (closure_ms >= kLongClosureMs)
+    mark_open_ = true;
+    mark_start_ms_ = now_ms;
+  }
+
+  // KEY open edge — returns hang_ms to wait before EOT (0 = release now).
+  // If KEY asserts again before hang expires, call on_key_assert (not EOT).
+  int on_key_open (qint64 now_ms)
+  {
+    int mark_ms = 0;
+    if (mark_open_ && mark_start_ms_ >= 0)
       {
-        return kHangDebounceMs;
+        mark_ms = static_cast<int> (now_ms - mark_start_ms_);
+        note_mark (mark_ms);
       }
-    double sample = static_cast<double> (closure_ms);
+    mark_open_ = false;
+    mark_start_ms_ = -1;
+    gap_start_ms_ = now_ms;
+
+    if (key_class_ == KeyClass::Continuous
+        || (key_class_ == KeyClass::Unknown && mark_ms >= kContinuousMarkMs))
+      {
+        key_class_ = KeyClass::Continuous;
+        return 0; // hang 0 — non-break-in / SSB
+      }
+    if (key_class_ == KeyClass::BreakInCw || dit_ms_ > 0.0)
+      {
+        key_class_ = KeyClass::BreakInCw;
+        return hang_ms_break_in ();
+      }
+    // Unknown, short mark, no gaps yet: wait a short provisional hang based
+    // on this mark as a dit candidate; if KEY returns, on_gap_closed fires.
+    if (mark_ms > 0 && mark_ms < kContinuousMarkMs)
+      {
+        note_dit_sample (static_cast<double> (mark_ms));
+        return hang_ms_break_in ();
+      }
+    return 0;
+  }
+
+  KeyClass key_class () const { return key_class_; }
+  double dit_ms () const { return dit_ms_; }
+
+  int hang_ms_break_in () const
+  {
     if (dit_ms_ <= 0.0)
       {
-        dit_ms_ = sample;
+        return kHangMinMs;
+      }
+    // hang = 1.5 × word_gap = 1.5 × 7 × dit = 10.5 × dit
+    double hang = kHangWordGapMult * static_cast<double> (kWordGapDits) * dit_ms_;
+    int h = static_cast<int> (std::lround (hang));
+    return std::max (kHangMinMs, std::min (kHangMaxMs, h));
+  }
+
+  char const * class_name () const
+  {
+    switch (key_class_)
+      {
+      case KeyClass::BreakInCw: return "break-in CW";
+      case KeyClass::Continuous: return "continuous (non-break-in/SSB)";
+      default: return "unknown";
+      }
+  }
+
+private:
+  void note_mark (int mark_ms)
+  {
+    if (mark_ms <= 0)
+      {
+        return;
+      }
+    if (mark_ms >= kContinuousMarkMs && key_class_ != KeyClass::BreakInCw)
+      {
+        key_class_ = KeyClass::Continuous;
+        return;
+      }
+    // Dit-like: shorter than ~2× current dit, or first short mark
+    if (dit_ms_ <= 0.0)
+      {
+        if (mark_ms < kContinuousMarkMs)
+          {
+            note_dit_sample (static_cast<double> (mark_ms));
+          }
+        return;
+      }
+    if (mark_ms < 2.0 * dit_ms_)
+      {
+        note_dit_sample (static_cast<double> (mark_ms));
+      }
+    // else dah / long mark — speed from dits only
+  }
+
+  void note_dit_sample (double sample_ms)
+  {
+    if (sample_ms <= 0.0)
+      {
+        return;
+      }
+    if (dit_ms_ <= 0.0)
+      {
+        dit_ms_ = sample_ms;
       }
     else
       {
-        dit_ms_ = 0.35 * sample + 0.65 * dit_ms_;
+        dit_ms_ = 0.35 * sample_ms + 0.65 * dit_ms_;
       }
-    int hang = static_cast<int> (std::lround (kHangDitMult * dit_ms_));
-    hang = std::max (kHangMinMs, std::min (kHangMaxMs, hang));
-    return hang;
   }
 
-  double dit_ms () const { return dit_ms_; }
+  void on_gap_closed (int gap_ms)
+  {
+    if (gap_ms <= 0)
+      {
+        return;
+      }
+    // Short open between marks ⇒ break-in CW (element or letter gap).
+    double max_gap = (dit_ms_ > 0.0)
+      ? kMaxIntraTxGapDits * dit_ms_
+      : static_cast<double> (kContinuousMarkMs);
+    if (gap_ms <= max_gap)
+      {
+        key_class_ = KeyClass::BreakInCw;
+      }
+  }
 
-private:
+  KeyClass key_class_ {KeyClass::Unknown};
   double dit_ms_ {0.0};
+  bool mark_open_ {false};
+  qint64 mark_start_ms_ {-1};
+  qint64 gap_start_ms_ {-1};
 };
 
 } // namespace
@@ -388,18 +524,19 @@ int main (int argc, char * argv[])
 {
   QCoreApplication app (argc, argv);
   QCoreApplication::setApplicationName (QStringLiteral ("inhibit-spacebar"));
-  QCoreApplication::setApplicationVersion (QStringLiteral ("1.2"));
+  QCoreApplication::setApplicationVersion (QStringLiteral ("2.0"));
 
   QCommandLineParser parser;
   parser.setApplicationDescription (
       QStringLiteral (
-          "KEY-agent stand-in: Space level = KEY (press=hold, release=hang then release).\n"
-          "Default: only keys for this terminal/console (no false triggers from other windows).\n"
-          "Use --global-keys for system-wide Space (old Linux evdev / Win GetAsyncKeyState)."));
+          "KEY-agent stand-in (docs/TX_INHIBIT.md §3): Hold sender + KEYing monitor.\n"
+          "KEY key = left quote / grave ` (not Space — typing won't false-trigger).\n"
+          "Break-in CW: hang = 1.5×word gap; continuous KEY: hang 0.\n"
+          "Default: only this terminal/console. Use --global-keys for system-wide."));
   parser.addHelpOption ();
   parser.addVersionOption ();
   QCommandLineOption hostOpt {QStringList () << "H" << "host",
-                              QStringLiteral ("Seat host (default 127.0.0.1)"),
+                              QStringLiteral ("WSJT-X station host (default 127.0.0.1)"),
                               QStringLiteral ("host"),
                               QStringLiteral ("127.0.0.1")};
   QCommandLineOption portOpt {QStringList () << "p" << "port",
@@ -409,36 +546,31 @@ int main (int argc, char * argv[])
   QCommandLineOption stationOpt {QStringList () << "s" << "station",
                                  QStringLiteral ("Badge station id"),
                                  QStringLiteral ("name"),
-                                 QStringLiteral ("TEST-SSB")};
+                                 QStringLiteral ("TEST-KEY")};
   QCommandLineOption bandOpt {QStringList () << "b" << "band",
                               QStringLiteral ("Band field (informational)"),
                               QStringLiteral ("band"),
                               QStringLiteral ("144")};
   QCommandLineOption ttlOpt {QStringList () << "t" << "ttl-ms",
-                             QStringLiteral ("Hold TTL ms for keepalives (default 600)"),
+                             QStringLiteral ("hold_timeout_ms on hold/keepalive packets (default 600)"),
                              QStringLiteral ("ms"),
-                             QString::number (kDefaultTtlMs)};
+                             QString::number (kDefaultHoldTimeoutMs)};
   QCommandLineOption fixedHangOpt {
     QStringList () << "fixed-hang-ms",
-    QStringLiteral ("Hang after KEY up (default 80). Use 0 for immediate release."),
-    QStringLiteral ("ms"),
-    QString::number (kHangDebounceMs)};
-  QCommandLineOption adaptiveOpt {
-    QStringList () << "adaptive",
-    QStringLiteral ("CW-style adaptive hang (8×dit). Default is short fixed hang.")};
+    QStringLiteral ("Override hang after KEY open (ms). Omit for KEYing-monitor hang."),
+    QStringLiteral ("ms")};
   QCommandLineOption globalKeysOpt {
     QStringList () << "global-keys",
-    QStringLiteral ("Read Space system-wide (other windows can trigger KEY). Not default.")};
+    QStringLiteral ("Read grave/` key system-wide (other windows can trigger KEY). Not default.")};
   QCommandLineOption quietKaOpt {
     QStringList () << "verbose-keepalive",
-    QStringLiteral ("Log every keepalive (default: only first HOLD, hang, RELEASE).")};
+    QStringLiteral ("Log every keepalive (default: HOLD, KEY events, RELEASE only).")};
   parser.addOption (hostOpt);
   parser.addOption (portOpt);
   parser.addOption (stationOpt);
   parser.addOption (bandOpt);
   parser.addOption (ttlOpt);
   parser.addOption (fixedHangOpt);
-  parser.addOption (adaptiveOpt);
   parser.addOption (globalKeysOpt);
   parser.addOption (quietKaOpt);
   parser.process (app);
@@ -447,90 +579,104 @@ int main (int argc, char * argv[])
   quint16 const port = static_cast<quint16> (parser.value (portOpt).toUInt ());
   QString const station = parser.value (stationOpt);
   QString const band = parser.value (bandOpt);
-  int const ttl_ms = parser.value (ttlOpt).toInt ();
-  bool const adaptive = parser.isSet (adaptiveOpt);
-  int const fixed_hang_ms = parser.value (fixedHangOpt).toInt ();
+  int const hold_timeout_ms = parser.value (ttlOpt).toInt ();
+  bool const fixed_hang_set = parser.isSet (fixedHangOpt);
+  int const fixed_hang_ms = fixed_hang_set ? parser.value (fixedHangOpt).toInt () : 0;
   bool const global_keys = parser.isSet (globalKeysOpt);
   bool const verbose_ka = parser.isSet (quietKaOpt);
-  if (ttl_ms < 100 || ttl_ms > 30000)
+  if (hold_timeout_ms < 100 || hold_timeout_ms > 30000)
     {
       QTextStream err (stderr);
-      err << "ttl-ms must be 100..30000\n";
+      err << "ttl-ms (hold_timeout_ms) must be 100..30000\n";
       return 2;
     }
 
   InputMode input_mode = global_keys ? InputMode::GlobalKeys : InputMode::StdinTerminal;
 
   QString input_note;
-#if defined (Q_OS_LINUX) || defined (Q_OS_UNIX)
-  if (input_mode == InputMode::StdinTerminal)
+  bool use_true_key_level = false; // OS key state (no stdin 120ms glue)
+#if defined (Q_OS_LINUX)
+  // Prefer EVIOCGKEY for true KEY_GRAVE level (accurate short marks).
+  if (open_evdev_keyboard ())
+    {
+      use_true_key_level = true;
+      if (input_mode == InputMode::GlobalKeys)
+        {
+          input_note = QStringLiteral (
+              "KEY = grave/` via /dev/input EVIOCGKEY (true level, system-wide). "
+              "Group 'input' may be required.");
+        }
+      else
+        {
+          // Still use true level; rare KEY + quit via this TTY.
+          (void) setup_stdin_raw (); // q/Esc from this terminal
+          input_note = QStringLiteral (
+              "KEY = grave/` via /dev/input EVIOCGKEY (true level). "
+              "q/Esc only from *this terminal* (not global). May need group 'input'. "
+              "--global-keys makes q/Esc system-wide too.");
+        }
+    }
+  else
     {
       if (setup_stdin_raw ())
         {
           input_note = QStringLiteral (
-              "Space only from *this terminal* (raw stdin). "
-              "Focus the terminal first. --global-keys for system-wide keyboard.");
+              "WARNING: no /dev/input keyboard — KEY uses stdin sticky (%1 ms). "
+              "Add user to group 'input' for true-level KEY (short marks).")
+              .arg (kStdinStickyMs);
         }
       else
         {
-          QTextStream err (stderr);
-          err << "WARNING: cannot use raw stdin (not a TTY?). ";
-#if defined (Q_OS_LINUX)
-          err << "Falling back to --global-keys.\n";
-          input_mode = InputMode::GlobalKeys;
-#else
-          err << "No input method available.\n";
-#endif
+          input_note = QStringLiteral (
+              "ERROR: no /dev/input and no raw stdin. KEY timing unavailable.");
         }
     }
-#if defined (Q_OS_LINUX)
-  if (input_mode == InputMode::GlobalKeys)
+#elif defined (Q_OS_UNIX)
+  if (setup_stdin_raw ())
     {
-      if (open_evdev_keyboard ())
-        {
-          input_note = QStringLiteral (
-              "Space is SYSTEM-WIDE via /dev/input (any window). "
-              "May need group 'input'. Prefer default (no --global-keys) for tests.");
-        }
-      else
-        {
-          input_note = QStringLiteral (
-              "No readable keyboard under /dev/input — "
-              "add user to group 'input', or run in a TTY without --global-keys.");
-        }
+      input_note = QStringLiteral (
+          "KEY = grave/` via stdin sticky (%1 ms) — no Linux evdev on this build.")
+          .arg (kStdinStickyMs);
     }
-#endif
 #elif defined (Q_OS_WIN)
+  use_true_key_level = true; // GetAsyncKeyState is true level
   if (input_mode == InputMode::StdinTerminal)
     {
       input_note = QStringLiteral (
-          "Windows: Space only when *this console* is the foreground window. "
-          "Use --global-keys for system-wide (any window).");
+          "Windows: KEY = `~ (VK_OEM_3) true level when *this console* is foreground.");
     }
   else
     {
       input_note = QStringLiteral (
-          "Windows: Space is SYSTEM-WIDE (GetAsyncKeyState). Any window can trigger KEY.");
+          "Windows: KEY = `~ (VK_OEM_3) true level SYSTEM-WIDE.");
     }
 #else
-  input_note = QStringLiteral ("This platform has limited Space support.");
+  input_note = QStringLiteral ("This platform has limited KEY-key support.");
 #endif
+  Q_UNUSED (use_true_key_level);
 
   QUdpSocket sock;
   qint64 seq = 1;
-  HangPolicy hang_policy;
+  KeyingMonitor keying;   // KEYing monitor SM
   int holds_sent = 0;
   int keepalives_sent = 0;
   int releases_sent = 0;
 
   bool key_down = false;
-  bool band_held = false;
-  qint64 key_down_at_ms = -1;
-  qint64 hang_until_ms = -1;
+  bool hold_active = false;   // Hold sender SM
+  qint64 hang_until_ms = -1;  // EOT after KEY open (break-in hang)
 
   auto now_ms = [] () { return QDateTime::currentMSecsSinceEpoch (); };
 
-  auto send = [&] (int ttl, bool is_keepalive) {
+  QTimer keepalive;
+  keepalive.setInterval (kKeepaliveMs);
+
+  // Hold sender: only path that emits UDP (race-safe vs keepalives).
+  auto send_hold_packet = [&] (int ttl, bool is_keepalive) {
+    if (is_keepalive && !hold_active)
+      {
+        return; // END_HOLD already cleared hold_active
+      }
     QByteArray payload = encode_hold (station, band, seq++, ttl);
     qint64 n = sock.writeDatagram (payload, QHostAddress (host), port);
     QTextStream out (stdout);
@@ -547,7 +693,6 @@ int main (int argc, char * argv[])
       {
         ++holds_sent;
       }
-    // Default: log first HOLD, hang notes, RELEASE — not every 200 ms keepalive.
     if (verbose_ka || !is_keepalive || ttl == 0)
       {
         out << QDateTime::currentDateTime ().toString (QStringLiteral ("hh:mm:ss.zzz"))
@@ -567,62 +712,110 @@ int main (int argc, char * argv[])
       }
   };
 
+  // END_HOLD: cancel keepalives first, then ttl_ms=0 (docs §3.6).
+  auto end_hold = [&] (char const * reason) {
+    hang_until_ms = -1;
+    if (!hold_active)
+      {
+        return;
+      }
+    hold_active = false;
+    keepalive.stop ();
+    send_hold_packet (0, false);
+    QTextStream out (stdout);
+    out << QDateTime::currentDateTime ().toString (QStringLiteral ("hh:mm:ss.zzz"))
+        << "  RELEASE (" << reason << ")\n";
+    out.flush ();
+  };
+
+  auto start_hold = [&] () {
+    if (hold_active)
+      {
+        return;
+      }
+    hold_active = true;
+    send_hold_packet (hold_timeout_ms, false);
+    keepalive.start ();
+  };
+
+  // 5 ms poll when true key level is available (evdev / Windows).
+  int const poll_ms =
+#if defined (Q_OS_LINUX)
+      (g_evdev_fd >= 0) ? 5 : 10;
+#elif defined (Q_OS_WIN)
+      5;
+#else
+      10;
+#endif
+
   QTextStream out (stdout);
-  out << "inhibit-spacebar → " << host << ':' << port << '\n'
-      << "  Space     = KEY level (press = hold, release = hang then free)\n"
-      << "  q or Esc  = release and quit\n"
-      << "  station=" << station << "  band=" << band
-      << "  ttl_ms=" << ttl_ms << "  keepalive every " << kKeepaliveMs << " ms (while held)\n"
-      << "  hang=" << (adaptive
-                       ? QStringLiteral ("adaptive 8×dit (clamp %1–%2 ms)")
-                           .arg (kHangMinMs).arg (kHangMaxMs)
-                       : QStringLiteral ("fixed %1 ms (use --adaptive for CW hang training)")
-                           .arg (std::max (0, fixed_hang_ms)))
+  out << "inhibit-spacebar (KEY agent) → " << host << ':' << port << '\n'
+      << "  ` (grave) = KEY level (assert / open)  — not Space\n"
+      << "  q or Esc  = release hold and quit\n"
+      << "  station=" << station << "  band=" << band << '\n'
+      << "  hold_timeout_ms=" << hold_timeout_ms
+      << "  keepalive every " << kKeepaliveMs << " ms while hold active\n"
+      << "  key poll=" << poll_ms << " ms"
+#if defined (Q_OS_LINUX)
+      << (g_evdev_fd >= 0 ? " (EVIOCGKEY true level)" : " (stdin sticky fallback)")
+#endif
+      << '\n'
+      << "  hang=" << (fixed_hang_set
+                       ? QStringLiteral ("fixed override %1 ms").arg (std::max (0, fixed_hang_ms))
+                       : QStringLiteral ("KEYing monitor: break-in 1.5×word gap; continuous hang=0"))
       << '\n'
       << "  " << input_note << '\n'
-      << "Tip: one short press → 1 HOLD + keepalives only while hang lasts, then 1 RELEASE.\n"
-      << "     Default hang is short; old adaptive mode looked like many HOLD lines.\n\n";
+      << "  See docs/TX_INHIBIT.md §3 (Hold sender + KEYing monitor).\n\n";
   out.flush ();
 
-  QTimer keepalive;
-  keepalive.setInterval (kKeepaliveMs);
   QObject::connect (&keepalive, &QTimer::timeout, &app, [&] () {
-      if (band_held)
+      if (hold_active)
         {
-          send (ttl_ms, true);
+          send_hold_packet (hold_timeout_ms, true);
         }
     });
 
   QTimer poll;
-  poll.setInterval (15);
+  poll.setInterval (poll_ms);
   QObject::connect (&poll, &QTimer::timeout, &app, [&] () {
       qint64 t = now_ms ();
 
       bool want_quit = false;
       bool space = false;
-#if defined (Q_OS_LINUX) || defined (Q_OS_UNIX)
-      if (input_mode == InputMode::StdinTerminal)
+#if defined (Q_OS_LINUX)
+      // KEY (grave): true level via EVIOCGKEY when available.
+      // Quit (q/Esc): only this terminal's stdin unless --global-keys, so typing
+      // q in another window does not end the agent.
+      if (g_evdev_fd >= 0)
+        {
+          space = space_down_evdev ();
+          if (input_mode == InputMode::GlobalKeys)
+            {
+              want_quit = quit_requested_evdev () || quit_requested_stdin ();
+            }
+          else
+            {
+              want_quit = quit_requested_stdin ();
+            }
+        }
+      else
         {
           space = space_down_stdin (t);
           want_quit = quit_requested_stdin ();
         }
-#if defined (Q_OS_LINUX)
-      else
-        {
-          space = space_down_evdev ();
-          want_quit = quit_requested_evdev ();
-        }
-#endif
+#elif defined (Q_OS_UNIX)
+      space = space_down_stdin (t);
+      want_quit = quit_requested_stdin ();
 #elif defined (Q_OS_WIN)
       if (input_mode == InputMode::StdinTerminal)
         {
           space = space_down_console ();
-          want_quit = quit_requested_console ();
+          want_quit = quit_requested_console (); // q/Esc only if console focused
         }
       else
         {
           space = space_down_global ();
-          want_quit = quit_requested_global ();
+          want_quit = quit_requested_global (); // system-wide q/Esc with --global-keys
         }
 #else
       Q_UNUSED (t);
@@ -630,12 +823,7 @@ int main (int argc, char * argv[])
 
       if (want_quit)
         {
-          if (band_held)
-            {
-              send (0, false);
-              band_held = false;
-              keepalive.stop ();
-            }
+          end_hold ("quit");
           out << "quit\n";
           out.flush ();
 #if defined (Q_OS_LINUX) || defined (Q_OS_UNIX)
@@ -645,57 +833,59 @@ int main (int argc, char * argv[])
           return;
         }
 
-      // --- KEY down edge
+      // --- KEY assert edge → Hold sender + KEYing monitor
       if (space && !key_down)
         {
           key_down = true;
-          key_down_at_ms = t;
           hang_until_ms = -1;
-          if (!band_held)
-            {
-              band_held = true;
-              send (ttl_ms, false);
-              keepalive.start ();
-            }
+          keying.on_key_assert (t);
+          start_hold ();
           out << QDateTime::currentDateTime ().toString (QStringLiteral ("hh:mm:ss.zzz"))
-              << "  KEY DOWN\n";
+              << "  KEY ASSERT  class=" << keying.class_name () << '\n';
           out.flush ();
         }
 
-      // --- KEY up edge → hang (still keepalives until hang ends)
+      // --- KEY open edge → hang (or EOT if hang=0)
       if (!space && key_down)
         {
           key_down = false;
-          int closure = (key_down_at_ms >= 0)
-            ? static_cast<int> (t - key_down_at_ms) : 0;
-          int hang_ms = adaptive
-            ? hang_policy.hang_ms_for_closure (closure)
-            : std::max (0, fixed_hang_ms);
-          hang_until_ms = t + hang_ms;
-          out << QDateTime::currentDateTime ().toString (QStringLiteral ("hh:mm:ss.zzz"))
-              << "  KEY UP    closure=" << closure << " ms"
-              << "  hang=" << hang_ms << " ms";
-          if (adaptive && hang_policy.dit_ms () > 0.0)
+          int hang_ms = keying.on_key_open (t);
+          if (fixed_hang_set)
             {
-              out << "  dit≈" << qRound (hang_policy.dit_ms ()) << " ms";
+              hang_ms = std::max (0, fixed_hang_ms);
             }
-          out << '\n';
-          out.flush ();
-        }
-
-      // --- hang complete → release
-      if (!key_down && hang_until_ms >= 0 && t >= hang_until_ms)
-        {
-          hang_until_ms = -1;
-          if (band_held)
+          QString const cls = QString::fromUtf8 (keying.class_name ());
+          double const dit = keying.dit_ms ();
+          if (hang_ms <= 0)
             {
-              send (0, false);
-              band_held = false;
-              keepalive.stop ();
+              // Continuous KEY / hang 0: EOT immediately (may be before first keepalive)
+              end_hold (keying.class_name ());
+              keying.reset_transmission ();
               out << QDateTime::currentDateTime ().toString (QStringLiteral ("hh:mm:ss.zzz"))
-                  << "  RELEASE (hang done)\n";
+                  << "  KEY OPEN   hang=0  (" << cls << ")\n";
               out.flush ();
             }
+          else
+            {
+              hang_until_ms = t + hang_ms;
+              out << QDateTime::currentDateTime ().toString (QStringLiteral ("hh:mm:ss.zzz"))
+                  << "  KEY OPEN   hang=" << hang_ms << " ms"
+                  << "  class=" << cls;
+              if (dit > 0.0)
+                {
+                  out << "  dit≈" << qRound (dit) << " ms"
+                      << "  ~" << qRound (1200.0 / dit) << " WPM";
+                }
+              out << '\n';
+              out.flush ();
+            }
+        }
+
+      // --- hang complete → EOT → release hold
+      if (!key_down && hang_until_ms >= 0 && t >= hang_until_ms)
+        {
+          end_hold ("hang done / EOT");
+          keying.reset_transmission ();
         }
     });
   poll.start ();
