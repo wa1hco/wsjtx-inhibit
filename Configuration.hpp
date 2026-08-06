@@ -387,12 +387,12 @@ public:
   // the "Emulate Split" mode requires PTT information to coordinate
   // frequency changes.
   //
-  // When PTT method is DTR or RTS, serial line drive is handled by the
-  // TxInhibitGate thread (RTS/DTR = intent ∧ ¬inhibit). Hamlib is
-  // opened with VOX-style PTT so it does not own the same port.
+  // When PTT method is DTR or RTS, HamlibTransceiver may install a TX
+  // Inhibit pin filter (physical PTT = intent ∧ ¬UDP hold). Sequencing
+  // and CAT remain stock; Configuration does not drive RTS/DTR itself.
   Q_SLOT void transceiver_ptt (bool = true);
 
-  // TX inhibit: true when the gate owns serial PTT for this session.
+  // TX inhibit: true for RTS/DTR seats with an open rig (gate in HamlibTransceiver).
   bool tx_inhibit_gate_active () const;
   // Bound UDP inhibit listen port (0 if not active).
   quint16 tx_inhibit_port () const;

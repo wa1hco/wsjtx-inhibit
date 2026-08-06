@@ -1,5 +1,4 @@
 #include "Configuration.hpp"
-#include "TxInhibit/TxInhibitGate.hpp"
 
 #include <QMetaObject>
 #include <QThread>
@@ -715,14 +714,9 @@ private:
 
   QThread * transceiver_thread_;
 
-  // TX Inhibit gate (serial DTR/RTS PTT path). See docs/TX_INHIBIT.md.
-  TxInhibitGate * tx_inhibit_gate_ {nullptr};
-  QThread * tx_inhibit_thread_ {nullptr};
-  bool tx_inhibit_owns_serial_ {false};
+  // TX Inhibit: pin filter lives inside HamlibTransceiver (do_ptt). See docs/TX_INHIBIT.md.
   quint16 tx_inhibit_port_ {0};
 
-  void start_tx_inhibit_gate (TransceiverFactory::ParameterPack const& pack);
-  void stop_tx_inhibit_gate ();
   TransceiverFactory transceiver_factory_;
   QList<QMetaObject::Connection> rig_connections_;
 
@@ -1265,7 +1259,10 @@ void Configuration::transceiver_ptt (bool on)
 
 bool Configuration::tx_inhibit_gate_active () const
 {
-  return m_->tx_inhibit_owns_serial_;
+  // Active when the seat uses RTS/DTR PTT (HamlibTransceiver installs the gate).
+  return m_->rig_active_
+    && (m_->rig_params_.ptt_type == TransceiverFactory::PTT_method_DTR
+        || m_->rig_params_.ptt_type == TransceiverFactory::PTT_method_RTS);
 }
 
 quint16 Configuration::tx_inhibit_port () const
@@ -2122,71 +2119,9 @@ Configuration::impl::impl (Configuration * self, QNetworkAccessManager * network
 
 Configuration::impl::~impl ()
 {
-  stop_tx_inhibit_gate ();
   transceiver_thread_->quit ();
   transceiver_thread_->wait ();
   write_settings ();
-}
-
-// Start (or reconfigure) the TX Inhibit gate when the operator uses RTS/DTR
-// serial PTT. CAT-PTT seats never take this path — those PTT methods are
-// not line-gated. See docs/TX_INHIBIT.md.
-void Configuration::impl::start_tx_inhibit_gate (TransceiverFactory::ParameterPack const& pack)
-{
-  bool serial_ptt = (pack.ptt_type == TransceiverFactory::PTT_method_DTR
-                     || pack.ptt_type == TransceiverFactory::PTT_method_RTS);
-  if (!serial_ptt)
-    {
-      stop_tx_inhibit_gate ();
-      return;
-    }
-  if (!tx_inhibit_gate_)
-    {
-      // One dedicated thread for the seat lifetime of RTS/DTR use.
-      tx_inhibit_gate_ = TxInhibitGate::create_on_thread (&tx_inhibit_thread_);
-      // Badge / telemetry (GUI thread).
-      connect (tx_inhibit_gate_, &TxInhibitGate::inhibitChanged,
-               this, [this] (bool inhibited, QString const& source) {
-                 Q_EMIT self_->tx_inhibit_changed (inhibited, source);
-               }, Qt::QueuedConnection);
-      // Remember bound port (22372 or ephemeral) for KEY agents / InhibitStatus.
-      connect (tx_inhibit_gate_, &TxInhibitGate::portBound,
-               this, [this] (quint16 port) {
-                 tx_inhibit_port_ = port;
-                 Q_EMIT self_->tx_inhibit_port_changed (port);
-               }, Qt::QueuedConnection);
-      // Serial open / config problems — same channel as rig failures.
-      connect (tx_inhibit_gate_, &TxInhibitGate::lineError,
-               this, [this] (QString const& msg) {
-                 Q_EMIT self_->transceiver_failure (msg);
-               }, Qt::QueuedConnection);
-    }
-  bool use_rts = (pack.ptt_type == TransceiverFactory::PTT_method_RTS);
-  // configure runs on the gate thread (opens COM, binds UDP).
-  QMetaObject::invokeMethod (tx_inhibit_gate_, "configure", Qt::QueuedConnection,
-                             Q_ARG (QString, pack.ptt_port),
-                             Q_ARG (bool, use_rts));
-  // Hamlib must not open this PTT port; we drive it in transceiver_ptt.
-  tx_inhibit_owns_serial_ = true;
-}
-
-void Configuration::impl::stop_tx_inhibit_gate ()
-{
-  if (tx_inhibit_gate_)
-    {
-      // Blocking so PTT is low before we tear down the thread.
-      QMetaObject::invokeMethod (tx_inhibit_gate_, "shutdown", Qt::BlockingQueuedConnection);
-      tx_inhibit_owns_serial_ = false;
-      tx_inhibit_port_ = 0;
-    }
-  if (tx_inhibit_thread_)
-    {
-      tx_inhibit_thread_->quit ();
-      tx_inhibit_thread_->wait ();
-      delete tx_inhibit_thread_;
-      tx_inhibit_thread_ = nullptr;
-      tx_inhibit_gate_ = nullptr; // deleted via deleteLater on thread finish
-    }
 }
 
 void Configuration::impl::initialize_models ()
@@ -5135,29 +5070,13 @@ bool Configuration::impl::open_rig (bool force)
           if (is_tci_ && rig_active_ && tci_audio_) restart_tci_device_ = true;
           close_rig ();
 
-          // PTT split of responsibility when operator chose RTS or DTR:
-          //   • TxInhibitGate opens the PTT serial port and drives the pin
-          //     as (intent ∧ ¬line_inhibited) — see docs/TX_INHIBIT.md.
-          //   • Hamlib still does CAT on its port, but must not open PTT —
-          //     we pass VOX-style PTT into the factory so it leaves the
-          //     key line alone. Audio/sequencer intent still flows through
-          //     transceiver_ptt() → set_intent on the gate.
-          auto hamlib_data = rig_data;
-          if (rig_data.ptt_type == TransceiverFactory::PTT_method_DTR
-              || rig_data.ptt_type == TransceiverFactory::PTT_method_RTS)
-            {
-              start_tx_inhibit_gate (rig_data);
-              hamlib_data.ptt_type = TransceiverFactory::PTT_method_VOX;
-              hamlib_data.ptt_port.clear ();
-            }
-          else
-            {
-              // CAT / VOX PTT: no line gate for this session.
-              stop_tx_inhibit_gate ();
-            }
+          // Stock Hamlib open (including RTS/DTR). TX Inhibit is a pin filter
+          // inside HamlibTransceiver::do_ptt when PTT method is RTS/DTR —
+          // no VOX rewrite, no second serial open. See docs/TX_INHIBIT.md.
+          tx_inhibit_port_ = 0;
 
           // create a new Transceiver object
-          auto rig = transceiver_factory_.create (hamlib_data, transceiver_thread_);
+          auto rig = transceiver_factory_.create (rig_data, transceiver_thread_);
           cached_rig_state_ = Transceiver::TransceiverState {};
 
           // hook up Configuration transceiver control signals to Transceiver slots
@@ -5172,6 +5091,16 @@ bool Configuration::impl::open_rig (bool force)
           rig_connections_ << connect (rig.get (), &Transceiver::resolution, this, [=] (int resolution) {
               rig_resolution_ = resolution;
             });
+          // TX Inhibit badge / KEY-agent port (optional; only RTS/DTR seats emit).
+          rig_connections_ << connect (rig.get (), &Transceiver::tx_inhibit_changed,
+                                       this, [this] (bool inhibited, QString const& source) {
+                                         Q_EMIT self_->tx_inhibit_changed (inhibited, source);
+                                       });
+          rig_connections_ << connect (rig.get (), &Transceiver::tx_inhibit_port_bound,
+                                       this, [this] (quint16 port) {
+                                         tx_inhibit_port_ = port;
+                                         Q_EMIT self_->tx_inhibit_port_changed (port);
+                                       });
           rig_connections_ << connect (rig.get (), &Transceiver::tciframeswritten, this, &Configuration::impl::handle_transceiver_tciframeswritten);
           rig_connections_ << connect (rig.get (), &Transceiver::tci_mod_active, this, &Configuration::impl::handle_transceiver_tci_mod_active);
           rig_connections_ << connect (rig.get (), &Transceiver::update, this, &Configuration::impl::handle_transceiver_update);
@@ -5294,17 +5223,8 @@ void Configuration::impl::transceiver_ptt (bool on)
   cached_rig_state_.online (true); // we want the rig online
   set_cached_mode ();
   cached_rig_state_.ptt (on);
-  // When the gate owns serial PTT: push TX intent to the gate thread.
-  // Intent is always stored there; physical RTS/DTR stays low while a KEY
-  // agent hold is active. Sequencer/audio are unchanged.
-  // We still emit set_transceiver below for CAT/split bookkeeping (hamlib
-  // was given VOX PTT so it does not fight the gate for the key line).
-  if (tx_inhibit_owns_serial_ && tx_inhibit_gate_)
-    {
-      QMetaObject::invokeMethod (tx_inhibit_gate_, "set_intent", Qt::QueuedConnection,
-                                 Q_ARG (bool, on));
-    }
-  // qDebug () << "Configuration::impl::transceiver_ptt: n:" << transceiver_command_number_ + 1 << "on:" << on;
+  // Stock path only. TX Inhibit (if any) filters inside HamlibTransceiver::do_ptt
+  // after Fake It QSY — Configuration does not own PTT or hold state.
   LOG_TRACE ("emitting set_transceiver: requested state:" << cached_rig_state_);
   Q_EMIT set_transceiver (cached_rig_state_, ++transceiver_command_number_);
 }
@@ -5565,7 +5485,7 @@ void Configuration::impl::close_rig ()
       rig_connections_.clear ();
       rig_active_ = false;
     }
-  stop_tx_inhibit_gate ();
+  tx_inhibit_port_ = 0;
 }
 
 // find the audio device that matches the specified name, also

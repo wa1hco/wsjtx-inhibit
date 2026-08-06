@@ -178,6 +178,13 @@ public:
     return inhibited (now_ms);
   }
 
+  // Pin formula used by the gate (unit-test friendly).
+  // radiate = intent && !line_inhibited(now)
+  bool radiate (bool intent, qint64 now_ms)
+  {
+    return intent && !line_inhibited (now_ms);
+  }
+
   // Status-bar text; empty string means "not inhibited" (hide the badge).
   QString badge_text (qint64 now_ms)
   {

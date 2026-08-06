@@ -71,9 +71,19 @@ Many modern contest/digital radios expose **one USB cable** that provides:
 - the same port’s **RTS** and/or **DTR** modem lines, which the radio can map to **PTT / CW / FSK**.
 
 **Shared COM is a valid configuration.** Operators routinely run CAT and RTS/DTR
-PTT on that one port (especially Icom, Elecraft, and many Yaesu USB rigs). N1MM
-and similar loggers document that **CAT control and DTR/RTS PTT on one port are
-compatible** when the radio is **not** using RTS for hardware handshaking.
+PTT on that one port (especially Icom, Elecraft, Digirig, and many Yaesu USB
+rigs). N1MM and similar loggers document that **CAT control and DTR/RTS PTT on
+one port are compatible** when the radio is **not** using RTS for hardware
+handshaking.
+
+**Implementation note (wsjtx-inhibit):** the gate does **not** open the serial
+port. Hamlib owns CAT and RTS/DTR as stock (shared COM uses one fd). Inhibit
+is a **pin filter** inside `HamlibTransceiver::do_ptt`:
+
+`physical PTT = software intent ∧ ¬UDP hold`
+
+Hold is private to the gate (UDP KEY agent + deadman). Main sequencing and
+Fake It are unchanged.
 
 They also commonly use **CAT PTT only** (no RTS/DTR) for casual FT8, or a
 **second path** (WinKeyer, ACC jack, DigiRig, dedicated USB-serial) when several

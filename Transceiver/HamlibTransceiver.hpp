@@ -7,6 +7,8 @@
 #include "PollingTransceiver.hpp"
 #include "pimpl_h.hpp"
 
+class TxInhibitGate;
+
 // hamlib transceiver and PTT mostly delegated directly to hamlib Rig class
 class HamlibTransceiver final
   : public PollingTransceiver
@@ -35,10 +37,18 @@ private:
 
   void do_poll () override;
 
+  // Actual Hamlib pin/CAT PTT (used by stock path and by the inhibit gate).
+  void apply_physical_ptt (bool radiate);
+  void start_tx_inhibit_gate ();
+  void stop_tx_inhibit_gate ();
+
   bool ptt_on_ = false;
   bool do_pwr_;
   bool do_pwr2_;
   bool do_swr_;
+  // True when operator chose RTS/DTR — enable optional TX Inhibit pin filter.
+  bool use_tx_inhibit_ = false;
+  TxInhibitGate * inhibit_gate_ = nullptr;
 
   class impl;
   pimpl<impl> m_;

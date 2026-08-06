@@ -2,22 +2,19 @@
 #define TX_INHIBIT_GATE_HPP__
 
 // ---------------------------------------------------------------------------
-// TX Inhibit gate — I/O thread
+// TX Inhibit gate — pin filter for RTS/DTR PTT
 //
-// Owns the seat's serial PTT (RTS or DTR) and combines:
-//   • TX intent from WSJT-X (sequencer / Test PTT)
-//   • UDP holds from a KEY agent (or inhibit-spacebar / send_inhibit_hold.py)
+// Concept (intentionally small):
 //
-// Physical line:
-//   RTS or DTR  =  intent  ∧  ¬ inhibited(UDP hold)
+//   physical PTT  =  WSJT-X intent  ∧  ¬ UDP hold
 //
-// KEY sense and hang live in the KEY agent (UDP). The gate opens RTS/DTR only.
-// (A future optional Settings-gated CTS path would be opt-in; default is UDP.)
+// • Intent arrives only from HamlibTransceiver::do_ptt() via set_intent().
+// • Hold state is private (UDP KEY agent + deadman timer).
+// • This class does NOT open a serial port. Hamlib owns CAT and RTS/DTR;
+//   the gate only decides whether rig_set_ptt may assert the line.
 //
-// WSJT-X audio and FT8 sequencing continue; the gate only holds the PTT pin.
-//
-// Lives on its own QThread (see create_on_thread). Public slots are the
-// cross-thread API (QueuedConnection from Configuration / GUI).
+// Lives as a child of HamlibTransceiver on the transceiver thread so
+// set_intent and pin apply share that thread (stock CAT/Fake It order).
 //
 // Design authority: docs/TX_INHIBIT.md
 // SPDX-License-Identifier: GPL-3.0-or-later
@@ -25,13 +22,11 @@
 
 #include <QObject>
 #include <QString>
-#include <QSerialPort>
 
 #include "TxInhibitLogic.hpp"
 
 class QUdpSocket;
 class QTimer;
-class QThread;
 
 class TxInhibitGate
   : public QObject
@@ -39,68 +34,58 @@ class TxInhibitGate
   Q_OBJECT
 
 public:
-  // Which modem output pin keys the radio (matches Settings → PTT method).
-  enum class Line { RTS, DTR };
-
   explicit TxInhibitGate (QObject * parent = nullptr);
   ~TxInhibitGate () override;
 
-  // Create gate + QThread, move gate onto the thread, start it.
-  // Returns the worker (owned by the thread; deleted on thread finish).
-  // *out_thread receives the thread pointer for quit/wait/delete by Configuration.
-  static TxInhibitGate * create_on_thread (QThread ** out_thread);
-
 public slots:
-  // (Re)open the serial PTT port and choose RTS vs DTR.
-  // port_name: real device (may match CAT COM for shared USB RTS/DTR).
-  // Empty / "None" / list entry "CAT" → UDP listener only until a real port is set.
-  void configure (QString const& port_name, bool use_rts /* else DTR */);
+  // Bind UDP + start deadman timer (call once after construction on the
+  // transceiver thread).
+  void start_listening ();
 
-  // WSJT-X TX intent. Always stored; physical pin stays low during a UDP hold.
-  // Sequencing and audio keep running; only the PTT pin is gated.
+  // WSJT-X TX intent from do_ptt(on). Does not take "hold" as an argument;
+  // hold is private. Physical line is driven via physicalPtt(radiate).
   void set_intent (bool on);
 
-  // Deassert PTT, close serial + UDP, stop timer (settings change / shutdown).
-  void shutdown ();
+  // Force intent off, stop UDP/timer (rig close / shutdown).
+  // If emit_pin is false, do not request a physical PTT change (caller already
+  // closed Hamlib or will set the pin itself). Safe to call more than once.
+  void shutdown (bool emit_pin = true);
 
-  // When true, on_udp_ready skips KEY-agent packets (future UI test hold).
+  // When true, ignore KEY-agent UDP (future UI test hold).
   void set_hold_test (bool hold);
 
 signals:
-  // Queued to GUI: show/hide status-bar badge.
-  // inhibited = UDP hold active; source = badge text (empty when open).
+  // Ask HamlibTransceiver to call rig_set_ptt (radiate true/false).
+  // Same thread (DirectConnection) when parent is HamlibTransceiver.
+  void physicalPtt (bool radiate);
+
+  // Queued to GUI: status-bar badge.
   void inhibitChanged (bool inhibited, QString const& source);
 
-  // Actual bound UDP port after ensure_udp (22372 or ephemeral).
+  // Bound UDP port (22372 or ephemeral).
   void portBound (quint16 port);
 
-  // Operator-visible serial / config problems (surfaced as transceiver_failure).
+  // Operator-visible problems (UDP bind, etc.).
   void lineError (QString const& message);
 
 private slots:
-  // Hot path: KEY-agent packets → GateLogic → apply_line (event-driven).
   void on_udp_ready ();
-  void on_serial_error (QSerialPort::SerialPortError);
-  // 50 Hz: UDP deadman expiry + re-apply line + badge.
   void tick ();
 
 private:
   void ensure_udp ();
-  // Drive RTS/DTR from intent_ and UDP hold (line_inhibited).
   void apply_line ();
-  // Emit inhibitChanged when hold level or badge text changes.
   void emit_state_if_changed ();
   qint64 now_ms () const;
 
   TxInhibit::GateLogic logic_;
   QUdpSocket * udp_ {nullptr};
-  QSerialPort * serial_ {nullptr};
   QTimer * timer_ {nullptr};
-  QString port_name_;
-  Line line_ {Line::RTS};
-  bool intent_ {false};          // last set_intent from WSJT-X
-  bool hold_test_ {false};       // if true, ignore UDP (see set_hold_test)
+  bool intent_ {false};
+  bool hold_test_ {false};
+  bool last_radiate_ {false};
   bool last_emitted_inhibited_ {false};
+  bool stopped_ {false};         // after shutdown: no further pin emits
   QString last_badge_;
   quint16 bound_port_ {0};
 };
