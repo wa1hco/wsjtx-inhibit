@@ -998,10 +998,22 @@ series — ideally 3–5 commits (core logic + tests; transceiver integration; s
 UI; UDP status message), or a single squashed commit. Do **not** rebase this fork's
 history; author the patch deliberately.
 
-#### ⊘ U5. The Windows `\\.\COM` change — **do not ship; it breaks CAT**
+#### ☐ U5. The Windows `\\.\COM` change — redundant, not harmful *(claim retracted)*
 
-**Status: superseded. Original reading was wrong. There is no WSJT-X COM10+ bug.**
-The real defect is in Hamlib — see U6.
+**Status: the breakage claim is RETRACTED — disproved on Windows 2026-08-09.**
+
+Two successive corrections, both recorded here so the reasoning trail is honest:
+
+1. *First reading* — "WSJT-X has a COM10+ CAT bug; this hunk fixes it."
+   **Wrong:** Hamlib's `win32_serial_open()` already applies the prefix idempotently.
+2. *Second reading* — "the hunk breaks CAT on every COM port via the unguarded
+   `check_com_port_in_use()`." **Also wrong:** Windows normalizes `\\.\` paths, so the
+   doubled prefix canonicalises back to the same device. Measured, not argued —
+   see U6 and `docs/verification/u5-u6-windows-2026-08-09/`.
+
+**Where that leaves the hunk: harmless and redundant.** It does not fix a bug (Hamlib
+already handles COM10+) and it does not cause one (the double prefix normalizes away).
+It is a no-op.
 
 **What was in the working tree (2026-08-09), saved to
 `scratchpad/wsjtx-com-path.patch`:** two hunks in `Transceiver/HamlibTransceiver.cpp` —
@@ -1043,15 +1055,32 @@ the guard always takes the branch upstream already took. It only diverges for
 non-`COM*` port names, where it silently stops prefixing — a small behaviour
 regression with no upside.
 
-**Action:** revert both hunks —
-`git checkout -- Transceiver/HamlibTransceiver.cpp`. Patch preserved in scratchpad.
+**Action — now a judgement call, not a blocker.** The recommendation to drop it
+stands, but on much weaker grounds: it is a no-op change to an upstream-owned file, so
+it costs a rebase conflict site (§H.1) and one more hunk to strip at merge-back, for
+no behavioural benefit. If you prefer belt-and-braces against some future Hamlib that
+stops prefixing, keeping it is defensible — just mark it `FORK-ONLY` (§H.3).
 
-#### ☐ U6. Hamlib `check_com_port_in_use()` is not idempotent — a real upstream PR
+The change is stashed (`git stash list` → "U5 com-path change (do not ship)" — the
+stash message is now misleading) and also saved as
+`docs/patches/wsjtx-com-path-DO-NOT-APPLY.patch`. Both should be renamed or dropped
+once you decide; the "DO-NOT-APPLY" filename no longer reflects reality.
+
+**Still unexplained:** if a real COM-port symptom originally motivated this change, it
+has not been accounted for — Hamlib handles COM10+ and the prefix is inert. Worth
+recalling what the original symptom was, because the actual cause is still unknown.
+
+#### ⊘ U6. Hamlib `check_com_port_in_use()` is not idempotent — cosmetic, not a bug
 
 **Not a WSJT-X change.** Within the same library, `win32_serial_open()`
 (`lib/termios.c:1368`) guards the `\\.\` prefix and `check_com_port_in_use()`
 (`src/serial.c:175`) does not. Any caller passing an already-extended path is rejected
 before the open is attempted.
+
+**Measured outcome: no functional impact.** See the "Why the double prefix is
+harmless" subsection below — Windows normalizes `\\.\` paths, so the doubled string
+resolves to the same device. What follows was the original (incorrect) reasoning,
+retained for the trail.
 
 **WSJT-X is such a caller today**: upstream sets `ptt_pathname` to `"\\\\.\\" + ptt_port`
 unconditionally on WIN32 (`HamlibTransceiver.cpp:572-575`). The PTT port is opened via
@@ -1080,10 +1109,43 @@ Full report: [`docs/verification/u5-u6-windows-2026-08-09/REPORT.md`](verificati
 | Dummy model `-m 1` | Does **not** open serial; useless for this test (use a serial model e.g. IC-7300) |
 | U5 DO-NOT-APPLY rebuild | Not run; open already succeeds with extended path here |
 
-**Revised takeaway:** the non-idempotent prefix is real in Hamlib source and still
-worth an optional clean-up PR to `Hamlib/Hamlib`, but it is **not** a demonstrated
-CAT open failure on this host. Do **not** treat U6 as an rc2 blocker. Re-test with a
-USB-serial CAT cable if driver path handling differs from motherboard COM1.
+**Revised takeaway:** the non-idempotent prefix is real in Hamlib source, but it is
+**not** a functional bug. Do **not** treat U6 as an rc2 blocker.
+
+### Why the double prefix is harmless (the mechanism the original analysis missed)
+
+`\\.\` is the Win32 **device namespace** prefix, and — unlike `\\?\` — paths using it
+are still **normalized** before the object manager resolves them. Normalization
+collapses duplicate separators and drops `.` components:
+
+```text
+\\.\\\.\COM1     device prefix "\\.\"  +  remainder "\\.\COM1"
+                 -> collapse duplicate "\\", drop the "." component
+                 -> \??\COM1          (identical to the single-prefix result)
+```
+
+`\\?\` is the only prefix that bypasses normalization. Hamlib uses `\\.\`, so the
+doubled path canonicalises back to the correct device. That is exactly what the probe
+shows.
+
+**The control row is what makes this conclusive.** `COM99` (a port that does not
+exist) fails with `err=2` under *both* the single and double prefix. So the failure
+mode observed is "no such device", never "malformed path" — the prefix count simply
+does not affect the outcome in either direction.
+
+**This generalises beyond the tested host — no USB re-test needed.** Normalization
+happens in `ntdll` when the Win32 path is converted to an NT path, *before* the object
+manager resolves the device name. The serial driver is handed a device object and
+never sees the string at all, so FTDI / USB-CDC / motherboard UART cannot differ on
+this point. The report's caveat about re-testing with a USB CAT cable is
+over-cautious; the negative result is structural, not host-specific.
+
+**Strategic reversal.** This was previously recommended as an easy first PR to
+`Hamlib/Hamlib` to establish credibility before proposing TX Inhibit. **Withdraw
+that.** A patch that fixes no observable behaviour, submitted as a bug fix, spends
+maintainer attention and buys nothing. If sent at all it should be framed honestly as
+a defensive-consistency cleanup between two functions in the same file — low value,
+easily declined. Better to find a real first contribution.
 
 **If a hard fail ever reproduces on another machine:** still goes to
 `Hamlib/Hamlib`, not `WSJTX/wsjtx`.
@@ -1127,7 +1189,8 @@ git apply docs\patches\wsjtx-com-path-DO-NOT-APPLY.patch
 Rebuild, then try to open **any** serial CAT rig — `COM3` is fine, it does not need to
 be COM10+.
 
-*Expected:* rig fails to open. WSJT-X reports a Hamlib error; the Hamlib log shows
+*Expected (as of 2026-08-09: **this did not happen** — kept only if you want to
+re-confirm on different hardware):* rig fails to open, Hamlib log shows
 
 ```
 serial_open: serial port \\.\COM3 does not exist
@@ -1143,7 +1206,9 @@ entire analysis was reasoned from source and never executed.
 
 Then revert: `git checkout -- Transceiver/HamlibTransceiver.cpp`
 
-**Step 3 — U6 independent of WSJT-X.** Prove the Hamlib bug without WSJT-X at all.
+**Step 3 — U6 independent of WSJT-X.** *(Run 2026-08-09: both invocations
+succeeded. The steps below remain valid as a procedure.)* Test the Hamlib path
+handling without WSJT-X at all.
 **Do not use Dummy (`-m 1`)** — it never calls `serial_open`. Use any serial model
 (e.g. IC-7300 `-m 3073`). High verbosity shows the open line:
 
