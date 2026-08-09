@@ -770,14 +770,17 @@ main event rather than an afterthought.
 - Port names reach WSJT-X as bare `COMn` (`Configuration.cpp:5790-5801`).
 
 **Inferred from code reading, not executed:**
-- U5 / U6 runtime behaviour on Windows. The `CreateFileA("\\.\\\.\COMn")` failure and
-  the resulting `-RIG_EIO` are deduced from the call chain, not observed. Pending
-  Jeff's VM verification (see U6).
 - C1 clock-step behaviour (reasoned from the absolute-epoch comparison).
 - C2 crash path (reasoned from `error_check` throwing + no `try` in the slot chain +
   `ExceptionCatchingApplication::notify` calling `qFatal`).
 - R3 NSIS default path (derived from the CPack variable chain, not from running the
   installer). **Worth confirming in a VM before acting.**
+
+**Executed on Windows (2026-08-09) — see U6 update and
+`docs/verification/u5-u6-windows-2026-08-09/REPORT.md`:**
+- U5 / U6 hard-fail claim (`CreateFileA` on double-prefixed path → `-RIG_EIO`) did
+  **not** reproduce on Win 10.0.26200 + Hamlib 4.7.1 + motherboard COM1. Double
+  prefix is real in source; CreateFile still opens.
 
 ---
 
@@ -1064,18 +1067,26 @@ guard as `win32_serial_open()`. Uses `strncmp` rather than the sibling's `memcmp
 which reads a fixed 4 bytes and would run past the terminator on a port name shorter
 than 4 characters.
 
-**Status: UNVERIFIED — reasoned from source on Linux, not reproduced.**
+**Status: VERIFIED (negative on hard-fail) — 2026-08-09 Windows.**
 
-**Verify in the Windows VM (Jeff, pending):**
-1. Stock WSJT-X + Hamlib 4.7.1, **separate PTT COM port** (`ptt_port != serial_port`).
-   Does the rig open? Per the trace it should — `ser_open` is idempotent.
-2. Apply hunk (1) from U5 and confirm CAT then fails to open on *any* COM port. That
-   is the direct proof of the U5 breakage.
-3. For U6 proper, exercise a Hamlib caller that passes `\\.\COMn` as `rig_pathname`
-   (e.g. `rigctl -r "\\.\COM3"`) and confirm `-RIG_EIO` / "does not exist".
+Full report: [`docs/verification/u5-u6-windows-2026-08-09/REPORT.md`](verification/u5-u6-windows-2026-08-09/REPORT.md).
 
-**If it reproduces:** goes to `Hamlib/Hamlib`, not `WSJTX/wsjtx`. Read their
-contribution conventions first — not reviewed here.
+| Check | Result |
+|---|---|
+| `rigctl -V` | Hamlib **4.7.1** `2026-04-15T20:20:01Z` SHA=`d042479` (WSJT-X bundled) |
+| bare `COM1` via `serial_open` | **OK** |
+| `\\.\COM1` via `serial_open` | **OK** — expected fail did **not** happen |
+| CreateFile probe of unguarded double-prefix `\\.\\\.\COM1` | **OK** on Win 10.0.26200 |
+| Dummy model `-m 1` | Does **not** open serial; useless for this test (use a serial model e.g. IC-7300) |
+| U5 DO-NOT-APPLY rebuild | Not run; open already succeeds with extended path here |
+
+**Revised takeaway:** the non-idempotent prefix is real in Hamlib source and still
+worth an optional clean-up PR to `Hamlib/Hamlib`, but it is **not** a demonstrated
+CAT open failure on this host. Do **not** treat U6 as an rc2 blocker. Re-test with a
+USB-serial CAT cable if driver path handling differs from motherboard COM1.
+
+**If a hard fail ever reproduces on another machine:** still goes to
+`Hamlib/Hamlib`, not `WSJTX/wsjtx`.
 
 ---
 
@@ -1132,15 +1143,21 @@ entire analysis was reasoned from source and never executed.
 
 Then revert: `git checkout -- Transceiver/HamlibTransceiver.cpp`
 
-**Step 3 — U6 independent of WSJT-X.** Prove the Hamlib bug without WSJT-X at all:
+**Step 3 — U6 independent of WSJT-X.** Prove the Hamlib bug without WSJT-X at all.
+**Do not use Dummy (`-m 1`)** — it never calls `serial_open`. Use any serial model
+(e.g. IC-7300 `-m 3073`). High verbosity shows the open line:
 
 ```bat
-rigctl -m 1 -r "\\.\COM3" -v
-rigctl -m 1 -r COM3 -v
+rigctl -m 3073 -r "\\.\COM1" -vvvvv f
+rigctl -m 3073 -r COM1 -vvvvv f
 ```
 
-*Expected:* the first fails ("does not exist"), the second works. Same physical port,
-only the prefix differs. That is `check_com_port_in_use()` double-prefixing.
+Look for `serial_open: serial port … is OK` vs `does not exist`.
+
+*Original expected:* the first fails ("does not exist"), the second works.
+
+*Observed 2026-08-09 (COM1, Win 10.0.26200, Hamlib 4.7.1):* **both OK**. See
+`docs/verification/u5-u6-windows-2026-08-09/`.
 
 **Step 4 — confirm the fix.** Rebuild Hamlib with
 `docs/patches/hamlib-check-com-port-idempotent.patch` applied, then repeat step 3.
