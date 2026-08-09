@@ -2092,7 +2092,15 @@ endif ()
 #
 set (CPACK_PACKAGE_DESCRIPTION_FILE "${CMAKE_SOURCE_DIR}/package_description.txt")
 set (CPACK_MONOLITHIC_INSTALL 1)
-set (CPACK_PACKAGE_NAME "${CMAKE_PROJECT_NAME}")
+# ---- FORK-ONLY (wsjtx-inhibit): drop this hunk when rebasing for an upstream PR ----
+# Package identity is deliberately distinct from stock WSJT-X so this fork can be
+# installed beside an official release without sharing an install directory or an
+# uninstall entry. The *project* name stays "wsjtx" so runtime data paths
+# (share/wsjtx, ...) are unchanged; only the package identity differs.
+# Release stage (-devel / -rcN / GA) is carried in the version by set_build_type(),
+# NOT in this name. See docs/REVIEW-rc2.md R3/R5/D11.
+set (CPACK_PACKAGE_NAME "wsjtx-inhibit")
+# ---- end FORK-ONLY ----
 set (CPACK_PACKAGE_VERSION_MAJOR ${PROJECT_VERSION_MAJOR})
 set (CPACK_PACKAGE_VERSION_MINOR ${PROJECT_VERSION_MINOR})
 set (CPACK_PACKAGE_VERSION_PATCH "${PROJECT_VERSION_PATCH}${BUILD_TYPE_REVISION}")
@@ -2135,9 +2143,14 @@ set (CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
 # `wsjtx-doc`, `wsjtx-improved-data`, and `wsjtx-improved-doc` binary packages
 # so installing this .deb on a system carrying any of them doesn't fail with a
 # file conflict and doesn't cascade-remove `js8call` or other consumers.
-set (CPACK_DEBIAN_PACKAGE_PROVIDES "wsjtx-data (= ${wsjtx_VERSION}), wsjtx-doc (= ${wsjtx_VERSION}), wsjtx-improved-data (= ${wsjtx_VERSION}), wsjtx-improved-doc (= ${wsjtx_VERSION})")
-set (CPACK_DEBIAN_PACKAGE_REPLACES "wsjtx-data, wsjtx-doc, wsjtx-improved-data, wsjtx-improved-doc")
-set (CPACK_DEBIAN_PACKAGE_CONFLICTS "wsjtx-data (<< ${wsjtx_VERSION}), wsjtx-doc (<< ${wsjtx_VERSION}), wsjtx-improved-data (<< ${wsjtx_VERSION}), wsjtx-improved-doc (<< ${wsjtx_VERSION})")
+# FORK-ONLY addition to each list: plain "wsjtx". Because CPACK_PACKAGE_NAME is now
+# "wsjtx-inhibit", this .deb no longer implicitly supersedes the distro/official
+# "wsjtx" package, yet it still ships /usr/bin/wsjtx and would file-conflict with it.
+# Declaring Provides/Replaces/Conflicts on "wsjtx" restores the old behaviour under
+# the new package name. Drop the "wsjtx" entries when rebasing for an upstream PR.
+set (CPACK_DEBIAN_PACKAGE_PROVIDES "wsjtx (= ${wsjtx_VERSION}), wsjtx-data (= ${wsjtx_VERSION}), wsjtx-doc (= ${wsjtx_VERSION}), wsjtx-improved-data (= ${wsjtx_VERSION}), wsjtx-improved-doc (= ${wsjtx_VERSION})")
+set (CPACK_DEBIAN_PACKAGE_REPLACES "wsjtx, wsjtx-data, wsjtx-doc, wsjtx-improved-data, wsjtx-improved-doc")
+set (CPACK_DEBIAN_PACKAGE_CONFLICTS "wsjtx (<< ${wsjtx_VERSION}), wsjtx-data (<< ${wsjtx_VERSION}), wsjtx-doc (<< ${wsjtx_VERSION}), wsjtx-improved-data (<< ${wsjtx_VERSION}), wsjtx-improved-doc (<< ${wsjtx_VERSION})")
 
 set (CPACK_RPM_PACKAGE_ARCHITECTURE ${CMAKE_SYSTEM_PROCESSOR})
 set (CPACK_RPM_PACKAGE_REQUIRES "qt5-qtbase >= 5.9, qt5-qtserialport >= 5.9, qt5-qtmultimedia >= 5.9, qt5-qtwebsockets >= 5.9, qt5-qtsvg >= 5.9, libusbx >= 1.0.22, libgfortran >= 7, libgomp >= 7, fftw-libs-single >= 3.3, boost-log >= 1.62")

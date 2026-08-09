@@ -30,6 +30,8 @@ jobs:
     outputs:
       version: ${{ steps.v.outputs.version }}
       tag: ${{ steps.v.outputs.tag }}
+      release_channel: ${{ steps.v.outputs.release_channel }}
+      rc_number: ${{ steps.v.outputs.rc_number }}
     steps:
       - uses: actions/checkout@v6
       - id: v
@@ -52,9 +54,29 @@ jobs:
             fi
             TAG="packages/v${VER}"
           fi
-          echo "version=$VER" >> "$GITHUB_OUTPUT"
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "Tester package version=$VER tag=$TAG"
+          # Derive the build release channel from the version suffix so the
+          # version compiled into the binary matches the version in the file
+          # name. Without this the channel was hardcoded DEVEL and a
+          # "packages/v3.0.2-rc2" tag produced a file called
+          # "...-3.0.2-rc2-win64.exe" whose Help -> About read "3.0.2-devel".
+          # Tester packages are always published as prereleases, so a bare
+          # X.Y.Z maps to DEVEL rather than GA; use release.yml (build/v*)
+          # for real GA/RC releases.
+          if [[ "$VER" =~ ^[0-9]+\.[0-9]+\.[0-9]+-rc([1-9][0-9]*)$ ]]; then
+            RELEASE_CHANNEL=RC
+            RC_NUMBER="${BASH_REMATCH[1]}"
+          else
+            RELEASE_CHANNEL=DEVEL
+            RC_NUMBER=""
+          fi
+
+          {
+            echo "version=$VER"
+            echo "tag=$TAG"
+            echo "release_channel=$RELEASE_CHANNEL"
+            echo "rc_number=$RC_NUMBER"
+          } >> "$GITHUB_OUTPUT"
+          echo "Tester package version=$VER tag=$TAG channel=$RELEASE_CHANNEL rc=$RC_NUMBER"
 
   linux:
     needs: prepare
@@ -63,7 +85,8 @@ jobs:
       version: ${{ needs.prepare.outputs.version }}
       hamlib_branch: "4.7.1"
       arch: "x86_64"
-      release_channel: "DEVEL"
+      release_channel: ${{ needs.prepare.outputs.release_channel }}
+      rc_number: ${{ needs.prepare.outputs.rc_number }}
     secrets: inherit
 
   windows:
@@ -72,7 +95,8 @@ jobs:
     with:
       version: ${{ needs.prepare.outputs.version }}
       hamlib_branch: "4.7.1"
-      release_channel: "DEVEL"
+      release_channel: ${{ needs.prepare.outputs.release_channel }}
+      rc_number: ${{ needs.prepare.outputs.rc_number }}
     secrets: inherit
 
   publish:

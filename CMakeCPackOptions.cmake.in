@@ -6,6 +6,11 @@ set (CPACK_PACKAGE_VENDOR "@PROJECT_VENDOR@")
 set (CPACK_PACKAGE_CONTACT "@PROJECT_CONTACT@")
 set (CPACK_RESOURCE_FILE_LICENSE "@PROJECT_SOURCE_DIR@/COPYING")
 set (CPACK_PACKAGE_INSTALL_DIRECTORY ${CPACK_PACKAGE_NAME})
+# FORK-ONLY: pin the uninstall registry key to the package name so successive
+# release candidates upgrade one Add/Remove Programs entry in place instead of
+# accumulating one entry per RC (CMake's default is "<name> <version>", which
+# leaves rc1/rc2/... entries all pointing at the same directory).
+set (CPACK_PACKAGE_INSTALL_REGISTRY_KEY ${CPACK_PACKAGE_NAME})
 set (CPACK_PACKAGE_EXECUTABLES
   wsjtx "@PROJECT_NAME@"
   inhibit-test-gui "TX Inhibit KEY tester (GUI)"
@@ -40,7 +45,9 @@ if (CPACK_GENERATOR MATCHES "NSIS")
   # Use the icon from wsjtx for add-remove programs
   set (CPACK_NSIS_INSTALLED_ICON_NAME "bin\\\\wsjtx.exe")
 
-  set (CPACK_NSIS_DISPLAY_NAME "${CPACK_PACKAGE_DESCRIPTION_SUMMARY}")
+  # FORK-ONLY: must differ from stock WSJT-X's summary string, otherwise this fork
+  # is indistinguishable from an official install in Add/Remove Programs.
+  set (CPACK_NSIS_DISPLAY_NAME "wsjtx-inhibit (WSJT-X with TX Inhibit)")
   set (CPACK_NSIS_HELP_LINK "@PROJECT_MANUAL_DIRECTORY_URL@/@PROJECT_MANUAL@")
   set (CPACK_NSIS_URL_INFO_ABOUT "@PROJECT_HOMEPAGE@")
   set (CPACK_NSIS_CONTACT "${CPACK_PACKAGE_CONTACT}")
