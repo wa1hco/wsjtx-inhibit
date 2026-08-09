@@ -10,15 +10,15 @@ You do **not** need Microsoft Visual Studio, MSYS2, or anything called “NSIS.�
 ## Where do I get the program?
 
 1. Open **[Releases](https://github.com/wa1hco/wsjtx-inhibit/releases)**.
-2. Open the release you were asked to test (for example **[wsjtx-inhibit-rc1](https://github.com/wa1hco/wsjtx-inhibit/releases/tag/wsjtx-inhibit-rc1)**).
+2. Open the release you were asked to test.
 3. Use the download links in the release notes, or expand **Assets** if needed (same files).
 
 ### Which file do I download?
 
 | File | Meaning | What you do |
 |------|---------|-------------|
-| **`…-win64.exe`** (e.g. `wsjtx-inhibit-rc1-win64.exe`) | Windows **installer** (recommended) | Download → double-click → Next, Next, Finish |
-| **`…-windows-x86_64.zip`** (e.g. `wsjtx-inhibit-rc1-windows-x86_64.zip`) | **Portable** copy (no installer) | Download → unzip → run `bin\wsjtx.exe` |
+| **`wsjtx-inhibit-<version>-win64.exe`** | Windows **installer** (recommended) | Download → double-click → Next, Next, Finish |
+| **`wsjtx-inhibit-<version>-windows-x86_64.zip`** | **Portable** copy (no installer) | Download → unzip → run `bin\wsjtx.exe` |
 
 The **`.exe`** is the setup program itself (built with a packaging tool on the maintainers’ side). Treat it like any other Windows installer.
 
@@ -39,7 +39,7 @@ Use another release that lists a `-win64.exe` or Windows `.zip`, or contact the 
    - Click **Run anyway**  
    - Only do this if you trust **this** GitHub project (`wa1hco/wsjtx-inhibit`).
 6. Follow the installer screens.  
-   Default location is often under **`C:\WSJT\`** (for example `C:\WSJT\wsjtx` or similar).
+   Default location is **`C:\WSJT\wsjtx-inhibit`** (changeable in the wizard). Deliberately *not* `C:\WSJT\wsjtx`, where official WSJT-X installs.
 7. When finished, start the program:
    - From the **Start** menu (shortcut the installer created),  
    - From a **desktop** shortcut if the installer offered one, or  
@@ -49,15 +49,38 @@ Use another release that lists a `-win64.exe` or Windows `.zip`, or contact the 
 
 | Item | Result |
 |------|--------|
-| Program files | Under `C:\WSJT\…` (path is choosable in the wizard) |
+| Program files | Under `C:\WSJT\wsjtx-inhibit\` (path is choosable in the wizard) |
 | Start menu | Launch shortcut, documentation/site links, Uninstall |
 | Desktop | Optional app shortcut when that option is enabled |
 | Finish page | Option to launch the app when setup completes |
-| Windows apps list | Uninstaller entry for this install |
+| Windows apps list | Entry named **wsjtx-inhibit (WSJT-X with TX Inhibit)**, separate from official WSJT-X |
 
 ### Can I keep official WSJT-X installed?
 
-Yes. Prefer side-by-side installs. For testing, always launch **this** build’s Start-menu entry or `wsjtx.exe`. Use one program at a time on a given radio and COM ports.
+**Yes — but read this before you do.**
+
+**Program files are separate.** This build installs to `C:\WSJT\wsjtx-inhibit\`, official WSJT-X installs to `C:\WSJT\wsjtx\`. They do not overwrite each other, and each gets its own entry in Add/Remove Programs (this one is listed as **wsjtx-inhibit (WSJT-X with TX Inhibit)**).
+
+**Settings and logs are NOT separate.** Both programs read and write the *same* configuration, in `%LOCALAPPDATA%\WSJT-X\`:
+
+- `WSJT-X.ini` — callsign, grid, rig, COM ports, audio devices, **and the new Enable TX Inhibit checkbox**
+- `ALL.TXT`, `wsjtx_log.adi` — decode and QSO logs
+
+So if you change a setting here, official WSJT-X sees it too, and vice versa.
+
+**Recommended: give this build its own settings.** Launch it with `--rig-name`:
+
+1. Right-click the Start-menu shortcut → **More** → **Open file location**
+2. Right-click the shortcut → **Properties**
+3. In **Target**, add ` --rig-name inhibit` at the end, after the closing quote:
+   ```text
+   "C:\WSJT\wsjtx-inhibit\bin\wsjtx.exe" --rig-name inhibit
+   ```
+4. **OK**, then launch from that shortcut.
+
+That creates a separate `WSJT-X - inhibit.ini`, leaving your working WSJT-X configuration untouched. You will need to re-enter callsign, rig, and audio settings once — that is the point.
+
+Use one program at a time on a given radio and COM ports.
 
 ---
 
@@ -101,7 +124,7 @@ Click **OK**. Try receive first, then a careful TX test (dummy load recommended)
    - A **separate** PTT COM is also fine if you use an external keyline adapter.
 5. Wire **RTS** or **DTR** to the radio’s PTT / SEND, or use the radio’s **USB SEND** / **PC KEYING** map on that COM.
 6. On the radio, turn **VOX off** for the test so only the key line can key the transmitter.
-7. **Shared USB CAT + RTS/DTR checklist:** **Handshake = None**; radio menu assigns the line to SEND/PTT (not flow control); only one program drives the modem lines. Details: [docs/TX_INHIBIT.md — Shared USB CAT + RTS/DTR](docs/TX_INHIBIT.md#shared-usb-cat--rtsdtr-what-operators-actually-do).
+7. **Shared USB CAT + RTS/DTR checklist:** **Handshake = None**; radio menu assigns the line to SEND/PTT (not flow control); only one program drives the modem lines. Details: [docs/TX_INHIBIT.md — Shared USB CAT + RTS/DTR](docs/TX_INHIBIT.md#shared-usb-cat--rtsdtr).
 
 ### What you should see when the KEY agent says not to transmit
 
@@ -109,6 +132,17 @@ Click **OK**. Try receive first, then a careful TX test (dummy load recommended)
 - The WSJT-X station **must not assert PTT** (no RF) even if WSJT-X is in a TX cycle and audio is still playing.
 
 Default UDP port is **22372** (if free). Design: [docs/TX_INHIBIT.md](docs/TX_INHIBIT.md).
+
+### Three things that surprise people
+
+**1. Windows Firewall will ask on first launch.** With **Enable TX Inhibit** checked, the program opens a UDP listening port. Windows Defender Firewall shows *"Windows Defender Firewall has blocked some features of this app."*
+
+- KEY agent on **this same PC** (including the `inhibit-test` helpers): you can **Cancel** — loopback traffic is not blocked.
+- KEY agent on **another PC on your LAN**: click **Allow access**, and tick **Private networks**. Without this the holds never arrive and the radio will transmit when it should not.
+
+**2. No agent means no inhibit — and that is silent.** TX Inhibit does nothing until something sends it a hold. If your KEY agent is not running, is pointed at the wrong address, or the firewall is blocking it, this build behaves exactly like stock WSJT-X and transmits normally. There is currently **no indication** that the feature is armed but not receiving. Always confirm with a test hold before relying on it.
+
+**3. One WSJT-X per PC can receive on port 22372.** If you run two copies on one computer, only one reliably gets the hold packets — which one is decided by Windows, not by you. For multi-op, run one WSJT-X station per PC, or give each a different port and point the agent at both.
 
 ### Optional local test
 
@@ -147,7 +181,7 @@ Default UDP target is `127.0.0.1:22372`. Day-to-day multi-op uses a real **KEY a
 | Program starts but no radio control | Same as stock WSJT-X: CAT port, baud, driver, cable |
 | Error about opening a COM port / “TX Inhibit: cannot open …” | Wrong `COMx`, permissions, or another program already owns the port — close the other app or pick the correct COM |
 | PTT never keys at all after install | Check **PTT method** is RTS/DTR and **PTT port** is a real `COMx` (**not** the special value “CAT”). Confirm USB SEND / PC KEYING and wiring |
-| Radio keys when the program opens the COM | DTR/RTS polarity or another app forcing the line — see [shared USB CAT + RTS/DTR](docs/TX_INHIBIT.md#shared-usb-cat--rtsdtr-what-operators-actually-do) |
+| Radio keys when the program opens the COM | DTR/RTS polarity or another app forcing the line — see [shared USB CAT + RTS/DTR](docs/TX_INHIBIT.md#shared-usb-cat--rtsdtr) |
 | CAT flaky after enabling RTS PTT | Handshake must be **None**; radio must not use RTS for CAT flow control |
 | TX Inhibit never stops PTT | Need **Enable TX Inhibit**, RTS/DTR on a real serial PTT port; **CAT-only PTT is not filtered**. Confirm agent UDP reaches port **22372** |
 | Radio still keys while TX INHIBITED | Radio **VOX** may still key from audio — turn VOX off; confirm you are not using a second PTT path |

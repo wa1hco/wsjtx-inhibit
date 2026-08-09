@@ -2,7 +2,7 @@
 
 **You are an operator / tester.** You do not need to build anything from source.
 
-**wsjtx-inhibit** is a modified **WSJT-X** with **TX Inhibit** for multi-op and same-band stations. A **WSJT-X station** is one digi position (this app, PC, radio, antenna). A **KEY agent** (or the Spacebar test helper) **tells WSJT-X stations not to transmit** when a priority radio is keyed. It is **not** an official WSJT-X / ARRL release.
+**wsjtx-inhibit** is a modified **WSJT-X** with **TX Inhibit** for multi-op and same-band stations. A **WSJT-X station** is one digi position (this app, PC, radio, antenna). A **KEY agent** (or the `inhibit-test` KEY helper) **tells WSJT-X stations not to transmit** when a priority radio is keyed. It is **not** an official WSJT-X / ARRL release.
 
 ---
 
@@ -28,7 +28,7 @@ Check **Assets** on the release you opened. Currently typical:
 
 | Your computer | What you should see under Assets | Status |
 |---------------|----------------------------------|--------|
-| **Windows 64-bit** | `…-win64.exe` and/or `…-windows-x86_64.zip` | **Published** on recent test releases |
+| **Windows 64-bit** | `wsjtx-inhibit-…-win64.exe` and/or `wsjtx-inhibit-…-windows-x86_64.zip` | **Published** on recent test releases |
 | **Linux** (AppImage / `.deb` / `.rpm`) | Names ending in `.AppImage`, `.deb`, or `.rpm` | Only if that release lists them — **not every release has Linux yet** |
 | **macOS** | `.pkg` files | Only on full multi-platform releases |
 
@@ -46,17 +46,17 @@ You never need to compile code or install a tool called “NSIS.” The Windows 
 
 | File name looks like | What to do |
 |----------------------|------------|
-| **`wsjtx-inhibit-…-win64.exe`** (or any `…-win64.exe`) | **Recommended.** Double-click to install (like other Windows programs). |
-| **`wsjtx-inhibit-…-windows-x86_64.zip`** (or any Windows `…zip`) | Unzip to a folder, then run `bin\wsjtx.exe` (no installer). |
+| **`wsjtx-inhibit-<version>-win64.exe`** | **Recommended.** Double-click to install. Installs to `C:\WSJT\wsjtx-inhibit\`. |
+| **`wsjtx-inhibit-<version>-windows-x86_64.zip`** | Unzip to a folder, then run `bin\wsjtx.exe` (no installer). |
 
-Example release: **[wsjtx-inhibit-rc1](https://github.com/wa1hco/wsjtx-inhibit/releases/tag/wsjtx-inhibit-rc1)** (`wsjtx-inhibit-rc1-win64.exe` / `…-windows-x86_64.zip`).
+**Keeping official WSJT-X too?** Program files are separate (`C:\WSJT\wsjtx-inhibit\` vs `C:\WSJT\wsjtx\`), but **settings and logs are shared** in `%LOCALAPPDATA%\WSJT-X\`. To give this build its own configuration, launch it with `--rig-name inhibit`. Details: [INSTALL-WINDOWS.md](INSTALL-WINDOWS.md#can-i-keep-official-wsjt-x-installed).
 
 ### Short install (`.exe`)
 
 1. Close any running WSJT-X.
 2. Download the **`-win64.exe`** from **Assets**.
 3. Run it. If Windows SmartScreen appears: **More info** → **Run anyway** (only if you trust this GitHub project).
-4. Finish the installer (often under `C:\WSJT\…`).
+4. Finish the installer (default `C:\WSJT\wsjtx-inhibit\`).
 5. Start from the Start menu, or open the install folder and run `bin\wsjtx.exe`.
 
 ### After install — use it like WSJT-X
@@ -73,7 +73,7 @@ Set callsign, radio, audio as usual under **File → Settings**.
 5. When the KEY agent has said **not to transmit**, the **status bar** shows a red **TX INHIBITED** badge. Software sequencing/audio may continue; this WSJT-X station does not **assert PTT**.
 
 **Shared radio USB (CAT + RTS/DTR on one COM):** Valid on Icom / Elecraft / Yaesu and similar. Use **Handshake = None**, map the line to SEND/PTT (not flow control), and let only one app drive the modem lines. Brand menus and pitfalls:  
-[docs/TX_INHIBIT.md — Shared USB CAT + RTS/DTR](docs/TX_INHIBIT.md#shared-usb-cat--rtsdtr-what-operators-actually-do).
+[docs/TX_INHIBIT.md — Shared USB CAT + RTS/DTR](docs/TX_INHIBIT.md#shared-usb-cat--rtsdtr).
 
 Design (TX Inhibit + KEY agent): [docs/TX_INHIBIT.md](docs/TX_INHIBIT.md).  
 Windows/Linux step-by-step: [INSTALL-WINDOWS.md](INSTALL-WINDOWS.md), [INSTALL-LINUX.md](INSTALL-LINUX.md).
@@ -140,7 +140,7 @@ If there is no `.pkg` in Assets, macOS is not available on that release.
 
 ## 5. What TX Inhibit is (one paragraph)
 
-WSJT-X sequencing and audio stay the same. When a KEY agent (or the Spacebar helper) **tells the WSJT-X station not to transmit**, this build does not **assert PTT** (RTS/DTR) within milliseconds. That is **not** **Halt Tx** (which aborts the QSO sequence). Those requests arrive as short UDP messages (default port **22372**); they expire unless refreshed. Local CTS KEY sensing is **not** used (see [docs/TX_INHIBIT.md](docs/TX_INHIBIT.md) §5).
+WSJT-X sequencing and audio stay the same. When a KEY agent (or the `inhibit-test` helper) **tells the WSJT-X station not to transmit**, this build does not **assert PTT** (RTS/DTR) within milliseconds. That is **not** **Halt Tx** (which aborts the QSO sequence). Those requests arrive as short UDP messages (default port **22372**); they expire unless refreshed. Local CTS KEY sensing is **not** used (see [docs/TX_INHIBIT.md](docs/TX_INHIBIT.md) §5).
 
 ---
 
@@ -188,7 +188,7 @@ python3 tools/send_inhibit_hold.py --interactive
 python tools\send_inhibit_hold.py --interactive
 ```
 
-Same **level** Spacebar behaviour as `inhibit-test`. Optional flags:
+Same **level** KEY behaviour as `inhibit-test` — grave/backtick `` ` ``, **not Space**. Optional flags:
 
 ```bash
 python3 tools/send_inhibit_hold.py -i --station SSB-TEST --host 127.0.0.1 --port 22372
@@ -196,12 +196,12 @@ python3 tools/send_inhibit_hold.py -i --station SSB-TEST --host 127.0.0.1 --port
 
 | Flag | Purpose |
 |------|---------|
-| `-i` / `--interactive` | Spacebar KEY **level** + hang |
+| `-i` / `--interactive` | grave/backtick KEY **level** + hang |
 | `--station NAME` | Text shown in the badge (`held by …`) |
 | `--host` / `--port` | WSJT-X station address (default `127.0.0.1:22372`) |
 | `--fixed-hang-ms N` | Fixed hang after KEY up (disable adaptive) |
 
-One-shot hold (no Spacebar loop):
+One-shot hold (no interactive KEY loop):
 
 ```bash
 python3 tools/send_inhibit_hold.py --ttl-ms 3000 --station TEST   # hold ~3 s
@@ -212,7 +212,7 @@ Script on GitHub: [tools/send_inhibit_hold.py](https://github.com/wa1hco/wsjtx-i
 
 ### Production use
 
-Day-to-day multi-op use is a **KEY agent**: senses the priority KEY and tells WSJT-X stations not to transmit (UDP keepalives + **release hold**; see [docs/TX_INHIBIT.md](docs/TX_INHIBIT.md) §3). Spacebar helpers are **bench stand-ins**.
+Day-to-day multi-op use is a **KEY agent**: senses the priority KEY and tells WSJT-X stations not to transmit (UDP keepalives + **release hold**; see [docs/TX_INHIBIT.md](docs/TX_INHIBIT.md) §3). These helpers are **bench stand-ins**.
 
 ---
 

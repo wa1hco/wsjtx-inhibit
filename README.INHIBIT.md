@@ -34,14 +34,29 @@ Do **not** use the plain file named [`INSTALL`](INSTALL) for binary install — 
 | Upstream [README.md](README.md) | Stock WSJT-X description |
 | [UPSTREAM.md](UPSTREAM.md) | Baseline pin |
 
-```bash
-# Full multi-platform release (when CI is configured for it)
-git tag build/v3.0.2-rc1 && git push origin build/v3.0.2-rc1
+**Tag scheme.** The tag decides both which workflow runs and the release channel
+compiled into the binary (`set_build_type()` → `-devel` / `-rcN` / GA). A tag that
+matches neither pattern below runs nothing.
 
-# Faster tester packages (often Windows + Linux x86_64)
-git tag packages/v3.0.2-dev1 && git push origin packages/v3.0.2-dev1
+| Tag | Workflow | Channel | Artifacts |
+|-----|----------|---------|-----------|
+| `build/v3.0.2` | `release.yml` | **GA** | All platforms + source tarball + public release |
+| `build/v3.0.2-rc2` | `release.yml` | **RC 2** | All platforms, prerelease |
+| `packages/v3.0.2-rc2` | `tester-packages.yml` | **RC 2** | Windows + Linux x86_64, faster |
+| `packages/v3.0.2-dev1` | `tester-packages.yml` | DEVEL | Windows + Linux x86_64 |
+
+```bash
+# Release candidate, all platforms (preferred for an rc)
+git tag build/v3.0.2-rc2 && git push origin build/v3.0.2-rc2
+
+# Faster tester packages (Windows + Linux x86_64 only)
+git tag packages/v3.0.2-rc2 && git push origin packages/v3.0.2-rc2
 # or: Actions → "Tester packages" → Run workflow
 ```
+
+Product name stays `wsjtx-inhibit` across every release; only the version carries the
+stage. Artifacts are named `wsjtx-inhibit-<version>-win64.exe` and install to
+`C:\WSJT\wsjtx-inhibit`.
 
 ---
 

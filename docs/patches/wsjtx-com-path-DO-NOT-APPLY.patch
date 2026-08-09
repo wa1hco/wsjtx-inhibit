@@ -1,0 +1,39 @@
+diff --git a/Transceiver/HamlibTransceiver.cpp b/Transceiver/HamlibTransceiver.cpp
+index ff377a9..3738d83 100644
+--- a/Transceiver/HamlibTransceiver.cpp
++++ b/Transceiver/HamlibTransceiver.cpp
+@@ -489,7 +489,17 @@ HamlibTransceiver::HamlibTransceiver (logger_type * logger,
+         case RIG_PORT_SERIAL:
+           if (!params.serial_port.isEmpty ())
+             {
+-              m_->set_conf ("rig_pathname", params.serial_port.toLatin1 ().data ());
++              // Windows CreateFile needs \\.\COMn for n >= 10; also harmless
++              // for COM1–COM9 and prevents Hamlib open failures on USB hubs.
++              QString cat_path = params.serial_port;
++#if defined (WIN32)
++              if (cat_path.startsWith (QStringLiteral ("COM"), Qt::CaseInsensitive)
++                  && !cat_path.startsWith (QStringLiteral ("\\\\.\\")))
++                {
++                  cat_path = QStringLiteral ("\\\\.\\") + cat_path;
++                }
++#endif
++              m_->set_conf ("rig_pathname", cat_path.toLatin1 ().data ());
+             }
+           m_->set_conf ("serial_speed", QByteArray::number (params.baud).data ());
+           if (params.data_bits != TransceiverFactory::default_data_bits)
+@@ -562,7 +572,14 @@ HamlibTransceiver::HamlibTransceiver (logger_type * logger,
+               || params.ptt_port != params.serial_port))
+         {
+ #if defined (WIN32)
+-          m_->set_conf ("ptt_pathname", ("\\\\.\\" + params.ptt_port).toLatin1 ().data ());
++          // Avoid doubling \\.\ if the UI already stored an extended path.
++          QString ptt_path = params.ptt_port;
++          if (ptt_path.startsWith (QStringLiteral ("COM"), Qt::CaseInsensitive)
++              && !ptt_path.startsWith (QStringLiteral ("\\\\.\\")))
++            {
++              ptt_path = QStringLiteral ("\\\\.\\") + ptt_path;
++            }
++          m_->set_conf ("ptt_pathname", ptt_path.toLatin1 ().data ());
+ #else
+           m_->set_conf ("ptt_pathname", params.ptt_port.toLatin1 ().data ());
+ #endif

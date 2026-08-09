@@ -8,7 +8,7 @@
   Produces a full cmake --install tree under -StageDir.
 #>
 param(
-  [string]$SourceDir = "C:\src\wsjtx-wims",
+  [string]$SourceDir = "C:\src\wsjtx-inhibit",
   [string]$PrefixDir = "C:\src\wsjtx-prefix",
   [string]$HamlibPrefix = "C:\src\wsjtx-prefix\hamlib",
   [string]$BuildDir = "C:\src\wsjtx-prefix\build",
@@ -24,7 +24,10 @@ if (-not (Test-Path $SourceDir)) { throw "Source not found: $SourceDir" }
 if (-not (Test-Path (Join-Path $HamlibPrefix "bin\rigctl.exe"))) {
   throw "Hamlib rigctl.exe missing under $HamlibPrefix\bin — run make install-strip in Hamlib (tests tools)."
 }
-if (-not (Test-Path $OmniRig)) { throw "OmniRig.exe not found: $OmniRig" }
+if (-not (Test-Path $OmniRig)) {
+  Write-Warning "OmniRig.exe not found: $OmniRig - building without OmniRig rig support."
+  $OmniRig = $null
+}
 if ($Jobs -le 0) { $Jobs = [Environment]::ProcessorCount }
 
 $srcUnix = ($SourceDir -replace '\\', '/') -replace '^([A-Za-z]):', { "/$($args[0].Groups[1].Value.ToLower())" }
@@ -37,7 +40,8 @@ SRC="`$(cygpath '$SourceDir')"
 HAMLIB="`$(cygpath '$HamlibPrefix')"
 BUILD="`$(cygpath '$BuildDir')"
 STAGE="`$(cygpath '$StageDir')"
-OMNI="`$(cygpath '$OmniRig')"
+OMNI=""
+if [ -n '$OmniRig' ]; then OMNI="`$(cygpath '$OmniRig')"; fi
 JOBS=$Jobs
 if [ -x /mingw64/bin/dumpcpp-qt5.exe ] && [ ! -e /mingw64/bin/dumpcpp.exe ]; then
   ln -sf /mingw64/bin/dumpcpp-qt5.exe /mingw64/bin/dumpcpp.exe
@@ -47,7 +51,7 @@ rigctl -V || true
 cmake -G "MSYS Makefiles" -S "`$SRC" -B "`$BUILD" \
   -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_PREFIX_PATH="`$HAMLIB" \
-  -DOMNIRIG_TYPE_LIB="`$OMNI" \
+  `${OMNI:+-DOMNIRIG_TYPE_LIB="`$OMNI"} \
   -DCMAKE_Fortran_FLAGS="-fallow-argument-mismatch -std=legacy" \
   -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
   -DWSJT_SKIP_MANPAGES=ON \

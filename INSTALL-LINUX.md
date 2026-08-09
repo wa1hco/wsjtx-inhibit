@@ -146,7 +146,7 @@ Same as stock WSJT-X:
 4. Wire RTS or DTR to the radio’s PTT/SEND, or use the radio’s USB SEND / PC KEYING map.
 5. On the radio, turn **VOX off** for the test so only the key line can key the transmitter.
 6. Your user may need membership in the **`dialout`** group (or **`uucp`** on some distros); log out and back in after changing groups.
-7. **Shared USB checklist:** **Handshake = None**; radio menu maps the line to SEND/PTT; one app owns the modem lines. Brand notes: [docs/TX_INHIBIT.md — Shared USB CAT + RTS/DTR](docs/TX_INHIBIT.md#shared-usb-cat--rtsdtr-what-operators-actually-do).
+7. **Shared USB checklist:** **Handshake = None**; radio menu maps the line to SEND/PTT; one app owns the modem lines. Brand notes: [docs/TX_INHIBIT.md — Shared USB CAT + RTS/DTR](docs/TX_INHIBIT.md#shared-usb-cat--rtsdtr).
 
 When the KEY agent has said **not to transmit**, the status bar shows a red **TX INHIBITED** badge. The WSJT-X station should **not assert PTT** even if WSJT-X is in a TX cycle.
 
@@ -185,7 +185,7 @@ You do **not** need the script for normal use — a **KEY agent** tells WSJT-X s
 | Error opening serial / “TX Inhibit: cannot open …” | Wrong device node, permissions, or another program already has the port open |
 | PTT never keys at all | **PTT method** RTS/DTR and **PTT port** a real `/dev/tty…` (**not** the special value “CAT”); check USB SEND / wiring |
 | TX Inhibit never stops PTT | Need **Enable TX Inhibit**, RTS/DTR on a real serial PTT port; **CAT-only PTT is not filtered**. Confirm agent UDP reaches port **22372** |
-| Radio keys on port open / CAT flaky with RTS PTT | Handshake **None**; polarity; multi-app; see [shared USB CAT + RTS/DTR](docs/TX_INHIBIT.md#shared-usb-cat--rtsdtr-what-operators-actually-do) |
+| Radio keys on port open / CAT flaky with RTS PTT | Handshake **None**; polarity; multi-app; see [shared USB CAT + RTS/DTR](docs/TX_INHIBIT.md#shared-usb-cat--rtsdtr) |
 | Radio still keys while TX INHIBITED | Radio **VOX** may still key from audio — turn VOX off |
 
 ---

@@ -8,8 +8,8 @@ preferred way to produce multi-platform binaries.
 
 | Dependency | Notes |
 |------------|--------|
-| CMake ≥ 3.7.2 | 3.16+ recommended |
-| C++17 compiler | GCC/Clang (Linux), MSVC 2019+ (Windows) |
+| CMake ≥ 3.16 | matches upstream `CONTRIBUTING.md` |
+| C++ compiler | GCC/Clang (Linux), **MinGW-w64 via MSYS2** (Windows — *not* MSVC). The tree builds `--std=gnu++11 -Werror`; keep new code C++11-clean. |
 | gfortran / Intel Fortran | Decoder |
 | Qt 5.12+ | Core, Gui, Widgets, Multimedia, SerialPort, Network, Sql, WebSockets, Linguist |
 | FFTW3 (float + double) | `libfftw3f` |
@@ -22,7 +22,7 @@ preferred way to produce multi-platform binaries.
 ```bash
 mkdir -p ~/hamlib-prefix && cd ~/hamlib-prefix
 git clone https://github.com/Hamlib/Hamlib src
-cd src && git checkout 4.7.0   # or integration
+cd src && git checkout 4.7.1   # read the current value from .github/workflows/ci.yml
 ./bootstrap
 mkdir ../build && cd ../build
 ../src/configure --prefix=$HOME/hamlib-prefix \
@@ -56,29 +56,30 @@ installs the same packages and builds Hamlib inside the runner.
 
 ## Windows
 
-Official CI uses [`.github/workflows/build-windows.yml`](../.github/workflows/build-windows.yml)
-(MSVC, Qt, gfortran, Hamlib). Locally:
+Windows builds use **MSYS2 MINGW64** (MinGW-w64 GCC), *not* Visual Studio. This is
+what CI does (`.github/workflows/build-windows.yml`) and what the stage scripts
+assume (`scripts/windows/Build-Stage.ps1`).
 
-1. Install Visual Studio 2019/2022 with C++ and CMake tools.
-2. Install Qt 5.x (MSVC kit) and a Fortran compiler compatible with the CI.
-3. Build Hamlib for the same toolchain; set `CMAKE_PREFIX_PATH` to Qt + Hamlib.
-4. Open a “x64 Native Tools” shell:
+Two documented routes:
 
-```bat
-cmake -S . -B build -G "Ninja" -DCMAKE_BUILD_TYPE=Release ^
-  -DCMAKE_PREFIX_PATH=C:\Qt\5.15.2\msvc2019_64;C:\hamlib-prefix
-cmake --build build --config Release
-```
+| Route | Use | Where |
+|---|---|---|
+| **MSYS2 MINGW64** | matches CI exactly; what `Build-Stage.ps1` drives | `.github/workflows/build-windows.yml` is the reference package list |
+| **Qt MinGW + Hamlib SDK** | lighter local setup for development | `docs/WINDOWS_DEV.md`, `scripts/windows/Build-Inhibit.ps1` |
 
-Or rely on **GitHub Actions** and download the Windows artifact from a
-`build/v*` release tag.
+Upstream's own prerequisites for all three platforms are in `CONTRIBUTING.md`,
+including the [Hamlib SDK](https://sourceforge.net/projects/hamlib-sdk/) route for
+Windows. Prefer that over duplicating the list here.
+
+**Do not** hardcode a Hamlib version: read the current `hamlib_branch` from
+`.github/workflows/ci.yml`.
 
 ## Release / test executables for download
 
 ```bash
 # After bumping CMakeLists.txt VERSION if needed:
-git tag build/v3.0.2-rc1
-git push origin build/v3.0.2-rc1
+git tag build/v3.0.2-rc2
+git push origin build/v3.0.2-rc2
 ```
 
 `release.yml` builds all platforms and attaches installers/archives to a

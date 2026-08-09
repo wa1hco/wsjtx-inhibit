@@ -1,0 +1,25 @@
+--- a/src/serial.c
++++ b/src/serial.c
+@@ -172,7 +172,21 @@
+ static int check_com_port_in_use(const char *port)
+ {
+     char device[1024];
+-    snprintf(device, sizeof(device), "\\\\.\\%s", port);
++
++    /* Apply the "\\.\" prefix only when it is not already present, matching
++     * win32_serial_open() in lib/termios.c. Without this guard a caller that
++     * passes an already-extended path (as WSJT-X does for ptt_pathname) is
++     * turned into "\\.\\\.\COMn", CreateFileA fails, and serial_open()
++     * rejects a perfectly good port with SER_NO_EXIST / -RIG_EIO. */
++    if (strncmp(port, "\\\\.\\", 4) != 0)
++    {
++        snprintf(device, sizeof(device), "\\\\.\\%s", port);
++    }
++    else
++    {
++        snprintf(device, sizeof(device), "%s", port);
++    }
++
+     HANDLE hCom = CreateFileA(
+         device,
+         GENERIC_READ | GENERIC_WRITE,

@@ -3,7 +3,7 @@
 Design authority for this repository: how **wsjtx-inhibit** implements
 **TX Inhibit**, and how a **KEY agent** drives it.
 
-**Operators (install / Spacebar test):** [INSTALL.md](../INSTALL.md)  
+**Operators (install / KEY test):** [INSTALL.md](../INSTALL.md)  
 **Code map:** §7
 
 ---
@@ -419,7 +419,7 @@ Malformed JSON, wrong `tx_inhibit`, bad `ttl_ms`, oversized: **ignored**.
 **Decision:** no CTS in the WSJT-X station binary. **UDP hold only** + RTS/DTR PTT.
 
 **Why:** floating/driven CTS caused intermittent false hold. Worse than
-requiring a KEY agent (or Spacebar helper) on UDP.
+requiring a KEY agent (or the `inhibit-test` helper) on UDP.
 
 Until CTS is opt-in and safe: KEY agent → UDP, or localhost helper.
 
@@ -474,7 +474,7 @@ python3 tools/send_inhibit_hold.py --ttl-ms 3000 --station TEST
 python3 tools/send_inhibit_hold.py --ttl-ms 0
 ```
 
-Operator checklist: [INSTALL.md §6](../INSTALL.md#6-test-inhibit-with-the-spacebar-helper).
+Operator checklist: [INSTALL.md §6](../INSTALL.md#6-test-tx-inhibit-with-the-key-helper-inhibit-test).
 
 ---
 
