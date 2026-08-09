@@ -1,8 +1,5 @@
 #include "Configuration.hpp"
 
-#include <QMetaObject>
-#include <QThread>
-
 //
 // Read me!
 //

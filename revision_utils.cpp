@@ -115,5 +115,5 @@ QString http_user_agent ()
     + QSysInfo::currentCpuArchitecture () + "; "
     + QString {"rv:%1"}.arg (QSysInfo::kernelVersion ()) + ")"};
 
-  return QString {"wsjtx-inhibit/" + version () + "_" + revision ()}.simplified () + " " + platform;
+  return QString {"WSJT-X/" + version () + "_" + revision ()}.simplified () + " " + platform;
 }
