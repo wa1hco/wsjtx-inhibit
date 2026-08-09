@@ -1687,7 +1687,7 @@ if (NOT WSJT_SKIP_MAP65)
 endif ()
 add_subdirectory (qmap)
 
-# Windows TX Inhibit spacebar tester (native .exe for operators; no Python)
+# Windows KEY-agent GUI stand-in (native .exe; no Python). bin/inhibit-test-gui.exe
 if (WIN32)
   add_subdirectory (tools/inhibit_spacebar)
 endif ()
@@ -1803,12 +1803,13 @@ generate_version_info (wsjtx_app_version_VERSION_RESOURCES
 add_executable (wsjtx_app_version AppVersion/AppVersion.cpp ${wsjtx_app_version_VERSION_RESOURCES})
 target_link_libraries (wsjtx_app_version wsjt_qt)
 
-# TX Inhibit local test helper — installed as bin/inhibit-spacebar(.exe) next to wsjtx.
-add_executable (inhibit-spacebar tools/inhibit-spacebar/main.cpp)
-target_link_libraries (inhibit-spacebar Qt5::Core Qt5::Network)
-# Console subsystem on Windows (keyboard Spacebar test).
+# TX Inhibit KEY-agent stand-in — installed as bin/inhibit-test(.exe) next to wsjtx.
+# (Formerly inhibit-spacebar; grave/` KEY, not Space.)
+add_executable (inhibit-test tools/inhibit-test/main.cpp)
+target_link_libraries (inhibit-test Qt5::Core Qt5::Network)
+# Console subsystem on Windows (keyboard KEY test).
 if (WIN32)
-  set_target_properties (inhibit-spacebar PROPERTIES WIN32_EXECUTABLE OFF)
+  set_target_properties (inhibit-test PROPERTIES WIN32_EXECUTABLE OFF)
 endif ()
 
 generate_version_info (message_aggregator_VERSION_RESOURCES
@@ -1881,7 +1882,7 @@ install (TARGETS jt9 wsprd fmtave fcal fmeasure
   )
 
 # KEY-agent stand-in for local TX Inhibit tests (next to wsjtx.exe in bin/).
-install (TARGETS inhibit-spacebar
+install (TARGETS inhibit-test
   RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT runtime
   BUNDLE DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT runtime
   )

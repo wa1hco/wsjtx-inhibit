@@ -190,7 +190,7 @@ def interactive(args: argparse.Namespace) -> None:
     if level is None:
         print(
             "No KEY (grave/`) level reader on this platform (need Windows or Linux "
-            "/dev/input). Use the built inhibit-spacebar binary, or fix input access.",
+            "/dev/input). Use the built inhibit-test binary, or fix input access.",
             file=sys.stderr,
         )
         sys.exit(1)

@@ -60,7 +60,7 @@ Wire format: JSON fields `tx_inhibit`, `ttl_ms`, … (§4). No hang field.
 |------|--------|-----|
 | **WSJT-X station** (wsjtx-inhibit) | App + PC + network + radio + antenna (may be remote go-box) | When TX Inhibit is enabled and PTT is RTS/DTR: apply the equation (when may this station **assert PTT**). |
 | **KEY agent** | Process that sees the priority radio’s KEY (often near SSB/CW / WIMS server) | While KEY is asserted (and during agent **hang** after **release KEY**), sends hold keepalives; when hang finishes, **releases hold** (`ttl_ms: 0`). |
-| **Bench helper** | Same PC or LAN | **`inhibit-spacebar`** (canonical KEY-agent stand-in) or `tools/send_inhibit_hold.py`. |
+| **Bench helper** | Same PC or LAN | **`inhibit-test`** (canonical KEY-agent stand-in) or `tools/send_inhibit_hold.py`. |
 
 Any program that speaks §4 is a valid KEY agent.
 
@@ -352,7 +352,7 @@ hold timeout and look like a stuck hold.
 |-------|--------|
 | USB-serial **CTS** (or other pin) | KEY → interface → CTS; event-driven if possible |
 | GPIO / other | Agent-specific |
-| Manual / test | Grave/backtick **`** KEY — `inhibit-spacebar` / `tools/send_inhibit_hold.py --interactive` |
+| Manual / test | Grave/backtick **`** KEY — `inhibit-test` / `tools/send_inhibit_hold.py --interactive` |
 
 Debounce and **hang** (anti-chatter) live in the agent. The WSJT-X station applies only
 **hold timeout** (safety) so a **deadman** cannot leave a hold stuck forever.
@@ -431,37 +431,40 @@ Enable TX Inhibit, RTS/DTR on a real serial port, then send the same UDP a KEY
 agent would (default **127.0.0.1:22372**). Expect red **TX INHIBITED**; WSJT-X station
 does not **assert PTT** while hold is active.
 
-### `inhibit-spacebar` (canonical KEY-agent stand-in)
+### `inhibit-test` / `inhibit-test-gui` (KEY-agent stand-ins)
 
-**Name:** `inhibit-spacebar` (hyphen) — installed next to `wsjtx`.  
-Windows GUI alternate: `inhibit_spacebar` (underscore); prefer the hyphen name in docs.
+| Binary | Platform | Notes |
+|--------|----------|--------|
+| **`inhibit-test`** | Linux / Windows console | Canonical CLI (Qt). |
+| **`inhibit-test-gui`** | Windows GUI | Native Win32; mouse or grave; same protocol. |
 
-Implements §3 (Hold sender + KEYing monitor) in-process:
-
-| Platform | Path |
-|----------|------|
-| **Windows** | `bin\inhibit-spacebar.exe` |
-| **Linux** | `bin/inhibit-spacebar` |
+Implements §3 (Hold sender + KEYing monitor):
 
 | Action | Effect |
 |--------|--------|
-| **` (grave) down** | **assert KEY** → hold (`ttl_ms`=hold_timeout) + keepalives |
-| **` up** | KEY open → hang per §3.2, then **release hold** (`ttl_ms: 0`) after hang |
-| **q** / **Esc** | cancel keepalives, **release hold**, quit |
+| **` (grave) down** (or GUI button) | **assert KEY** → hold (`ttl_ms`=hold_timeout) + keepalives |
+| **` up** / button up | KEY open → hang per §3.2, then **release hold** (`ttl_ms: 0`) after hang |
+| **q** / **Esc** / Force RELEASE | cancel keepalives, **release hold** (quit on console) |
 
-**KEY key is grave/backtick `` ` ``** (left of `1` on US keyboards) — **not Space**, so normal typing does not false-trigger holds.
+**KEY key is grave/backtick `` ` ``** (left of `1` on US keyboards) — **not Space**.
 
 Hang policy (default): break-in **1.5× word gap** from measured dit; continuous
-KEY (long mark) **hang = 0**. Override with `--fixed-hang-ms`.
+KEY (long mark ≥500 ms) **hang = 0**. Override: `--fixed-hang-ms` (console) or
+**fixed hang ms** field (GUI).
 
 ```text
-inhibit-spacebar --host 127.0.0.1 --port 22372 --station TEST-KEY --ttl-ms 600
-inhibit-spacebar --fixed-hang-ms 0
+inhibit-test --host 127.0.0.1 --port 22372 --station TEST-KEY --ttl-ms 600
+inhibit-test --fixed-hang-ms 0
+bin\inhibit-test-gui.exe
 ```
 
 If the WSJT-X station bound an ephemeral port, pass that `--port`.
 
-**Linux:** default KEY = this terminal only; `--global-keys` needs group `input`.
+**Input focus:** console default = this terminal only (`--global-keys` = system-wide).
+GUI = keys only while the GUI window is focused. **Linux console:** group
+`input` required for `/dev/input`; without it **`inhibit-test` refuses to start**.
+
+**Digi RF checks:** hold `` ` `` ≥500 ms (continuous, hang 0) or fixed hang 0.
 
 ### Python: `tools/send_inhibit_hold.py`
 
@@ -485,7 +488,7 @@ Operator checklist: [INSTALL.md §6](../INSTALL.md#6-test-inhibit-with-the-space
 | Settings **Enable TX Inhibit** + signals | `Configuration.{hpp,cpp,ui}` |
 | Status badge + `InhibitStatus` | `widgets/mainwindow.cpp` |
 | MessageClient type 17 | `Network/NetworkMessage.hpp`, `MessageClient` |
-| KEY-agent stand-in | **`inhibit-spacebar`** (`tools/inhibit-spacebar/`); `send_inhibit_hold.py` |
+| KEY-agent stand-in | **`inhibit-test`** (`tools/inhibit-test/`); Windows **`inhibit-test-gui`** (`tools/inhibit_spacebar/`); `send_inhibit_hold.py` |
 
 **Maintainer notes (algorithm)**
 

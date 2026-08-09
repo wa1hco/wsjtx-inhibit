@@ -1,31 +1,34 @@
-# Windows-only TX Inhibit spacebar tester (native .exe, no extra runtime).
-# Built as part of the main project when WIN32; installed next to wsjtx.exe.
+# Windows GUI KEY-agent stand-in (native .exe, no Qt/Python runtime).
+# Installed as bin/inhibit-test-gui.exe next to wsjtx.exe.
+# Console sibling on all platforms: inhibit-test (tools/inhibit-test/).
 
 if (NOT WIN32)
   return ()
 endif ()
 
-add_executable (inhibit_spacebar WIN32
+add_executable (inhibit-test-gui WIN32
   inhibit_spacebar.c
   )
 
-target_link_libraries (inhibit_spacebar PRIVATE
+target_link_libraries (inhibit-test-gui PRIVATE
   ws2_32
   comctl32
   user32
   gdi32
   )
 
-# Helpful for MinGW: ensure UNICODE-off ANSI entry matches WinMain
 if (MINGW)
-  target_compile_options (inhibit_spacebar PRIVATE -Wall -O2)
-  # Prefer subsystem windows
-  set_target_properties (inhibit_spacebar PROPERTIES
+  target_compile_options (inhibit-test-gui PRIVATE -Wall -O2)
+  set_target_properties (inhibit-test-gui PROPERTIES
     WIN32_EXECUTABLE TRUE
-    OUTPUT_NAME "inhibit_spacebar"
     )
 endif ()
 
-install (TARGETS inhibit_spacebar
+# Stable install name (was inhibit_spacebar.exe).
+set_target_properties (inhibit-test-gui PROPERTIES
+  OUTPUT_NAME "inhibit-test-gui"
+  )
+
+install (TARGETS inhibit-test-gui
   RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT runtime
   )

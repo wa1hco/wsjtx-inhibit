@@ -116,13 +116,14 @@ With this build running and settings as above, use the helper **next to the app*
 
 ```text
 bin\wsjtx.exe
-bin\inhibit-spacebar.exe
+bin\inhibit-test-gui.exe     Windows GUI (mouse or grave ` KEY)
+bin\inhibit-test.exe         optional console KEY agent
 ```
 
-1. Run **`bin\inhibit-spacebar.exe`** (same install folder as `wsjtx.exe`).
-2. **Space down** → red **TX INHIBITED**; attempt TX (dummy load) — WSJT-X station does not assert PTT.
-3. **Space up** → after hang, badge clears; normal PTT works. Short taps simulate CW (adaptive hang).
-4. **q** or **Esc** to quit. Space follows KEY **level**.
+1. Run **`bin\inhibit-test-gui.exe`** (or `inhibit-test.exe`) from the same install folder as `wsjtx.exe`.
+2. With the helper focused, hold **grave `` ` ``** (or the big button) → red **TX INHIBITED**; attempt TX (dummy load) — WSJT-X station does not assert PTT. **Not Space.**
+3. Release → hang then badge clears (hold ≥500 ms for hang 0 / continuous). Short taps ≈ break-in CW hang.
+4. **Esc** / Force RELEASE ends hold immediately. Console: **q** or **Esc** to quit.
 
 Default UDP target is `127.0.0.1:22372`. Day-to-day multi-op uses a real **KEY agent** (tells WSJT-X stations not to transmit); this helper is a bench stand-in. See [docs/TX_INHIBIT.md](docs/TX_INHIBIT.md).
 

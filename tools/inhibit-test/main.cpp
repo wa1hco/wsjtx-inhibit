@@ -1,7 +1,7 @@
-// inhibit-spacebar — KEY-agent stand-in for TX Inhibit (docs/TX_INHIBIT.md §3)
+// inhibit-test — KEY-agent stand-in for TX Inhibit (docs/TX_INHIBIT.md §3)
 //
-// Canonical name: inhibit-spacebar (installed as bin/inhibit-spacebar next to
-// wsjtx). Implements two cooperating roles on one rare KEY line:
+// Canonical name: inhibit-test (installed as bin/inhibit-test next to wsjtx).
+// Formerly inhibit-spacebar. Implements two cooperating roles on one rare KEY:
 //
 //   KEY stand-in key: left quote / grave accent `  (not Space — typing
 //   spaces must not false-trigger holds).
@@ -13,6 +13,8 @@
 //                   EOT signals Hold sender to release.
 //
 // KEY level: press = assert, release = open (gap or EOT).
+// Default input: only keys typed into *this* terminal (not other windows).
+// Use --global-keys for system-wide KEY (true KEY-agent bench).
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -40,6 +42,7 @@
 # include <fcntl.h>
 # include <unistd.h>
 # include <dirent.h>
+# include <errno.h>
 # include <linux/input.h>
 # include <sys/ioctl.h>
 # include <termios.h>
@@ -153,9 +156,7 @@ void poll_stdin_keys ()
     {
       return;
     }
-  // Drain all pending bytes; track space/q/esc level from press/release is
-  // not available via raw tty — we only see press events. Treat as edge:
-  // set down flags; level is synthesized in the poll loop via sticky state.
+  // Drain all pending bytes; TTY has no release event — only press bytes.
   unsigned char buf[64];
   for (;;)
     {
@@ -169,7 +170,7 @@ void poll_stdin_keys ()
           unsigned char c = buf[i];
           if (is_key_char (c))
             {
-              // Grave press (tty has no release event) — sticky hold synthesised
+              // Grave press while this TTY has focus.
               g_stdin_space = true;
             }
           else if (c == 'q' || c == 'Q' || c == 0x1b || c == 3 /* Ctrl-C */)
@@ -181,8 +182,9 @@ void poll_stdin_keys ()
 }
 
 // Degraded stdin KEY (only if /dev/input unavailable): TTY has no release.
-// Use a *short* sticky window (~2 polls) so short taps are not forced to 120ms.
-// Long holds need autorepeat (or use EVIOCGKEY). Prefer open_evdev_keyboard().
+// Synthesizes a short "down" after each press byte. Hold duration is NOT real
+// KEY level: marks collapse to ~sticky length unless keyboard autorepeat keeps
+// sending bytes. Prefer EVIOCGKEY (group 'input').
 static int const kStdinStickyMs = 25;
 static qint64 g_last_space_byte_ms = -1;
 
@@ -203,6 +205,19 @@ bool space_down_stdin (qint64 now_ms)
   return false;
 }
 
+// Consume one TTY-focus KEY press edge (does not synthesize level).
+// Used to *arm* EVIOCGKEY tracking only when this terminal has focus.
+bool consume_stdin_key_press ()
+{
+  poll_stdin_keys ();
+  if (!g_stdin_space)
+    {
+      return false;
+    }
+  g_stdin_space = false;
+  return true;
+}
+
 bool quit_requested_stdin ()
 {
   poll_stdin_keys ();
@@ -210,12 +225,21 @@ bool quit_requested_stdin ()
 }
 
 #if defined (Q_OS_LINUX)
+// Filled by open_evdev_keyboard() on failure (ASCII, for banner).
+static QString g_evdev_fail_reason;
+
 bool open_evdev_keyboard ()
 {
   if (g_evdev_fd >= 0)
     {
       return true;
     }
+  g_evdev_fail_reason.clear ();
+  int n_open_fail_eacces = 0;
+  int n_open_fail_other = 0;
+  int n_no_grave = 0;
+  int n_no_keys = 0;
+  int n_tried = 0;
   char const * dirs[] = {"/dev/input/by-path", "/dev/input", nullptr};
   for (int d = 0; dirs[d]; ++d)
     {
@@ -240,9 +264,18 @@ bool open_evdev_keyboard ()
               continue;
             }
           QByteArray path = QByteArray (dirs[d]) + '/' + QByteArray (ent->d_name);
+          ++n_tried;
           int fd = ::open (path.constData (), O_RDONLY | O_NONBLOCK);
           if (fd < 0)
             {
+              if (errno == EACCES || errno == EPERM)
+                {
+                  ++n_open_fail_eacces;
+                }
+              else
+                {
+                  ++n_open_fail_other;
+                }
               continue;
             }
           unsigned long evbits[(EV_MAX + 8 * sizeof (long) - 1) / (8 * sizeof (long))] = {};
@@ -257,6 +290,7 @@ bool open_evdev_keyboard ()
           if (!test_bit (EV_KEY, evbits))
             {
               ::close (fd);
+              ++n_no_keys;
               continue;
             }
           unsigned long keybits[(KEY_MAX + 8 * sizeof (long) - 1) / (8 * sizeof (long))] = {};
@@ -266,19 +300,48 @@ bool open_evdev_keyboard ()
               if (!test_bit (KEY_GRAVE, keybits))
                 {
                   ::close (fd);
+                  ++n_no_grave;
                   continue;
                 }
             }
           g_evdev_fd = fd;
           closedir (dir);
+          g_evdev_fail_reason.clear ();
           return true;
         }
       closedir (dir);
     }
+  if (n_tried == 0)
+    {
+      g_evdev_fail_reason = QStringLiteral (
+          "no /dev/input event-kbd devices found");
+    }
+  else if (n_open_fail_eacces > 0)
+    {
+      g_evdev_fail_reason = QStringLiteral (
+          "permission denied on /dev/input (%1 devices; group 'input' required). "
+          "Fix: sudo usermod -aG input $USER   then log out and back in "
+          "(newgrp input is not enough for all sessions).")
+          .arg (n_open_fail_eacces);
+    }
+  else if (n_no_grave > 0 && n_open_fail_other == 0)
+    {
+      g_evdev_fail_reason = QStringLiteral (
+          "opened input devices but none advertise KEY_GRAVE");
+    }
+  else
+    {
+      g_evdev_fail_reason = QStringLiteral (
+          "could not open a keyboard with KEY_GRAVE "
+          "(tried=%1 eacces=%2 other_open=%3 no_key=%4 no_grave=%5)")
+          .arg (n_tried).arg (n_open_fail_eacces).arg (n_open_fail_other)
+          .arg (n_no_keys).arg (n_no_grave);
+    }
   return false;
 }
 
-// True KEY *level* via kernel key state (no 120ms sticky). Call often.
+// True KEY *level* via kernel key state (no sticky). Call often.
+// System-wide unless gated by the caller (focus-arm).
 bool space_down_evdev ()
 {
   if (g_evdev_fd < 0 && !open_evdev_keyboard ())
@@ -318,8 +381,6 @@ bool quit_requested_evdev ()
 #endif // Q_OS_LINUX
 
 #elif defined (Q_OS_WIN)
-
-static bool g_console_only = false;
 
 bool space_down_global ()
 {
@@ -523,16 +584,17 @@ private:
 int main (int argc, char * argv[])
 {
   QCoreApplication app (argc, argv);
-  QCoreApplication::setApplicationName (QStringLiteral ("inhibit-spacebar"));
-  QCoreApplication::setApplicationVersion (QStringLiteral ("2.0"));
+  QCoreApplication::setApplicationName (QStringLiteral ("inhibit-test"));
+  QCoreApplication::setApplicationVersion (QStringLiteral ("2.1"));
 
   QCommandLineParser parser;
   parser.setApplicationDescription (
       QStringLiteral (
-          "KEY-agent stand-in (docs/TX_INHIBIT.md §3): Hold sender + KEYing monitor.\n"
-          "KEY key = left quote / grave ` (not Space — typing won't false-trigger).\n"
-          "Break-in CW: hang = 1.5×word gap; continuous KEY: hang 0.\n"
-          "Default: only this terminal/console. Use --global-keys for system-wide."));
+          "KEY-agent stand-in (docs/TX_INHIBIT.md s3): Hold sender + KEYing monitor.\n"
+          "KEY key = left quote / grave ` (not Space - typing won't false-trigger).\n"
+          "Break-in CW: hang = 1.5x word gap; continuous KEY: hang 0.\n"
+          "Default: KEY only from *this terminal* (other windows ignored).\n"
+          "Use --global-keys for system-wide KEY (true agent bench)."));
   parser.addHelpOption ();
   parser.addVersionOption ();
   QCommandLineOption hostOpt {QStringList () << "H" << "host",
@@ -561,7 +623,7 @@ int main (int argc, char * argv[])
     QStringLiteral ("ms")};
   QCommandLineOption globalKeysOpt {
     QStringList () << "global-keys",
-    QStringLiteral ("Read grave/` key system-wide (other windows can trigger KEY). Not default.")};
+    QStringLiteral ("Read grave/` KEY system-wide (other windows can trigger). Not default.")};
   QCommandLineOption quietKaOpt {
     QStringList () << "verbose-keepalive",
     QStringLiteral ("Log every keepalive (default: HOLD, KEY events, RELEASE only).")};
@@ -594,66 +656,61 @@ int main (int argc, char * argv[])
   InputMode input_mode = global_keys ? InputMode::GlobalKeys : InputMode::StdinTerminal;
 
   QString input_note;
-  bool use_true_key_level = false; // OS key state (no stdin 120ms glue)
+  // Linux: require EVIOCGKEY (group 'input'). No stdin-sticky fallback - that
+  // cannot measure KEY level and always reports ~40 WPM marks.
+  bool use_evdev_level = false;
+  bool focus_arm_evdev = false; // arm only after stdin grave when not --global-keys
 #if defined (Q_OS_LINUX)
-  // Prefer EVIOCGKEY for true KEY_GRAVE level (accurate short marks).
-  if (open_evdev_keyboard ())
+  if (!open_evdev_keyboard ())
     {
-      use_true_key_level = true;
-      if (input_mode == InputMode::GlobalKeys)
-        {
-          input_note = QStringLiteral (
-              "KEY = grave/` via /dev/input EVIOCGKEY (true level, system-wide). "
-              "Group 'input' may be required.");
-        }
-      else
-        {
-          // Still use true level; rare KEY + quit via this TTY.
-          (void) setup_stdin_raw (); // q/Esc from this terminal
-          input_note = QStringLiteral (
-              "KEY = grave/` via /dev/input EVIOCGKEY (true level). "
-              "q/Esc only from *this terminal* (not global). May need group 'input'. "
-              "--global-keys makes q/Esc system-wide too.");
-        }
+      QTextStream err (stderr);
+      err << "inhibit-test: refusing to start (need true KEY level via /dev/input).\n"
+          << "  " << (g_evdev_fail_reason.isEmpty ()
+                      ? QStringLiteral ("could not open a keyboard device")
+                      : g_evdev_fail_reason)
+          << "\n"
+          << "  Verify after re-login:  groups | grep -w input\n";
+      return 1;
+    }
+  use_evdev_level = true;
+  (void) setup_stdin_raw (); // quit always; KEY arm when not --global-keys
+  if (input_mode == InputMode::GlobalKeys)
+    {
+      input_note = QStringLiteral (
+          "KEY = grave/` via /dev/input EVIOCGKEY (true level, SYSTEM-WIDE). "
+          "q/Esc also system-wide.");
     }
   else
     {
-      if (setup_stdin_raw ())
-        {
-          input_note = QStringLiteral (
-              "WARNING: no /dev/input keyboard — KEY uses stdin sticky (%1 ms). "
-              "Add user to group 'input' for true-level KEY (short marks).")
-              .arg (kStdinStickyMs);
-        }
-      else
-        {
-          input_note = QStringLiteral (
-              "ERROR: no /dev/input and no raw stdin. KEY timing unavailable.");
-        }
+      // True level only after a grave press *into this terminal*, so other
+      // windows cannot start a hold. Release tracked via EVIOCGKEY.
+      focus_arm_evdev = true;
+      input_note = QStringLiteral (
+          "KEY = grave/` only when typed in *this terminal* "
+          "(EVIOCGKEY level after TTY press; other windows ignored). "
+          "q/Esc only from this terminal. --global-keys for system-wide KEY.");
     }
 #elif defined (Q_OS_UNIX)
-  if (setup_stdin_raw ())
-    {
-      input_note = QStringLiteral (
-          "KEY = grave/` via stdin sticky (%1 ms) — no Linux evdev on this build.")
-          .arg (kStdinStickyMs);
-    }
+  QTextStream err_unix (stderr);
+  err_unix << "inhibit-test: Linux /dev/input KEY level required; "
+              "this non-Linux UNIX build is not supported.\n";
+  return 1;
 #elif defined (Q_OS_WIN)
-  use_true_key_level = true; // GetAsyncKeyState is true level
   if (input_mode == InputMode::StdinTerminal)
     {
       input_note = QStringLiteral (
-          "Windows: KEY = `~ (VK_OEM_3) true level when *this console* is foreground.");
+          "Windows: KEY = `~ (VK_OEM_3) when *this console* is foreground.");
     }
   else
     {
       input_note = QStringLiteral (
-          "Windows: KEY = `~ (VK_OEM_3) true level SYSTEM-WIDE.");
+          "Windows: KEY = `~ (VK_OEM_3) SYSTEM-WIDE.");
     }
 #else
-  input_note = QStringLiteral ("This platform has limited KEY-key support.");
+  QTextStream err_plat (stderr);
+  err_plat << "inhibit-test: unsupported platform for KEY level.\n";
+  return 1;
 #endif
-  Q_UNUSED (use_true_key_level);
 
   QUdpSocket sock;
   qint64 seq = 1;
@@ -665,6 +722,9 @@ int main (int argc, char * argv[])
   bool key_down = false;
   bool hold_active = false;   // Hold sender SM
   qint64 hang_until_ms = -1;  // EOT after KEY open (break-in hang)
+  // Focus-arm: once a grave reaches this TTY, track EVIOCGKEY until KEY up.
+  bool key_armed = false;
+  qint64 key_arm_ms = -1;
 
   auto now_ms = [] () { return QDateTime::currentMSecsSinceEpoch (); };
 
@@ -672,7 +732,9 @@ int main (int argc, char * argv[])
   keepalive.setInterval (kKeepaliveMs);
 
   // Hold sender: only path that emits UDP (race-safe vs keepalives).
-  auto send_hold_packet = [&] (int ttl, bool is_keepalive) {
+  // release_reason: optional note on RELEASE lines only (one log line per packet).
+  auto send_hold_packet = [&] (int ttl, bool is_keepalive,
+                               char const * release_reason = nullptr) {
     if (is_keepalive && !hold_active)
       {
         return; // END_HOLD already cleared hold_active
@@ -701,8 +763,12 @@ int main (int argc, char * argv[])
             << "  -> " << host << ':' << port
             << "  (holds=" << holds_sent
             << " ka=" << keepalives_sent
-            << " rel=" << releases_sent << ")"
-            << '\n';
+            << " rel=" << releases_sent << ")";
+        if (ttl == 0 && release_reason && release_reason[0])
+          {
+            out << "  (" << release_reason << ")";
+          }
+        out << '\n';
         out.flush ();
       }
     if (n < 0)
@@ -712,7 +778,7 @@ int main (int argc, char * argv[])
       }
   };
 
-  // END_HOLD: cancel keepalives first, then ttl_ms=0 (docs §3.6).
+  // END_HOLD: cancel keepalives first, then ttl_ms=0 (docs s3.6).
   auto end_hold = [&] (char const * reason) {
     hang_until_ms = -1;
     if (!hold_active)
@@ -721,11 +787,7 @@ int main (int argc, char * argv[])
       }
     hold_active = false;
     keepalive.stop ();
-    send_hold_packet (0, false);
-    QTextStream out (stdout);
-    out << QDateTime::currentDateTime ().toString (QStringLiteral ("hh:mm:ss.zzz"))
-        << "  RELEASE (" << reason << ")\n";
-    out.flush ();
+    send_hold_packet (0, false, reason);
   };
 
   auto start_hold = [&] () {
@@ -741,31 +803,34 @@ int main (int argc, char * argv[])
   // 5 ms poll when true key level is available (evdev / Windows).
   int const poll_ms =
 #if defined (Q_OS_LINUX)
-      (g_evdev_fd >= 0) ? 5 : 10;
+      use_evdev_level ? 5 : 10;
 #elif defined (Q_OS_WIN)
       5;
 #else
       10;
 #endif
 
+  // Banner uses ASCII only so logs stay readable on non-UTF-8 terminals.
   QTextStream out (stdout);
-  out << "inhibit-spacebar (KEY agent) → " << host << ':' << port << '\n'
-      << "  ` (grave) = KEY level (assert / open)  — not Space\n"
+  out << "inhibit-test (KEY agent) -> " << host << ':' << port << '\n'
+      << "  ` (grave) = KEY level (assert / open)  - not Space\n"
       << "  q or Esc  = release hold and quit\n"
       << "  station=" << station << "  band=" << band << '\n'
       << "  hold_timeout_ms=" << hold_timeout_ms
       << "  keepalive every " << kKeepaliveMs << " ms while hold active\n"
       << "  key poll=" << poll_ms << " ms"
 #if defined (Q_OS_LINUX)
-      << (g_evdev_fd >= 0 ? " (EVIOCGKEY true level)" : " (stdin sticky fallback)")
+      << (use_evdev_level ? " (EVIOCGKEY true level)" : " (stdin sticky fallback)")
 #endif
       << '\n'
       << "  hang=" << (fixed_hang_set
                        ? QStringLiteral ("fixed override %1 ms").arg (std::max (0, fixed_hang_ms))
-                       : QStringLiteral ("KEYing monitor: break-in 1.5×word gap; continuous hang=0"))
+                       : QStringLiteral ("KEYing monitor: break-in 1.5x word gap; continuous hang=0"))
       << '\n'
       << "  " << input_note << '\n'
-      << "  See docs/TX_INHIBIT.md §3 (Hold sender + KEYing monitor).\n\n";
+      << "  Tip: hold ` >=500 ms for hang=0 (continuous); short taps use break-in hang.\n"
+      << "  Or: --fixed-hang-ms 0 for immediate release on KEY open.\n"
+      << "  See docs/TX_INHIBIT.md s3 (Hold sender + KEYing monitor).\n\n";
   out.flush ();
 
   QObject::connect (&keepalive, &QTimer::timeout, &app, [&] () {
@@ -781,45 +846,87 @@ int main (int argc, char * argv[])
       qint64 t = now_ms ();
 
       bool want_quit = false;
-      bool space = false;
+      bool raw_space = false;
 #if defined (Q_OS_LINUX)
-      // KEY (grave): true level via EVIOCGKEY when available.
-      // Quit (q/Esc): only this terminal's stdin unless --global-keys, so typing
-      // q in another window does not end the agent.
-      if (g_evdev_fd >= 0)
+      // KEY (grave):
+      //   --global-keys: EVIOCGKEY always (system-wide).
+      //   default: arm only on grave typed into *this* TTY, then track
+      //            EVIOCGKEY level until key up (true release timing, no
+      //            false holds from other windows).
+      // Quit: stdin only unless --global-keys.
+      if (use_evdev_level)
         {
-          space = space_down_evdev ();
           if (input_mode == InputMode::GlobalKeys)
             {
+              raw_space = space_down_evdev ();
               want_quit = quit_requested_evdev () || quit_requested_stdin ();
+            }
+          else if (focus_arm_evdev)
+            {
+              // Arm only when grave is typed into *this* TTY (other windows
+              // never arm). Then track EVIOCGKEY for true release timing.
+              if (consume_stdin_key_press ())
+                {
+                  key_armed = true;
+                  key_arm_ms = t;
+                }
+              if (key_armed)
+                {
+                  bool const ev = space_down_evdev ();
+                  if (ev)
+                    {
+                      raw_space = true;
+                    }
+                  else if (key_arm_ms >= 0
+                           && (t - key_arm_ms) < kStdinStickyMs)
+                    {
+                      // Just armed: keep down briefly if kernel lag / short tap.
+                      raw_space = true;
+                    }
+                  else
+                    {
+                      // KEY open — disarm; next KEY needs TTY focus again.
+                      raw_space = false;
+                      key_armed = false;
+                      key_arm_ms = -1;
+                    }
+                }
+              else
+                {
+                  raw_space = false;
+                }
+              want_quit = quit_requested_stdin ();
             }
           else
             {
+              raw_space = space_down_evdev ();
               want_quit = quit_requested_stdin ();
             }
         }
       else
         {
-          space = space_down_stdin (t);
+          raw_space = space_down_stdin (t);
           want_quit = quit_requested_stdin ();
         }
 #elif defined (Q_OS_UNIX)
-      space = space_down_stdin (t);
+      raw_space = space_down_stdin (t);
       want_quit = quit_requested_stdin ();
 #elif defined (Q_OS_WIN)
       if (input_mode == InputMode::StdinTerminal)
         {
-          space = space_down_console ();
-          want_quit = quit_requested_console (); // q/Esc only if console focused
+          raw_space = space_down_console ();
+          want_quit = quit_requested_console ();
         }
       else
         {
-          space = space_down_global ();
-          want_quit = quit_requested_global (); // system-wide q/Esc with --global-keys
+          raw_space = space_down_global ();
+          want_quit = quit_requested_global ();
         }
 #else
       Q_UNUSED (t);
 #endif
+
+      bool space = raw_space;
 
       if (want_quit)
         {
@@ -873,7 +980,7 @@ int main (int argc, char * argv[])
                   << "  class=" << cls;
               if (dit > 0.0)
                 {
-                  out << "  dit≈" << qRound (dit) << " ms"
+                  out << "  dit~" << qRound (dit) << " ms"
                       << "  ~" << qRound (1200.0 / dit) << " WPM";
                 }
               out << '\n';

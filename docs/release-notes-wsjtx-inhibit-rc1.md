@@ -89,7 +89,7 @@ Sources include:
 | Source | Role |
 |--------|------|
 | **KEY agent** | Program that senses the priority radio’s KEY line and sends hold/keepalive/release UDP (see [docs/TX_INHIBIT.md](https://github.com/wa1hco/wsjtx-inhibit/blob/main/docs/TX_INHIBIT.md)) |
-| **Inhibit test helper** | Bench stand-in: `bin\inhibit-spacebar.exe` or `tools/send_inhibit_hold.py` |
+| **Inhibit test helper** | Bench stand-in: `bin\inhibit-test.exe` or `tools/send_inhibit_hold.py` |
 
 ### Quick check with a test hold
 
