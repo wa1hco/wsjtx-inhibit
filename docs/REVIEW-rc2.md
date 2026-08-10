@@ -305,7 +305,7 @@ clock, confirm behaviour.
 
 ---
 
-### ☐ C2. Hamlib exceptions can escape a timer/socket slot and abort the app
+### ☑ C2. Hamlib exceptions can escape a timer/socket slot and abort the app
 
 **Severity:** high — hard crash (`qFatal`) instead of a logged error
 **Evidence:**
@@ -334,7 +334,7 @@ true → `rig_set_ptt` fails → throw → unwinds through `QMetaObject::activat
 
 ---
 
-### ☐ C3. Badge and telemetry are missing under DXLab / HRD / OmniRig / TCI
+### ☑ C3. Badge and telemetry are missing under DXLab / HRD / OmniRig / TCI
 
 **Severity:** high — inhibit works but is completely invisible
 **Evidence:**
@@ -351,9 +351,21 @@ true → `rig_set_ptt` fails → throw → unwinds through `QMetaObject::activat
 PTT simply stops working with no visible reason. Worst possible failure mode for a
 beta tester writing a bug report.
 
-**Fix:** either forward the two signals in the four wrappers (3 lines each, same
-pattern as `EmulateSplitTransceiver`), or refuse to enable TX Inhibit for those rig
-types and grey the checkbox with an explanatory tooltip.
+**FIXED 2026-08-09 — forwarded in all four**, same pattern as
+`EmulateSplitTransceiver`, guarded by `if (wrapped_)` since the wrapped rig may be null:
+
+| Wrapper | Compiled here? |
+|---|---|
+| `DXLabSuiteCommanderTransceiver` | yes |
+| `HRDTransceiver` | yes |
+| `TCITransceiver` | yes |
+| `OmniRigTransceiver` | **no — `if (WIN32)`-gated (`CMakeLists.txt:383`)** |
+
+**The OmniRig edit is unverified**: it compiles for the first time on Windows, and a
+mistake there fails the whole Windows build. Risk is low — the code is identical to the
+three that do compile, uses no OmniRig-specific types, and the include chain reaches the
+signals (`OmniRigTransceiver.hpp` → `TransceiverBase.hpp` → `Transceiver.hpp`, where
+both are declared). Worth confirming early on the VM rather than at rc2 tag time.
 
 **Verify:** configure Rig = OmniRig (or DXLab) + PTT = RTS, send a hold, confirm the
 badge appears.

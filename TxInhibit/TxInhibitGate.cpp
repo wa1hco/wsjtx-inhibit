@@ -1,5 +1,7 @@
 #include "TxInhibitGate.hpp"
 
+#include <exception>
+
 #include <QDateTime>
 #include <QHostAddress>
 #include <QTimer>
@@ -91,7 +93,7 @@ void TxInhibitGate::shutdown (bool emit_pin)
     {
       // Request pin low once while Hamlib is still open (caller responsibility).
       last_radiate_ = false;
-      Q_EMIT physicalPtt (false);
+      emit_physical_ptt (false);   // teardown must not throw
     }
   else
     {
@@ -155,7 +157,47 @@ void TxInhibitGate::apply_line ()
       return;
     }
   last_radiate_ = radiate;
-  Q_EMIT physicalPtt (radiate);
+  emit_physical_ptt (radiate);
+}
+
+// physicalPtt is a DirectConnection into HamlibTransceiver::apply_physical_ptt,
+// which calls rig_set_ptt and *throws* on any Hamlib error. This is reached from
+// tick() (a QTimer slot) and on_udp_ready() (a readyRead slot), so an escaping
+// exception would unwind through QMetaObject::activate into the transceiver
+// thread's event loop; ExceptionCatchingApplication::notify catches it and calls
+// qFatal, killing the application.
+//
+// The stock path does not have this exposure: do_ptt is called from
+// TransceiverBase::set, which already wraps everything in try/catch. Only the
+// gate-driven path is unguarded, so the catch belongs here rather than inside
+// apply_physical_ptt -- putting it there would also swallow errors on the stock
+// path, where they are supposed to propagate and fail the rig.
+//
+// Realistic trigger: serial adapter unplugged or radio powered off while a hold
+// is active and want_tx is true. The hold expires, the gate tries to assert PTT,
+// rig_set_ptt fails, and the application dies.
+//
+// last_radiate_ is deliberately NOT rolled back on failure. The pin state is
+// unknown after a failed set, and rolling back would make the 50 Hz tick retry
+// forever, turning one dead cable into an error storm. The rig's own polling
+// will notice and fail the transceiver properly.
+void TxInhibitGate::emit_physical_ptt (bool radiate)
+{
+  try
+    {
+      Q_EMIT physicalPtt (radiate);
+    }
+  catch (std::exception const& e)
+    {
+      Q_EMIT lineError (QStringLiteral ("TX Inhibit: setting PTT %1 failed: %2")
+                        .arg (radiate ? QStringLiteral ("on") : QStringLiteral ("off"))
+                        .arg (QString::fromUtf8 (e.what ())));
+    }
+  catch (...)
+    {
+      Q_EMIT lineError (QStringLiteral ("TX Inhibit: setting PTT %1 failed (unknown error)")
+                        .arg (radiate ? QStringLiteral ("on") : QStringLiteral ("off")));
+    }
 }
 
 void TxInhibitGate::emit_state_if_changed ()

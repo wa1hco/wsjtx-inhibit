@@ -75,6 +75,10 @@ private:
   // Returns true if UDP is listening (preferred or ephemeral port).
   bool ensure_udp ();
   void apply_line ();
+  // Emits physicalPtt with exceptions contained. The slot on the other end
+  // calls rig_set_ptt, which throws; this is reached from timer and socket
+  // slots where an escaping exception would abort the application.
+  void emit_physical_ptt (bool radiate);
   void emit_state_if_changed ();
   qint64 now_ms () const;
 
