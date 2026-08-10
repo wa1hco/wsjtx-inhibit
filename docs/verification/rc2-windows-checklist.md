@@ -126,11 +126,26 @@ netstat -ano -p UDP | findstr 22372
 
 ## 4. The inhibit indicator — the new UI
 
-Send a hold from a second PowerShell window:
+Hold from a **separate PowerShell window** so WSJT-X keeps keyboard focus. The
+interactive helpers (`inhibit-test`, `inhibit-test-gui`) read a held key and therefore
+need focus themselves, which makes it impossible to hold the KEY *and* press Tune at
+the same time.
+
+```powershell
+cd C:\src\wsjtx-inhibit\tools
+.\Send-InhibitHold.ps1              # holds until Ctrl+C, with keepalives
+.\Send-InhibitHold.ps1 -Seconds 20  # holds 20 s, then auto-releases
+.\Send-InhibitHold.ps1 -Release     # clear a stuck hold
+```
+
+If PowerShell blocks the script: `powershell -ExecutionPolicy Bypass -File .\Send-InhibitHold.ps1`
+
+One-liner equivalent, if you would rather not run a script — a single hold lasts at
+most 30 s (protocol maximum for `ttl_ms`):
 
 ```powershell
 $u=[System.Net.Sockets.UdpClient]::new()
-$b=[Text.Encoding]::UTF8.GetBytes('{"tx_inhibit":1,"ttl_ms":8000,"station":"TEST"}')
+$b=[Text.Encoding]::UTF8.GetBytes('{"tx_inhibit":1,"ttl_ms":30000,"station":"TEST"}')
 $u.Send($b,$b.Length,"127.0.0.1",22372)
 ```
 
@@ -141,13 +156,26 @@ $u.Send($b,$b.Length,"127.0.0.1",22372)
 
 **4b — while transmitting or tuning**
 
-Send the hold, then press **Tune** (dummy load or no antenna — Rig=None will not key
-anything real, but RTS on COM1 will toggle).
+**Press Tune first, then apply the hold.** Tune is a latching toggle, so it stays on
+while you switch windows — no timing pressure and no fighting over focus:
 
-**Expected:** the same box shows **red `Inhibit`**, *not* yellow `Tx: TUNE`.
+1. In WSJT-X press **Tune**. Box shows yellow `Tx: TUNE`.
+2. Switch to the PowerShell window and run `.\Send-InhibitHold.ps1`.
+3. Look back at WSJT-X **without clicking on it** (the label updates regardless of
+   focus; clicking is fine too, it just is not needed).
+4. Ctrl+C in PowerShell to release, and confirm the box returns to yellow `Tx: TUNE`.
+5. Press **Tune** again in WSJT-X to stop tuning.
 
-This is the case an earlier build got wrong — the override was in the receive branch
-only, so Tune showed yellow while the radio really was held. Worth checking carefully.
+**Expected at step 3:** the box shows **red `Inhibit`**, *not* yellow `Tx: TUNE`.
+**Expected at step 4:** it returns to yellow `Tx: TUNE` — the hold released, but Tune
+is still on.
+
+Rig = None will not key a real radio, but RTS on COM1 does toggle, so this exercises
+the actual pin path.
+
+This is the case an earlier build got wrong: the override was in the receive branch
+only, so Tune showed yellow while the radio really was held. It is the single most
+valuable check on this page after step 1.
 
 **4c — no second box.** Confirm there is no extra status-bar widget and the status bar
 spacing is unchanged from stock.
@@ -156,6 +184,7 @@ spacing is unchanged from stock.
 |---|---|
 | 4a pale green `Inhibit` while receiving | |
 | 4b red `Inhibit` during Tune | |
+| 4b returns to yellow `Tx: TUNE` on release | |
 | 4c no extra box, spacing unchanged | |
 
 ---
