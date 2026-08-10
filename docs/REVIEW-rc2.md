@@ -380,6 +380,51 @@ tx_inhibit_gate_active()` (see C6) is the natural feed for this.
 
 ---
 
+### C4.1 Where to indicate inhibit — design decided 2026-08-09
+
+**A defect the current badge conceals.** `tx_status_label` is WSJT-X's canonical
+"what is my transmitter doing" widget (status-bar left) and is already a colour
+semaphore: green idle, `#ffff33` transmitting, `#66ffff`/`#ffccff` shorthand,
+`#ff0000` above 90% power. It is driven by `m_transmitting`, set by the **sequencer**
+at `widgets/mainwindow.cpp:8257` — from the decision to transmit, not from the pin.
+The fork's `do_ptt` deliberately calls `update_PTT(intent)`.
+
+So during a hold this label reads `Tx: CQ W1AW FN42` in transmit-yellow **while the
+radio is silent**. The primary TX indicator actively misreports, and the current
+design answers that by adding a second widget a few pixels away saying the opposite.
+Folding inhibit into `tx_status_label` is therefore a **correctness fix**, not a
+cosmetic preference.
+
+**Three surfaces, three jobs:**
+
+| # | Surface | Job | Notes |
+|---|---|---|---|
+| 1 | `tx_status_label` | at-a-glance "am I being held *right now*" | show `INHIBITED` on red instead of `Tx: <msg>` when `want_tx && hold`. Must live inside `guiUpdate()`'s `if (m_transmitting)` branch — that timer rewrites the label unconditionally and would clobber anything set elsewhere. |
+| 2 | `inhibit_status_label`, never hidden once bound | persistent **armed** state | dim grey `INH 22372` idle · red `INHIBITED` held · amber `INH ?` on ephemeral/failed bind. The amber row **is** the C4 fix. Also stops the status bar reflowing on every hold, which the present show/hide causes. |
+| 3 | `View → TX Inhibit status…` dialog | diagnosis on demand | bound port, holder station, the four counters, time since last packet. All of it already rides on `inhibitChanged` and is currently discarded — the handler uses only the badge string. Right home for "held by ROY-222-SSB". |
+
+**Rejected, with reasons:**
+
+- *Colouring the Enable Tx button* — implies the control is disabled. It is not;
+  sequencing continues. Misleading in exactly the way the feature exists to avoid.
+- *Window title* — tempting for an unattended go-box over RDP, but it churns on every
+  hold/release. Use the `InhibitStatus` UDP telemetry for remote monitoring instead.
+- *Waterfall overlay* — separate window, invasive, easy to do badly.
+
+**Also worth doing regardless:** log hold transitions to `ALL.TXT` with timestamps.
+Answers "was I held during the QSO I lost?" after the fact, which no live indicator can.
+
+**Flicker:** not a concern in normal operation — the KEY agent's hang is designed to
+hold across CW element gaps, so a hold spans a whole transmission. A ~500 ms minimum
+dwell is cheap insurance for the case where an agent dies mid-transmission and the
+hold timeout fires.
+
+**Recommended order:** 1 and 2 together (same edit region, and 1 is a defect fix).
+3 only when someone needs to debug an agent — the UDP telemetry already exists, so an
+external tool can serve that need first and prove whether an in-app dialog is wanted.
+
+---
+
 ### ☐ C5. `ptt_on_` is now set unconditionally — unintended stock-path change
 
 **Severity:** medium (deviation from upstream in shared code; maintainers will flag it)
@@ -630,6 +675,32 @@ fixed by the build script** — test the NSIS installer specifically.
 (§G.6). Payload verified valid against the parser (`ttl_ms` 2000 is inside the
 100–30000 range). Add a PowerShell equivalent: Windows has no `nc`.
 
+#### ☐ D16. Linux `input`-group instructions push testers toward breaking their session
+
+`tools/README-INHIBIT-TESTER.md`, `INSTALL.md`, and `docs/TX_INHIBIT.md` all say to run
+`usermod -aG input $USER` "then full log out/in". Correct, but presented as the only
+option — so the natural shortcut is `su -l $USER`, which **scrubs the environment**
+(`DISPLAY`, `WAYLAND_DISPLAY`, `XDG_RUNTIME_DIR`, `DBUS_SESSION_BUS_ADDRESS` are set by
+the graphical login via PAM/systemd, not by any dotfile).
+
+Hit on this machine 2026-08-09: `./wsjtx` failed with *"could not connect to display"*
+(empty `DISPLAY`). Worse than it looks — the same shell also loses `XDG_RUNTIME_DIR`,
+so PipeWire is unreachable and WSJT-X would have started with **no audio devices**,
+sending the tester chasing a phantom sound-card bug.
+
+**Fix the docs to offer the environment-preserving alternative:**
+
+```bash
+sg input -c './bin/inhibit-test --host 127.0.0.1 --port 22372'
+```
+
+Verified: keeps `DISPLAY=:0` and `XDG_RUNTIME_DIR`, gains the group, `/dev/input/event0`
+readable. `newgrp input` is the interactive equivalent.
+
+**Also worth stating:** `wsjtx` itself never needs the `input` group — only
+`inhibit-test` does. Nothing in the docs currently separates the two, which is why the
+group elevation gets applied to the wrong program.
+
 #### ☑ D15. `tester-packages.yml` hardcoded DEVEL, so the version string lied
 
 **Found 2026-08-09** while answering "how does WSJT-X name release candidates."
@@ -675,7 +746,7 @@ Sequenced so that each phase leaves the tree in a taggable-or-better state.
 ### Phase 1 — unblock the build (mechanical, ~1 sitting)
 
 - [x] R1 — fix `inhibit-spacebar.exe` → `inhibit-test-gui.exe` in `build-windows.yml`
-- [ ] R2 — decide (a) or (b), fix the UA test
+- [x] R2 — decide (a) or (b), fix the UA test
 - [x] D4 — add `main` to `ci.yml` triggers
 - [x] D12 — add `build/` to `.gitignore`
 - [ ] Run the `Tester packages` workflow to prove Windows + Linux artifacts build
@@ -684,9 +755,9 @@ Sequenced so that each phase leaves the tree in a taggable-or-better state.
 
 ### Phase 2 — packaging identity (needs a decision, then mechanical)
 
-- [ ] R3 — `CPACK_PACKAGE_NAME` → `wsjtx-inhibit`; verify default install path
-- [ ] R4 — decide app-name isolation vs documented `--rig-name`; implement
-- [ ] R5 — align asset filenames between CI and all four docs
+- [x] R3 — `CPACK_PACKAGE_NAME` → `wsjtx-inhibit`; verify default install path
+- [x] R4 — decide app-name isolation vs documented `--rig-name`; implement
+- [x] R5 — align asset filenames between CI and all four docs
 - [ ] Test in a VM that already has official WSJT-X installed
 
 **Exit criterion:** installing rc2 on a machine with stock WSJT-X leaves stock
@@ -698,9 +769,9 @@ untouched — binaries, settings, and logs.
 - [x] D7 — purge remaining "Spacebar" language from `INSTALL.md` and `docs/TX_INHIBIT.md`
 - [x] D8 — delete `Run-InhibitSpacebar.cmd` and `inhibit_spacebar_gui.py`
 - [x] D9 — fix all 7 anchors (verified 0 broken across 16 files); link-checker CI job still open
-- [ ] D10 — add firewall, fail-open, one-instance, and "is it listening?" sections
-- [ ] D11 — settle the tag scheme, update `README.INHIBIT.md`
-- [ ] Write `docs/release-notes-wsjtx-inhibit-rc2.md` (rc1 notes are a good template)
+- [x] D10 — add firewall, fail-open, one-instance, and "is it listening?" sections
+- [x] D11 — settle the tag scheme, update `README.INHIBIT.md`
+- [x] Write `docs/release-notes-wsjtx-inhibit-rc2.md` (rc1 notes are a good template)
 
 **Exit criterion:** a tester can go from the Releases page to a confirmed
 `TX INHIBITED` badge without hitting a wrong filename, wrong key, or dead link.
