@@ -444,6 +444,7 @@ Implements §3 (Hold sender + KEYing monitor):
 |--------|--------|
 | **` (grave) down** (or GUI button) | **assert KEY** → hold (`ttl_ms`=hold_timeout) + keepalives |
 | **` up** / button up | KEY open → hang per §3.2, then **release hold** (`ttl_ms: 0`) after hang |
+| **`--toggle`** (console) | `` ` ``/`~` latches: tap asserts, tap again releases. Reads as continuous KEY (hang 0). Frees the keyboard so WSJT-X can be driven at the same time; break-in hang needs level mode. |
 | **q** / **Esc** / Force RELEASE | cancel keepalives, **release hold** (quit on console) |
 
 **KEY key is grave/backtick `` ` ``** (left of `1` on US keyboards) — **not Space**.

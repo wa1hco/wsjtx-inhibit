@@ -627,6 +627,10 @@ int main (int argc, char * argv[])
   QCommandLineOption quietKaOpt {
     QStringList () << "verbose-keepalive",
     QStringLiteral ("Log every keepalive (default: HOLD, KEY events, RELEASE only).")};
+  QCommandLineOption toggleOpt {
+    QStringList () << "toggle",
+    QStringLiteral ("Latch KEY: tap ` (or ~) to assert, tap again to release. "
+                    "Default is level: KEY follows the key while it is held down.")};
   parser.addOption (hostOpt);
   parser.addOption (portOpt);
   parser.addOption (stationOpt);
@@ -635,6 +639,7 @@ int main (int argc, char * argv[])
   parser.addOption (fixedHangOpt);
   parser.addOption (globalKeysOpt);
   parser.addOption (quietKaOpt);
+  parser.addOption (toggleOpt);
   parser.process (app);
 
   QString const host = parser.value (hostOpt);
@@ -646,6 +651,7 @@ int main (int argc, char * argv[])
   int const fixed_hang_ms = fixed_hang_set ? parser.value (fixedHangOpt).toInt () : 0;
   bool const global_keys = parser.isSet (globalKeysOpt);
   bool const verbose_ka = parser.isSet (quietKaOpt);
+  bool const toggle_mode = parser.isSet (toggleOpt);
   if (hold_timeout_ms < 100 || hold_timeout_ms > 30000)
     {
       QTextStream err (stderr);
@@ -720,6 +726,14 @@ int main (int argc, char * argv[])
   int releases_sent = 0;
 
   bool key_down = false;
+  // --toggle: the physical key is a momentary contact, so latch it here and let
+  // everything downstream keep seeing a KEY *level*. A latched KEY reads to the
+  // KEYing monitor as one long continuous mark, i.e. the non-break-in / SSB
+  // class (hang 0), which is exactly right: the operator ends the transmission
+  // explicitly rather than by pausing. Break-in CW hang can only be exercised
+  // in the default level mode.
+  bool toggle_latched = false;
+  bool toggle_prev_raw = false;
   bool hold_active = false;   // Hold sender SM
   qint64 hang_until_ms = -1;  // EOT after KEY open (break-in hang)
   // Focus-arm: once a grave reaches this TTY, track EVIOCGKEY until KEY up.
@@ -813,7 +827,9 @@ int main (int argc, char * argv[])
   // Banner uses ASCII only so logs stay readable on non-UTF-8 terminals.
   QTextStream out (stdout);
   out << "inhibit-test (KEY agent) -> " << host << ':' << port << '\n'
-      << "  ` (grave) = KEY level (assert / open)  - not Space\n"
+      << (toggle_mode
+          ? "  ` (grave, or ~) = KEY LATCH: tap to assert, tap again to release  - not Space\n"
+          : "  ` (grave) = KEY level (assert / open)  - not Space\n")
       << "  q or Esc  = release hold and quit\n"
       << "  station=" << station << "  band=" << band << '\n'
       << "  hold_timeout_ms=" << hold_timeout_ms
@@ -828,8 +844,12 @@ int main (int argc, char * argv[])
                        : QStringLiteral ("KEYing monitor: break-in 1.5x word gap; continuous hang=0"))
       << '\n'
       << "  " << input_note << '\n'
-      << "  Tip: hold ` >=500 ms for hang=0 (continuous); short taps use break-in hang.\n"
-      << "  Or: --fixed-hang-ms 0 for immediate release on KEY open.\n"
+      << (toggle_mode
+          ? "  Latched KEY reads as one continuous mark, so hang=0 and the release is\n"
+            "  immediate on the second tap. Break-in CW hang needs the default level mode.\n"
+          : "  Tip: hold ` >=500 ms for hang=0 (continuous); short taps use break-in hang.\n"
+            "  Or: --fixed-hang-ms 0 for immediate release on KEY open.\n"
+            "  Or: --toggle to latch (tap on, tap off) - hands free while you drive WSJT-X.\n")
       << "  See docs/TX_INHIBIT.md s3 (Hold sender + KEYing monitor).\n\n";
   out.flush ();
 
@@ -927,9 +947,19 @@ int main (int argc, char * argv[])
 #endif
 
       bool space = raw_space;
+      if (toggle_mode)
+        {
+          if (raw_space && !toggle_prev_raw)   // rising edge only
+            {
+              toggle_latched = !toggle_latched;
+            }
+          toggle_prev_raw = raw_space;
+          space = toggle_latched;
+        }
 
       if (want_quit)
         {
+          toggle_latched = false;
           end_hold ("quit");
           out << "quit\n";
           out.flush ();

@@ -35,12 +35,29 @@ tools/inhibit_spacebar/*.c        →  target inhibit-test-gui   →  bin/inhibi
 
 **Input focus (default):** `` ` `` and q/Esc only count when typed into **this** terminal. Use **`--global-keys`** for system-wide KEY.
 
+**`--toggle` — latched KEY.** Tap `` ` `` (or `~`, same physical key) to assert; tap
+again to release. Default is *level*: KEY follows the key while it is physically held.
+
+Toggle exists because level mode makes some tests impossible: the tool needs keyboard
+focus to see the key held, but so does WSJT-X when you want to press Tune or Enable Tx
+at the same time. Latching frees your hands — tap on, drive WSJT-X, tap off.
+
+A latched KEY reads to the KEYing monitor as **one long continuous mark**, i.e. the
+non-break-in / SSB class, so hang is 0 and the release is immediate on the second tap.
+That is the correct mapping, not a workaround: the operator ends the transmission
+explicitly rather than by pausing. **Break-in CW hang can only be exercised in the
+default level mode**, where gap timing is what classifies the stream.
+
+Combines with `--global-keys` if you want to tap from any window.
+
 **Linux requirement:** read access to `/dev/input` (group **`input`**). Without it the tool **refuses to start**.
 
 ```bash
 sudo usermod -aG input "$USER"   # Linux; then full log out/in
 inhibit-test --host 127.0.0.1 --port 22372 --station TEST-KEY --ttl-ms 600
 inhibit-test --fixed-hang-ms 0
+inhibit-test --toggle                  # tap ` on, tap ` off
+inhibit-test --toggle --global-keys    # ...from any window
 ```
 
 ### Windows GUI (`inhibit-test-gui`)
