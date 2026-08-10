@@ -394,8 +394,6 @@ public:
 
   // Settings: Enable TX Inhibit. Default false.
   bool enable_tx_inhibit () const;
-  // True when a UDP listen port is bound for KEY-agent blocks.
-  bool tx_inhibit_gate_active () const;
   // Bound UDP block listen port (0 if not active).
   quint16 tx_inhibit_port () const;
 //  Q_SLOT void transceiver_tune (bool = true);

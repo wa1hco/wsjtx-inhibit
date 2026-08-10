@@ -1377,7 +1377,15 @@ void HamlibTransceiver::do_poll ()
 void HamlibTransceiver::do_ptt (bool on)
 {
   CAT_TRACE ("PTT: " << on << " " << state () << " reversed=" << m_->reversed_);
-  ptt_on_ = on;
+  // Upstream only tracks ptt_on_ for rigs that actually have a PTT port, and
+  // do_poll() gates its PWR/SWR reads on it. Hoisting this above the guard
+  // turned those reads on for RIG_PTT_NONE rigs -- a change to the stock path
+  // that has nothing to do with TX Inhibit, and would not belong in a
+  // merge-back diff. See docs/REVIEW-rc2.md C5.
+  if (RIG_PTT_NONE != m_->rig_->state.pttport.type.ptt)
+    {
+      ptt_on_ = on;
+    }
   if (inhibit_gate_)
     {
       // Stock sequencing already did Fake It QSY. Intent only; gate mixes

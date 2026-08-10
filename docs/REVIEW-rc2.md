@@ -546,7 +546,7 @@ external tool can serve that need first and prove whether an in-app dialog is wa
 
 ---
 
-### ☐ C5. `ptt_on_` is now set unconditionally — unintended stock-path change
+### ☑ C5. `ptt_on_` is now set unconditionally — unintended stock-path change
 
 **Severity:** medium (deviation from upstream in shared code; maintainers will flag it)
 **Evidence:** `HamlibTransceiver.cpp:1380` hoists `ptt_on_ = on;` above the
@@ -557,18 +557,26 @@ For a rig with no PTT port, `ptt_on_` now becomes true, which enables the PWR/SW
 polling block at `HamlibTransceiver.cpp:1326` that upstream never reached. This happens
 **whether or not TX Inhibit is enabled**.
 
-**Fix:** restore the guard, or scope the unconditional assignment to the
-`inhibit_gate_` branch only.
+**FIXED 2026-08-09.** Guard restored: `ptt_on_` is assigned only when
+`RIG_PTT_NONE != pttport.type.ptt`, as upstream had it. The gate branch is unaffected —
+it never depended on `ptt_on_`.
+
+Worth noting *why* this mattered beyond correctness: it was a change to the stock path
+with nothing to do with TX Inhibit, so by `CONTRIBUTING.md`'s one-logical-change rule it
+could not have travelled in a merge-back diff regardless.
 
 ---
 
-### ☐ C6. Dead code: `Configuration::tx_inhibit_gate_active()`
+### ☑ C6. Dead code: `Configuration::tx_inhibit_gate_active()`
 
 **Severity:** low
 **Evidence:** declared `Configuration.hpp:398`, defined `Configuration.cpp:1266`,
 called nowhere in the tree.
 
-**Fix:** wire it into the "gate is listening" badge (C4) or remove it.
+**REMOVED 2026-08-09.** The badge it was intended to feed no longer exists (C4.1), and
+`update_inhibit_status()` needs the port *value* rather than a boolean, so the accessor
+added nothing. Deleting it shrinks the footprint in two upstream-owned files, which is
+the §H.1 currency that actually matters.
 
 ---
 

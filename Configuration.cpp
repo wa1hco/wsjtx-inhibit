@@ -1260,12 +1260,6 @@ bool Configuration::enable_tx_inhibit () const
   return m_->enable_tx_inhibit_;
 }
 
-bool Configuration::tx_inhibit_gate_active () const
-{
-  // Active once the gate has bound a UDP listen port.
-  return m_->tx_inhibit_port_ != 0;
-}
-
 quint16 Configuration::tx_inhibit_port () const
 {
   return m_->tx_inhibit_port_;
