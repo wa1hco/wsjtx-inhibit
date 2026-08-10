@@ -61,6 +61,7 @@
 #include "helper_functions.h"
 #include "revision_utils.hpp"
 #include "qt_helpers.hpp"
+#include "TxInhibit/TxInhibitLogic.hpp" // default_gate_port for the inhibit badge
 #include "Network/NetworkAccessManager.hpp"
 #include "Audio/soundout.h"
 #include "Audio/soundin.h"
@@ -466,7 +467,6 @@ MainWindow::MainWindow(QDir const& temp_directory, bool multiple,
   m_onAirFreq0 {0.0},
   m_first_error {true},
   tx_status_label {tr ("Receiving")},
-  inhibit_status_label {},
   wsprNet {new WSPRNet {this}},
   Eqsl {new EQSL {this}},
   m_baseCall {Radio::base_callsign (m_config.my_callsign ())},
@@ -4361,6 +4361,74 @@ bool MainWindow::eventFilter (QObject * object, QEvent * event)
   return QObject::eventFilter(object, event);
 }
 
+// TX Inhibit has no status-bar widget of its own: the operator-visible signal
+// is tx_status_label turning red and reading INHIBITED (see guiUpdate), and a
+// second box merely disrupted the spacing of the whole line.
+//
+// Everything else lives here, costing no layout space:
+//   * the tooltip on tx_status_label always describes the current state,
+//     including the bound port and who is holding;
+//   * a one-shot status message warns when the operator has opted in but the
+//     station is NOT reachable — the fail-open/fail-silent hole in C4. It fires
+//     only on a change, so it cannot nag.
+void MainWindow::update_inhibit_status ()
+{
+  if (!m_config.enable_tx_inhibit ())
+    {
+      tx_status_label.setToolTip ({});
+      m_tx_inhibit_warned_port = 0;
+      m_tx_inhibit_warned = false;
+      return;
+    }
+
+  // Read the port from Configuration every time rather than caching it:
+  // close_rig() zeroes it without emitting, and a stale copy would describe a
+  // station as protected when nothing is listening.
+  auto const port = m_config.tx_inhibit_port ();
+
+  if (m_tx_inhibited)
+    {
+      tx_status_label.setToolTip (
+        m_tx_inhibit_holder.isEmpty ()
+        ? tr ("TX Inhibit: a KEY agent is holding PTT off (UDP port %1).").arg (port)
+        : tr ("TX Inhibit: held by %1 (UDP port %2).").arg (m_tx_inhibit_holder).arg (port));
+    }
+  else if (!port)
+    {
+      tx_status_label.setToolTip (
+        tr ("TX Inhibit is enabled but NOT listening: no UDP port is bound.\n"
+            "The rig may be closed, PTT method may not be RTS/DTR, or the bind failed.\n"
+            "This station is NOT protected."));
+    }
+  else if (TxInhibit::default_gate_port == port)
+    {
+      tx_status_label.setToolTip (
+        tr ("TX Inhibit: listening for KEY-agent holds on UDP port %1.").arg (port));
+    }
+  else
+    {
+      tx_status_label.setToolTip (
+        tr ("TX Inhibit: port %1 was busy, so an ephemeral port (%2) is in use.\n"
+            "A KEY agent aimed at %1 will NOT reach this station.")
+        .arg (TxInhibit::default_gate_port).arg (port));
+    }
+
+  // Unreachable == enabled but not bound to the well-known port. Warn once per
+  // transition rather than on every refresh.
+  bool const unreachable = !port || TxInhibit::default_gate_port != port;
+  if (unreachable && (!m_tx_inhibit_warned || m_tx_inhibit_warned_port != port))
+    {
+      showStatusMessage (port
+                         ? tr ("TX Inhibit: listening on %1, not %2 — a KEY agent aimed"
+                               " at %2 will not reach this station")
+                           .arg (port).arg (TxInhibit::default_gate_port)
+                         : tr ("TX Inhibit is enabled but no UDP port is bound —"
+                               " this station is NOT protected"));
+    }
+  m_tx_inhibit_warned = unreachable;
+  m_tx_inhibit_warned_port = port;
+}
+
 void MainWindow::createStatusBar()                           //createStatusBar
 {
   tx_status_label.setAlignment (Qt::AlignHCenter);
@@ -4369,28 +4437,13 @@ void MainWindow::createStatusBar()                           //createStatusBar
   tx_status_label.setFrameStyle (QFrame::Panel | QFrame::Sunken);
   statusBar()->addWidget (&tx_status_label);
 
-  // TX Inhibit badge — hidden until KEY agent has said not to transmit.
-  inhibit_status_label.setAlignment (Qt::AlignHCenter);
-  inhibit_status_label.setMinimumSize (QSize {160, 18});
-  inhibit_status_label.setStyleSheet ("QLabel{color: #ffffff; background-color: #cc0000; font-weight: bold}");
-  inhibit_status_label.setFrameStyle (QFrame::Panel | QFrame::Sunken);
-  statusBar()->addWidget (&inhibit_status_label);
-  inhibit_status_label.hide ();
   connect (&m_config, &Configuration::tx_inhibit_changed, this,
            [this] (bool inhibited, QString const& source
                    , quint32 hold_rx, quint32 release_rx
                    , quint32 expiries, quint32 invalid) {
-             if (inhibited)
-               {
-                 inhibit_status_label.setText (source.isEmpty ()
-                                               ? tr ("TX INHIBITED")
-                                               : source);
-                 inhibit_status_label.show ();
-               }
-             else
-               {
-                 inhibit_status_label.hide ();
-               }
+             m_tx_inhibited = inhibited;
+             m_tx_inhibit_holder = inhibited ? source : QString {};
+             update_inhibit_status ();
              if (m_messageClient)
                {
                  m_messageClient->inhibit_status (
@@ -4399,17 +4452,10 @@ void MainWindow::createStatusBar()                           //createStatusBar
                }
            });
   connect (&m_config, &Configuration::tx_inhibit_port_changed, this,
-           [this] (quint16 port) {
-             if (port)
-               {
-                 inhibit_status_label.setToolTip (
-                   tr ("TX Inhibit: UDP listen port %1 (KEY agent: do not transmit)").arg (port));
-               }
-             else
-               {
-                 inhibit_status_label.setToolTip ({});
-               }
+           [this] (quint16) {
+             update_inhibit_status ();
            });
+  update_inhibit_status ();
 
   config_label.setAlignment (Qt::AlignHCenter);
   config_label.setMinimumSize (QSize {80, 18});
@@ -8480,6 +8526,15 @@ void MainWindow::guiUpdate()
           tx_status_label.setText(t.trimmed());
         }
       }
+      // Transmit intent, but a KEY agent is holding PTT off. m_transmitting is
+      // set by the sequencer (not from the PTT line), so without this the label
+      // reads "Tx: <message>" in transmit-yellow while the radio is silent.
+      // Covers Tune too, which also runs through this branch.
+      // Last, so it overrides every style/text chosen above.
+      if (m_tx_inhibited) {
+        tx_status_label.setStyleSheet("QLabel{color: #ffffff; background-color: #cc0000; font-weight: bold}");
+        tx_status_label.setText (tr ("Inhibit"));
+      }
     } else if(m_monitoring) {
       if (!m_tx_watchdog) {
         tx_status_label.setStyleSheet("QLabel{color: #000000; background-color: #00ff00}");
@@ -8516,6 +8571,13 @@ void MainWindow::guiUpdate()
           t += QString {"   %1%"}.arg (npct, 2);
         }
         tx_status_label.setText (t);
+        // Receiving with a hold active: nothing is being prevented right now,
+        // so this is ambient status rather than an alarm. Staying in the green
+        // family keeps the escalation to red (transmit branch) as the signal.
+        if (m_tx_inhibited) {
+          tx_status_label.setStyleSheet("QLabel{color: #000000; background-color: #b3ffb3}");
+          tx_status_label.setText (tr ("Inhibit"));
+        }
       }
       transmitDisplay(false);
     } else if (!m_diskData && !m_tx_watchdog) {

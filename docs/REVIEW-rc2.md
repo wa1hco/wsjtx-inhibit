@@ -230,8 +230,12 @@ and the rc2 release notes.
 Option (a) (separate application name) remains available if testers report confusion;
 it is a one-line change in `main.cpp` but costs everyone their existing settings.
 
-**Still to verify in the VM:** that `--rig-name inhibit` really produces
-`WSJT-X - inhibit.ini` and leaves `WSJT-X.ini` untouched.
+**Verified on Linux 2026-08-09** (incidentally, during a GUI smoke test):
+`./wsjtx --rig-name inhibit-badge-smoke` created `~/.config/WSJT-X - inhibit-badge-smoke.ini`
+and `~/.local/share/WSJT-X - inhibit-badge-smoke/`, leaving the stock `WSJT-X.ini`
+untouched. The mechanism is `main.cpp:206` appending to `applicationName()`, which is
+platform-independent Qt code — so the Windows behaviour follows, though confirming it
+in the VM is still worth a minute.
 
 ---
 
@@ -418,6 +422,82 @@ Answers "was I held during the QSO I lost?" after the fact, which no live indica
 hold across CW element gaps, so a hold spans a whole transmission. A ~500 ms minimum
 dwell is cheap insurance for the case where an agent dies mid-transmission and the
 hold timeout fires.
+
+**IMPLEMENTED 2026-08-09 — surface 1 only. Surface 2 was tried and removed.**
+
+**What shipped:** `guiUpdate()` overrides `tx_status_label` in **both** state
+branches. Escalation carries the meaning:
+
+| WSJT-X state | Hold | Label |
+|---|---|---|
+| Monitoring (receive) | none | green `Receiving` *(upstream, unchanged)* |
+| Monitoring (receive) | active | pale green `#b3ffb3` **`Inhibit`** — ambient status |
+| Transmitting / Tune | none | yellow `Tx: <message>` *(upstream, unchanged)* |
+| Transmitting / Tune | active | red `#cc0000` bold **`Inhibit`** — alarm |
+| Monitor off, not transmitting | either | blank *(upstream, unchanged)* |
+
+No `Tx:` prefix on the alarm — nothing is being transmitted, and the prefix was a
+smaller version of the same lie this fixes. Text is `Inhibit`, not `Inhibited`:
+operator preference, one syllable shorter, and it fits the 100 px label.
+
+**Placement bug found in operator testing, and it was instructive.** The first cut
+anchored the override on a `tx_status_label.setText (t)` that I took to be the Tx
+message. It is not — it is the *Receiving* text inside the `else if (m_monitoring)`
+branch. So the override landed in the receive path and never ran during transmit,
+i.e. it implemented the case that did not matter and missed the defect entirely.
+
+The symptom set reported from testing pinned it exactly:
+
+| Observation | What it proved |
+|---|---|
+| Monitor on, hold → shows the text | override is in the monitoring branch |
+| Monitor off, hold → blank | third branch (`!m_diskData && !m_tx_watchdog`) clears; override absent |
+| Monitor off, **Tune**, hold → `Tx: TUNE` yellow, inhibit not shown, yet the radio *is* held | override missing from the `m_transmitting` branch — Tune runs through it |
+
+**Lesson:** in a 900-line function with several sibling branches setting the same
+widget, anchoring a patch on a repeated statement (`setText (t)`) is not enough — the
+enclosing branch has to be identified. Verifying by reading the diff would not have
+caught this; only running it did.
+
+**Surface 2 (a dedicated always-visible badge) is withdrawn.** Two rounds of visual
+testing killed it:
+
+1. *Wording collision.* Both indicators rendered red, bold, reading `INHIBITED`.
+   Adjacent, they read as one string — reported as the alarm text being appended to
+   the Tx message rather than replacing it. Fixed by making the badge show only
+   `INH <port>`, colour carrying state.
+2. *Position and hiding.* `config_label` between them is hidden by default, so the
+   badge abutted `mode_label` — `#ff6699` for FT8, `#ff6666` for MSK144 — producing
+   three touching red boxes. Separately, `showStatusMessage()` calls
+   `statusBar()->showMessage(msg, 5000)`, which hides every **non**-permanent widget;
+   the badge would have vanished for five seconds at a time. Moving it to the
+   permanent right-hand group fixed both.
+3. *Rejected anyway.* Operator verdict: the extra box **disrupts the spacing of the
+   whole status-bar line** and is not worth its width for something that is
+   uninteresting most of the time. Removed entirely.
+
+**How the C4 signal survives without a widget** — `update_inhibit_status()`:
+
+| Channel | Carries | Cost |
+|---|---|---|
+| Tooltip on `tx_status_label` | current state, bound port, holding station | none |
+| One-shot `showStatusMessage()` | "enabled but no port bound — NOT protected", or "listening on N, not 22372" | none (transient) |
+
+The status message fires only on a *change* of reachability (guarded by
+`m_tx_inhibit_warned` / `m_tx_inhibit_warned_port`), so it warns once per transition
+and cannot nag.
+
+**Honest limitation:** a tooltip is not discoverable, and a 5-second message can be
+missed. The fail-silent hole in C4 is *narrowed*, not closed. Closing it properly needs
+a surface that persists — which is exactly what was rejected — so the remaining option
+is the surface-3 diagnostics dialog, or accepting that an operator who wants certainty
+runs a test hold. Recorded rather than argued.
+
+**Known residual:** a rig closed by CAT *failure* zeroes the port without emitting, so
+the tooltip can lag until the next signal. Fixing it needs a new signal on
+`Configuration`, i.e. more upstream-owned surface (§H.1).
+
+Verified: builds clean and starts.
 
 **Recommended order:** 1 and 2 together (same edit region, and 1 is a defect fix).
 3 only when someone needs to debug an agent — the UDP telemetry already exists, so an
@@ -1462,7 +1542,7 @@ it is only read by `Network/Cloudlog.cpp`.
 
 ### H.4 Rebase vs merge — decide this before the first rebase
 
-☐ **H4.** *"Rebases as needed"* on a **published** fork rewrites history. Anyone who
+☑ **H4. DECIDED 2026-08-09 — two branches.** *"Rebases as needed"* on a **published** fork rewrites history. Anyone who
 cloned `wa1hco/wsjtx-inhibit` — testers building from source, and any future
 contributor — gets a non-fast-forward on their next pull.
 
@@ -1475,8 +1555,38 @@ Options:
 | **Hybrid (suggested)** | `main` only ever merges (safe for testers); a separate `upstream-pr` branch is rebased and force-pushed freely | Two branches to keep in step |
 
 The hybrid matches the two audiences: testers need a stable branch, the merge-back
-needs a clean one. Whichever you pick, **document it in `UPSTREAM.md`** so testers
-know whether to expect force-pushes.
+needs a clean one.
+
+### H4.1 The decided policy
+
+| Branch | Audience | Upstream integration | History | Tags |
+|---|---|---|---|---|
+| **`main`** | testers, package builds | **merge** from upstream | append-only, **never force-pushed** | `build/v*`, `packages/v*` |
+| **`upstream-pr`** | the merge-back proposal | **rebase** onto current upstream `master` | rewritten freely, force-pushed | none |
+
+**Rules that make this work:**
+
+1. **All development lands on `main` first.** It is the branch that gets built,
+   packaged, and tested. `upstream-pr` is a derived artefact, not a place to work.
+2. **`upstream-pr` is disposable.** Rebuild it from scratch when preparing a proposal
+   rather than maintaining it continuously — cherry-pick or re-author the feature
+   commits onto current `master`, strip everything marked `FORK-ONLY` (§H.3), and
+   force-push. Trying to keep it continuously in sync doubles the rebase work for no
+   benefit, since upstream only sees it once.
+3. **Never merge `upstream-pr` back into `main`.** One-way flow only. Merging a
+   rebased branch into a merge-based branch produces duplicated commits.
+4. **Testers are never asked to force-pull.** That is the whole point of the split, and
+   it should be stated in `UPSTREAM.md` (§H5) so it is a promise, not an accident.
+
+**Consequence for §H.2 (branding) and U5:** both become cheaper. Anything marked
+`FORK-ONLY` is stripped mechanically when `upstream-pr` is built, so carrying fork-only
+changes on `main` costs only rebase-conflict noise during upstream merges — not
+merge-back friction. That weakens (but does not remove) the argument for shedding the
+branding: the remaining cost is conflicts in `mainwindow.ui` and friends on every
+upstream merge.
+
+**Still to do:** document the policy in `UPSTREAM.md` (§H5), and create
+`upstream-pr` only when a proposal is actually being prepared — not before.
 
 ### H.5 `UPSTREAM.md` should become a living rebase record
 
