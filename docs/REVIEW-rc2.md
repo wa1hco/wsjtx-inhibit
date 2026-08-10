@@ -327,10 +327,23 @@ true → `rig_set_ptt` fails → throw → unwinds through `QMetaObject::activat
 `ExceptionCatchingApplication::notify` catches it and calls `qFatal("Aborting")`
 (`ExceptionCatchingApplication.hpp:27-46`).
 
-**Fix:** wrap the emit in `TxInhibitGate::apply_line()` (or the body of
-`apply_physical_ptt`) in `try`/`catch`, routing the message to `lineError` /
-`CAT_TRACE` rather than letting it escape. Teardown already does this correctly at
-`HamlibTransceiver.cpp:400-408` — mirror that.
+**FIXED 2026-08-09.** `TxInhibitGate::emit_physical_ptt()` wraps the emit and routes
+failures to `lineError`. Both call sites use it: `apply_line()` and the
+`shutdown(emit_pin=true)` path.
+
+**The catch belongs in the gate, not in `apply_physical_ptt`.** Putting it there would
+also swallow errors on the *stock* path, where `do_ptt` is called from
+`TransceiverBase::set` and exceptions are supposed to propagate and fail the rig. Only
+the gate-driven path was unguarded.
+
+**`last_radiate_` is deliberately not rolled back on failure.** The pin state is
+unknown after a failed set, and rolling back would make the 50 Hz tick retry forever —
+one unplugged cable becomes an error storm. The rig's own polling notices and fails the
+transceiver properly.
+
+**Residual:** `lineError` is still only wired to `CAT_TRACE` in `HamlibTransceiver`, so
+a PTT failure on this path is logged but not shown to the operator. Surfacing it is C4
+territory, and needs the same signal plumbing C4's residual describes.
 
 ---
 
