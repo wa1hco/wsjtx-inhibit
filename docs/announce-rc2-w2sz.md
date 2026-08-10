@@ -7,28 +7,29 @@ to an empty page. Check
 
 ---
 
-**Subject:** WSJT-X with TX Inhibit — rc2 available for testing (multi-op / same-band)
+**Subject:** WSJT-X with TX Inhibit — rc2 available for testing
 
 ---
 
-Gang,
-
 I have a second release candidate of **wsjtx-inhibit** ready for anyone willing to
-bang on it. It is WSJT-X 3.0.2 with one addition: a way to stop a digital station
-keying while another op on the same band is transmitting.
+bang on it. It is WSJT-X 3.0.2 with one addition: a way to keep a digital station
+off the air while an SSB/CW op on the same band is transmitting.
 
 **The problem it addresses.** In a multi-op setup with more than one radio on a band,
-an unattended FT8 station will happily key right on top of the SSB or CW operator.
-The usual fix is Halt Tx, which kills the QSO sequence and means restarting the
-contact. TX Inhibit instead holds the **PTT line** off while leaving FT8 sequencing
-and audio running. The digital station simply misses that transmission and carries on
-with the next one. In practice that lets you interleave FT8 with voice and CW on one
-band without babysitting the digital seat.
+an unattended FT8 station can share the band with an SSB/CW station but cannot be allowed to transmit simultaneously.  This requires the WSJTX radio's PTT line be inhibited for the duration of the SSB/CW transmission.  That approach has been proven to prevent overlapping transmissions and minimize the impact on FT8 operation.
 
-**How it works.** A "KEY agent" watches the priority radio's key line and sends a
+If the WSJTX and SSB/CW station are colocated, then inhibiting PTT on WSJTX is relatively easy.  I have the SO4R board for just that.  But when the WSJTX station are remoted, then inhibiting PTT requires a different solution.
+
+**The Objective of the fix.** The solution is to inhibit PTT to the WSJTX radio from within WSJTX at the point where it asserts RTS or DTR to key the radio.  The inhibit function is controlled by UDP messages sent over the network from a small real time Agent that monitors the SSB/CW KEY line.
+
+TX Inhibit holds the **PTT line** off while leaving FT8 sequencing
+and audio running. This is not Halt Tx, which aborts the QSO and leaves you
+restarting the contact. The digital station simply drops part of the 15 sec transmission. In my testing, unless the signals are down in the noise, losing a few seconds of an FT8
+transmission does not prevent it being decoded.
+
+**How it works.** A "KEY agent" watches the SSB/CW radio's key line and sends a
 small UDP message to each WSJT-X station telling it not to transmit. Holds are
-refreshed a few times a second and expire on their own if the agent stops, so a dead
-agent or an unplugged network cable fails back to normal transmit rather than a
+refreshed a few times a second and expire on their own if the KEY agent stops, so a dead agent or an unplugged network cable fails back to normal transmit rather than a
 permanently muted station.
 
 **What you need**
@@ -47,7 +48,7 @@ AppImage / `.deb` / `.rpm` are there too.
 
 Install instructions: `INSTALL-WINDOWS.md` in that repo.
 
-**It installs beside your existing WSJT-X, not over it** — that was the main thing
+**It installs beside your existing WSJT-X, not over it** — that was a thing
 fixed since rc1. Program files land in `C:\WSJT\wsjtx-inhibit`, with its own entry in
 Add/Remove Programs. One caveat: it still *shares settings* with a normal WSJT-X
 install. If you would rather it did not touch your working configuration, add
