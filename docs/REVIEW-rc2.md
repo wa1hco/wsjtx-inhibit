@@ -505,9 +505,13 @@ the radio did not key while `want_tx` was asserted via Tune, and PTT was not lef
 stranded on the way back to receive. That exercises the pin filter through a state
 transition rather than a static hold, and covers the no-stuck-PTT path.
 
-Still to confirm: the *label* during that Tune — red `Inhibit` (fix working) versus
-yellow `Tx: TUNE` (function right, label still lying, i.e. the original defect
-surviving). The functional result above does not distinguish the two.
+**Label confirmed red `Inhibit` during that Tune.** The branch fix landed: the label
+now reports the transmitter rather than the sequencer, in the very case an earlier
+build got wrong. C4.1 surface 1 is verified end to end on Linux — receive, transmit,
+and Tune — against a real radio.
+
+What remains for this finding is Windows-side only, and none of it is about the label
+logic: the NSIS `InstallDir` line, the firewall prompt, and the port-occupied case.
 
 **Recommended order:** 1 and 2 together (same edit region, and 1 is a defect fix).
 3 only when someone needs to debug an agent — the UDP telemetry already exists, so an
