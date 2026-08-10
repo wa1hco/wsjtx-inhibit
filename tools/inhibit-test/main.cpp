@@ -112,6 +112,10 @@ static termios g_term_saved {};
 static bool g_term_raw = false;
 static bool g_stdin_space = false;
 static bool g_stdin_quit = false;
+// Set when the press was '~' (shifted grave) rather than '`'. The TTY byte
+// distinguishes the two directly, which is more reliable than sampling the
+// shift key at poll time.
+static bool g_stdin_latch = false;
 
 void restore_stdin_termios ()
 {
@@ -172,6 +176,10 @@ void poll_stdin_keys ()
             {
               // Grave press while this TTY has focus.
               g_stdin_space = true;
+              if (c == '~')
+                {
+                  g_stdin_latch = true;
+                }
             }
           else if (c == 'q' || c == 'Q' || c == 0x1b || c == 3 /* Ctrl-C */)
             {
@@ -216,6 +224,14 @@ bool consume_stdin_key_press ()
     }
   g_stdin_space = false;
   return true;
+}
+
+// Returns (and clears) "the last grave press seen on this TTY was shifted".
+bool take_stdin_latch_request ()
+{
+  bool const v = g_stdin_latch;
+  g_stdin_latch = false;
+  return v;
 }
 
 bool quit_requested_stdin ()
@@ -362,6 +378,25 @@ bool space_down_evdev ()
   return (keybits[bit / (8 * sizeof (long))] >> (bit % (8 * sizeof (long)))) & 1UL;
 }
 
+// Shift held? Used only under --global-keys, where no TTY byte is available to
+// tell '~' from '`'.
+bool shift_down_evdev ()
+{
+  if (g_evdev_fd < 0)
+    {
+      return false;
+    }
+  unsigned long keybits[(KEY_MAX + 8 * sizeof (long) - 1) / (8 * sizeof (long))] = {};
+  if (ioctl (g_evdev_fd, EVIOCGKEY (sizeof (keybits)), keybits) < 0)
+    {
+      return false;
+    }
+  auto down = [&] (int code) {
+    return (keybits[code / (8 * sizeof (long))] >> (code % (8 * sizeof (long)))) & 1UL;
+  };
+  return down (KEY_LEFTSHIFT) || down (KEY_RIGHTSHIFT);
+}
+
 bool quit_requested_evdev ()
 {
   if (g_evdev_fd < 0)
@@ -386,6 +421,12 @@ bool space_down_global ()
 {
   // US/PC keyboard: VK_OEM_3 is the `~ key (left of 1). Rare in normal typing.
   return (GetAsyncKeyState (VK_OEM_3) & 0x8000) != 0;
+}
+
+// Shift held? Distinguishes '~' (latch) from '`' (momentary).
+bool shift_down_global ()
+{
+  return (GetAsyncKeyState (VK_SHIFT) & 0x8000) != 0;
 }
 
 bool quit_requested_global ()
@@ -627,10 +668,6 @@ int main (int argc, char * argv[])
   QCommandLineOption quietKaOpt {
     QStringList () << "verbose-keepalive",
     QStringLiteral ("Log every keepalive (default: HOLD, KEY events, RELEASE only).")};
-  QCommandLineOption toggleOpt {
-    QStringList () << "toggle",
-    QStringLiteral ("Latch KEY: tap ` (or ~) to assert, tap again to release. "
-                    "Default is level: KEY follows the key while it is held down.")};
   parser.addOption (hostOpt);
   parser.addOption (portOpt);
   parser.addOption (stationOpt);
@@ -639,7 +676,6 @@ int main (int argc, char * argv[])
   parser.addOption (fixedHangOpt);
   parser.addOption (globalKeysOpt);
   parser.addOption (quietKaOpt);
-  parser.addOption (toggleOpt);
   parser.process (app);
 
   QString const host = parser.value (hostOpt);
@@ -651,7 +687,6 @@ int main (int argc, char * argv[])
   int const fixed_hang_ms = fixed_hang_set ? parser.value (fixedHangOpt).toInt () : 0;
   bool const global_keys = parser.isSet (globalKeysOpt);
   bool const verbose_ka = parser.isSet (quietKaOpt);
-  bool const toggle_mode = parser.isSet (toggleOpt);
   if (hold_timeout_ms < 100 || hold_timeout_ms > 30000)
     {
       QTextStream err (stderr);
@@ -726,14 +761,14 @@ int main (int argc, char * argv[])
   int releases_sent = 0;
 
   bool key_down = false;
-  // --toggle: the physical key is a momentary contact, so latch it here and let
-  // everything downstream keep seeing a KEY *level*. A latched KEY reads to the
-  // KEYing monitor as one long continuous mark, i.e. the non-break-in / SSB
-  // class (hang 0), which is exactly right: the operator ends the transmission
-  // explicitly rather than by pausing. Break-in CW hang can only be exercised
-  // in the default level mode.
-  bool toggle_latched = false;
-  bool toggle_prev_raw = false;
+  // '~' latch. The physical key is a momentary contact, so hold the latch here
+  // and let everything downstream keep seeing a KEY *level*. A latched KEY reads
+  // to the KEYing monitor as one long continuous mark, i.e. the non-break-in /
+  // SSB class (hang 0) -- right by construction, since the operator ends the
+  // transmission explicitly rather than by pausing. Break-in CW hang is still
+  // exercised by the unshifted ` key, which stays momentary.
+  bool latch_on = false;
+  bool prev_key_raw = false;
   bool hold_active = false;   // Hold sender SM
   qint64 hang_until_ms = -1;  // EOT after KEY open (break-in hang)
   // Focus-arm: once a grave reaches this TTY, track EVIOCGKEY until KEY up.
@@ -827,9 +862,8 @@ int main (int argc, char * argv[])
   // Banner uses ASCII only so logs stay readable on non-UTF-8 terminals.
   QTextStream out (stdout);
   out << "inhibit-test (KEY agent) -> " << host << ':' << port << '\n'
-      << (toggle_mode
-          ? "  ` (grave, or ~) = KEY LATCH: tap to assert, tap again to release  - not Space\n"
-          : "  ` (grave) = KEY level (assert / open)  - not Space\n")
+      << "  ` (grave) = KEY level: hold to assert, release to open  - not Space\n"
+      << "  ~ (shift+grave) = LATCH on; press ` or ~ again to release\n"
       << "  q or Esc  = release hold and quit\n"
       << "  station=" << station << "  band=" << band << '\n'
       << "  hold_timeout_ms=" << hold_timeout_ms
@@ -844,12 +878,9 @@ int main (int argc, char * argv[])
                        : QStringLiteral ("KEYing monitor: break-in 1.5x word gap; continuous hang=0"))
       << '\n'
       << "  " << input_note << '\n'
-      << (toggle_mode
-          ? "  Latched KEY reads as one continuous mark, so hang=0 and the release is\n"
-            "  immediate on the second tap. Break-in CW hang needs the default level mode.\n"
-          : "  Tip: hold ` >=500 ms for hang=0 (continuous); short taps use break-in hang.\n"
-            "  Or: --fixed-hang-ms 0 for immediate release on KEY open.\n"
-            "  Or: --toggle to latch (tap on, tap off) - hands free while you drive WSJT-X.\n")
+      << "  Latched (~) reads as one continuous mark: hang=0, released on the next press.\n"
+      << "  Held (`) >=500 ms is also continuous; short taps use break-in hang.\n"
+      << "  Or: --fixed-hang-ms 0 for immediate release on KEY open.\n"
       << "  See docs/TX_INHIBIT.md s3 (Hold sender + KEYing monitor).\n\n";
   out.flush ();
 
@@ -867,6 +898,8 @@ int main (int argc, char * argv[])
 
       bool want_quit = false;
       bool raw_space = false;
+      // True when this press was '~' (shifted) rather than '`'.
+      bool latch_request = false;
 #if defined (Q_OS_LINUX)
       // KEY (grave):
       //   --global-keys: EVIOCGKEY always (system-wide).
@@ -879,6 +912,7 @@ int main (int argc, char * argv[])
           if (input_mode == InputMode::GlobalKeys)
             {
               raw_space = space_down_evdev ();
+              latch_request = raw_space && shift_down_evdev ();
               want_quit = quit_requested_evdev () || quit_requested_stdin ();
             }
           else if (focus_arm_evdev)
@@ -889,6 +923,8 @@ int main (int argc, char * argv[])
                 {
                   key_armed = true;
                   key_arm_ms = t;
+                  // The TTY byte distinguishes '~' from '`' directly.
+                  latch_request = take_stdin_latch_request ();
                 }
               if (key_armed)
                 {
@@ -920,12 +956,17 @@ int main (int argc, char * argv[])
           else
             {
               raw_space = space_down_evdev ();
+              latch_request = raw_space && shift_down_evdev ();
               want_quit = quit_requested_stdin ();
             }
         }
       else
         {
           raw_space = space_down_stdin (t);
+          if (raw_space)
+            {
+              latch_request = take_stdin_latch_request ();
+            }
           want_quit = quit_requested_stdin ();
         }
 #elif defined (Q_OS_UNIX)
@@ -935,31 +976,43 @@ int main (int argc, char * argv[])
       if (input_mode == InputMode::StdinTerminal)
         {
           raw_space = space_down_console ();
+          latch_request = raw_space && shift_down_global ();
           want_quit = quit_requested_console ();
         }
       else
         {
           raw_space = space_down_global ();
+          latch_request = raw_space && shift_down_global ();
           want_quit = quit_requested_global ();
         }
 #else
       Q_UNUSED (t);
 #endif
 
-      bool space = raw_space;
-      if (toggle_mode)
+      // Two behaviours on one physical key, always both available:
+      //   `  (unshifted) momentary - KEY follows the key, as a real KEY line
+      //                  does; this is what break-in CW classification needs.
+      //   ~  (shifted)   latches   - the hold stays asserted after the key is
+      //                  released, freeing the keyboard to drive WSJT-X.
+      // Either key, pressed again, clears the latch.
+      bool const key_rising = raw_space && !prev_key_raw;
+      if (key_rising)
         {
-          if (raw_space && !toggle_prev_raw)   // rising edge only
+          if (latch_on)
             {
-              toggle_latched = !toggle_latched;
+              latch_on = false;      // second press releases, ` or ~ alike
             }
-          toggle_prev_raw = raw_space;
-          space = toggle_latched;
+          else if (latch_request)
+            {
+              latch_on = true;       // ~ latches on
+            }
         }
+      prev_key_raw = raw_space;
+      bool space = latch_on || raw_space;
 
       if (want_quit)
         {
-          toggle_latched = false;
+          latch_on = false;
           end_hold ("quit");
           out << "quit\n";
           out.flush ();

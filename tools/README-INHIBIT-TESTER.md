@@ -35,20 +35,28 @@ tools/inhibit_spacebar/*.c        →  target inhibit-test-gui   →  bin/inhibi
 
 **Input focus (default):** `` ` `` and q/Esc only count when typed into **this** terminal. Use **`--global-keys`** for system-wide KEY.
 
-**`--toggle` — latched KEY.** Tap `` ` `` (or `~`, same physical key) to assert; tap
-again to release. Default is *level*: KEY follows the key while it is physically held.
+**Two behaviours on one key, both always available:**
 
-Toggle exists because level mode makes some tests impossible: the tool needs keyboard
-focus to see the key held, but so does WSJT-X when you want to press Tune or Enable Tx
-at the same time. Latching frees your hands — tap on, drive WSJT-X, tap off.
+| Key | Behaviour |
+|-----|-----------|
+| `` ` `` (unshifted) | **Momentary.** KEY follows the key — assert while held, open on release. What a real KEY line does, and what break-in CW classification needs. |
+| `~` (shift+grave) | **Latch on.** The hold stays asserted after you let go. |
+| `` ` `` **or** `~` again | **Clears the latch, always.** `` ` `` then continues as momentary while held. |
+
+The latch exists because momentary mode makes some tests impossible: the tool needs
+keyboard focus to see the key held, but so does WSJT-X when you want to press Tune or
+Enable Tx at the same time. Latch with `~`, slide over to WSJT-X, do what you need,
+come back and press either key to release.
 
 A latched KEY reads to the KEYing monitor as **one long continuous mark**, i.e. the
-non-break-in / SSB class, so hang is 0 and the release is immediate on the second tap.
-That is the correct mapping, not a workaround: the operator ends the transmission
-explicitly rather than by pausing. **Break-in CW hang can only be exercised in the
-default level mode**, where gap timing is what classifies the stream.
+non-break-in / SSB class, so hang is 0 and release is immediate on the next press.
+That is right by construction: the operator ends the transmission explicitly rather
+than by pausing. Break-in CW hang is still exercised by the unshifted `` ` ``, which
+stays momentary.
 
-Combines with `--global-keys` if you want to tap from any window.
+Note the latch survives loss of focus by design — the hold is held in the tool, not by
+the keyboard. Releasing it does need the key press to be seen, so in the default mode
+return focus to the terminal, or use `--global-keys` to press from anywhere.
 
 **Linux requirement:** read access to `/dev/input` (group **`input`**). Without it the tool **refuses to start**.
 
@@ -56,8 +64,7 @@ Combines with `--global-keys` if you want to tap from any window.
 sudo usermod -aG input "$USER"   # Linux; then full log out/in
 inhibit-test --host 127.0.0.1 --port 22372 --station TEST-KEY --ttl-ms 600
 inhibit-test --fixed-hang-ms 0
-inhibit-test --toggle                  # tap ` on, tap ` off
-inhibit-test --toggle --global-keys    # ...from any window
+inhibit-test --global-keys             # ` and ~ readable from any window
 ```
 
 ### Windows GUI (`inhibit-test-gui`)

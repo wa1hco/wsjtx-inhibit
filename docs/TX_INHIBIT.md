@@ -444,10 +444,12 @@ Implements §3 (Hold sender + KEYing monitor):
 |--------|--------|
 | **` (grave) down** (or GUI button) | **assert KEY** → hold (`ttl_ms`=hold_timeout) + keepalives |
 | **` up** / button up | KEY open → hang per §3.2, then **release hold** (`ttl_ms: 0`) after hang |
-| **`--toggle`** (console) | `` ` ``/`~` latches: tap asserts, tap again releases. Reads as continuous KEY (hang 0). Frees the keyboard so WSJT-X can be driven at the same time; break-in hang needs level mode. |
+| **`~` (shift+grave)** | **Latch on** — hold stays asserted after key release, so the keyboard is free to drive WSJT-X. Reads as continuous KEY (hang 0). Press `` ` `` or `~` again to clear; `` ` `` always clears the latch. |
 | **q** / **Esc** / Force RELEASE | cancel keepalives, **release hold** (quit on console) |
 
 **KEY key is grave/backtick `` ` ``** (left of `1` on US keyboards) — **not Space**.
+Unshifted `` ` `` is momentary; **`~` (shifted) latches** the hold on until either key
+is pressed again.
 
 Hang policy (default): break-in **1.5× word gap** from measured dit; continuous
 KEY (long mark ≥500 ms) **hang = 0**. Override: `--fixed-hang-ms` (console) or
