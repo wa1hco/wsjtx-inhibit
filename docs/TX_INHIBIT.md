@@ -412,6 +412,34 @@ or other silence — not the preferred end of a normal transmission.
 
 Malformed JSON, wrong `tx_inhibit`, bad `ttl_ms`, oversized: **ignored**.
 
+### 4.1 Trust model — read this before exposing the port
+
+**There is no authentication.** The station binds `0.0.0.0:22372` and accepts a hold
+from any host that can reach it. That is deliberate for a small trusted multi-op LAN,
+where the alternative (keys, pairing, config) buys nothing against the actual threat.
+
+**What an attacker can do:** stop you transmitting. Sustained suppression needs
+sustained packets — a single hold lasts at most `ttl_ms` (30 s ceiling, ~600 ms in
+practice), so the effect decays as soon as the packets stop.
+
+**What an attacker cannot do: make you transmit.** The protocol has no packet that
+causes emission. Every message either starts, refreshes, or ends a *suppression*. The
+worst outcome is a station that will not key — inconvenient, and safe in the direction
+that matters for an unattended transmitter.
+
+**Operator guidance:**
+
+| Situation | Do |
+|---|---|
+| Agent on the same PC | Nothing. Loopback is not reachable from outside. |
+| Agent on your LAN | Allow UDP 22372 inbound on the **private** profile only. |
+| Station reachable from the internet | **Firewall the port.** Do not forward 22372. |
+| Shared or untrusted network | Treat "someone can stop my TX" as a real possibility. |
+
+**Not addressed today:** a sender allowlist, and per-station addressing (any valid hold
+holds every station that receives it). Both are straightforward to add if a deployment
+needs them; neither is implemented, so do not assume either.
+
 ---
 
 ## 5. Local CTS KEY — not in this build

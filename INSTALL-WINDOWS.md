@@ -133,7 +133,7 @@ Click **OK**. Try receive first, then a careful TX test (dummy load recommended)
 
 Default UDP port is **22372** (if free). Design: [docs/TX_INHIBIT.md](docs/TX_INHIBIT.md).
 
-### Three things that surprise people
+### Four things that surprise people
 
 **1. Windows Firewall will ask on first launch.** With **Enable TX Inhibit** checked, the program opens a UDP listening port. Windows Defender Firewall shows *"Windows Defender Firewall has blocked some features of this app."*
 
@@ -142,7 +142,14 @@ Default UDP port is **22372** (if free). Design: [docs/TX_INHIBIT.md](docs/TX_IN
 
 **2. No agent means no inhibit — and that is silent.** TX Inhibit does nothing until something sends it a hold. If your KEY agent is not running, is pointed at the wrong address, or the firewall is blocking it, this build behaves exactly like stock WSJT-X and transmits normally. There is currently **no indication** that the feature is armed but not receiving. Always confirm with a test hold before relying on it.
 
-**3. One WSJT-X per PC can receive on port 22372.** If you run two copies on one computer, only one reliably gets the hold packets — which one is decided by Windows, not by you. For multi-op, run one WSJT-X station per PC, or give each a different port and point the agent at both.
+**3. Anyone who can reach the port can hold your station off the air.** There is no
+authentication — that is a deliberate choice for a trusted multi-op LAN. The risk is
+bounded in the direction that matters: the protocol can only *stop* you transmitting,
+never cause transmission, so the worst case is a rig that will not key. Keep UDP 22372
+on the **private** firewall profile, and never port-forward it from the internet.
+Details: [docs/TX_INHIBIT.md §4.1](docs/TX_INHIBIT.md#41-trust-model--read-this-before-exposing-the-port).
+
+**4. One WSJT-X per PC can receive on port 22372.** If you run two copies on one computer, only one reliably gets the hold packets — which one is decided by Windows, not by you. For multi-op, run one WSJT-X station per PC, or give each a different port and point the agent at both.
 
 ### Optional local test
 

@@ -152,6 +152,12 @@ When the KEY agent has said **not to transmit**, the status bar shows a red **TX
 
 Default UDP port is **22372** (if free). Design: [docs/TX_INHIBIT.md](docs/TX_INHIBIT.md).
 
+**Trust model.** The listener accepts a hold from any host that can reach it — no
+authentication, deliberately, for a trusted multi-op LAN. The protocol can only *stop*
+you transmitting, never cause transmission, so the worst case is a rig that will not
+key. Firewall UDP 22372 to your LAN and never expose it to the internet. Details:
+[docs/TX_INHIBIT.md §4.1](docs/TX_INHIBIT.md#41-trust-model--read-this-before-exposing-the-port).
+
 ### Optional smoke test
 
 With the program running and settings as above, send a hold request to UDP port **22372**.  

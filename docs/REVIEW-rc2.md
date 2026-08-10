@@ -520,9 +520,12 @@ a surface that persists — which is exactly what was rejected — so the remain
 is the surface-3 diagnostics dialog, or accepting that an operator who wants certainty
 runs a test hold. Recorded rather than argued.
 
-**Known residual:** a rig closed by CAT *failure* zeroes the port without emitting, so
-the tooltip can lag until the next signal. Fixing it needs a new signal on
-`Configuration`, i.e. more upstream-owned surface (§H.1).
+**Known residual — ACCEPTED AS-IS 2026-08-09.** A rig closed by CAT *failure* zeroes
+the port without emitting, so the tooltip can lag until the next state change. Fixing
+it needs a new signal on `Configuration`, i.e. more upstream-owned surface in the
+highest-churn file in the tree (§H.1). The cost is a stale tooltip in a path where the
+rig has already failed and the operator has a louder problem; not worth the rebase tax.
+Revisit only if a tester reports being misled by it.
 
 Verified: builds clean and starts.
 
@@ -580,7 +583,7 @@ the §H.1 currency that actually matters.
 
 ---
 
-### ☐ C7. UDP socket accepts holds from anyone, and the firewall prompt is undocumented
+### ☑ C7. UDP socket accepts holds from anyone — documented, not restricted
 
 **Severity:** medium (design choice, but undocumented)
 **Evidence:** `TxInhibitGate.cpp:47-49` binds `QHostAddress::AnyIPv4` with
@@ -596,9 +599,30 @@ Also: `ShareAddress` means multiple WSJT-X instances on one host share 22372 and
 one receives a given datagram is OS-dependent. That caveat exists only as a code comment
 at `TxInhibitGate.cpp:44-46`.
 
-**Fix (docs, minimum):** add a security note to `docs/TX_INHIBIT.md §4` and firewall
-guidance + the one-instance-per-host caveat to `INSTALL-WINDOWS.md`.
-**Fix (code, optional / later):** optional sender allowlist or shared secret.
+**DECIDED 2026-08-09: document the risk, do not restrict.** No allowlist, no shared
+secret. Open receipt on a trusted LAN is the intended deployment, and the alternative
+buys little against the real threat while adding configuration every operator would
+have to get right.
+
+**The argument that makes this defensible** — and the framing now in the docs:
+
+> An attacker can stop you transmitting. An attacker **cannot make you transmit.**
+
+Every message in the protocol starts, refreshes, or ends a *suppression*; there is no
+packet that causes emission. So the worst case is a station that will not key —
+inconvenient, and safe in the direction that matters for an unattended transmitter with
+a licence attached to it. Suppression also decays: it requires sustained packets, since
+a single hold lasts at most `ttl_ms`.
+
+**Written up in:**
+- `docs/TX_INHIBIT.md §4.1` — full trust model, what an attacker can and cannot do, and
+  a per-situation firewall table.
+- `INSTALL-WINDOWS.md` — operator-level note in "Four things that surprise people".
+- `INSTALL-LINUX.md` — same, briefer.
+
+**Explicitly recorded as not implemented**, so nobody assumes otherwise: sender
+allowlist, and per-station addressing (any valid hold holds every station that receives
+it). Both are straightforward to add if a deployment needs them.
 
 ---
 
