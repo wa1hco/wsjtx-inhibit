@@ -26,3 +26,9 @@ lib/tmp
 # Local CMake build trees
 build/
 build-*/
+
+# Claude Code local state (permission allowlists, session settings).
+# Both settings.json and settings.local.json here are accumulated per-session
+# command approvals, not curated project config. If shared project settings are
+# ever wanted, un-ignore .claude/settings.json specifically.
+.claude/
