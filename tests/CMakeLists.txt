@@ -36,6 +36,10 @@ add_executable (test_tx_inhibit_logic test_tx_inhibit_logic.cpp)
 target_link_libraries (test_tx_inhibit_logic wsjt_qt Qt5::Test Qt5::Network)
 add_test (test_tx_inhibit_logic test_tx_inhibit_logic)
 
+add_executable (test_tx_inhibit_gate test_tx_inhibit_gate.cpp)
+target_link_libraries (test_tx_inhibit_gate wsjt_qt Qt5::Test Qt5::Network)
+add_test (test_tx_inhibit_gate test_tx_inhibit_gate)
+
 add_executable (test_bwf_file test_bwf_file.cpp)
 target_link_libraries (test_bwf_file wsjt_qt wsjt_qtmm Qt5::Test Qt5::Multimedia)
 add_test (test_bwf_file test_bwf_file)

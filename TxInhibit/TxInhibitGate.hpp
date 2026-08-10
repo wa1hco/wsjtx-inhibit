@@ -20,6 +20,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // ---------------------------------------------------------------------------
 
+#include <QElapsedTimer>
 #include <QObject>
 #include <QString>
 
@@ -82,6 +83,9 @@ private:
   void emit_state_if_changed ();
   qint64 now_ms () const;
 
+  // Monotonic time base for hold expiry: immune to system-clock steps, which
+  // WSJT-X hosts take routinely from time-sync tools. See now_ms().
+  QElapsedTimer uptime_;
   TxInhibit::GateLogic logic_;
   QUdpSocket * udp_ {nullptr};
   QTimer * timer_ {nullptr};

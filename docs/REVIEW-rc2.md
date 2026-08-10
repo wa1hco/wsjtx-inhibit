@@ -272,7 +272,7 @@ on the product name rather than diverging.
 
 ## B. Code findings
 
-### ☐ C1. Hold timing uses the wall clock, not a monotonic clock
+### ☑ C1. Hold timing uses the wall clock, not a monotonic clock
 
 **Severity:** high — can both stick PTT off and release a hold early
 **Evidence:** `TxInhibit/TxInhibitGate.cpp:19-22`
@@ -296,8 +296,10 @@ time-syncing population in amateur radio — Meinberg NTP, Dimension4, BktTimeSy
 - Forward step during a hold → hold ends early. **PTT can assert while the priority
   station is still keyed** — the exact failure the product exists to prevent.
 
-**Fix:** switch the time base to `QElapsedTimer` (monotonic). Keep the injectable
-`now_ms` parameter shape in `GateLogic` so the unit tests are unaffected.
+**FIXED 2026-08-09.** `TxInhibitGate::now_ms()` returns `uptime_.elapsed()` from a
+`QElapsedTimer` started in the constructor. `GateLogic` was already time-injectable
+(it takes `now_ms` as a parameter), so its tests were unaffected — the vulnerability
+was entirely in the gate's clock source.
 
 **Verify:** add a unit test that steps `now_ms` backwards and asserts the hold still
 expires on schedule relative to the monotonic base. Manual: hold, then step the system
@@ -1640,7 +1642,7 @@ rebases repeatedly it should carry:
 
 ### H.6 The test suite is the rebase safety net, and it is thin
 
-☐ **H6.** `test_tx_inhibit_logic` (12 cases) covers the **pure** logic only —
+☑ **H6.** `test_tx_inhibit_logic` (12 cases) covers the **pure** logic only —
 parsing, hold timeout, badge text, counters. Nothing covers the part a rebase is most
 likely to break: the integration in `HamlibTransceiver::do_ptt`, the gate lifecycle
 across `do_start`/`do_stop`, and the signal path out to `Configuration`.
@@ -1649,10 +1651,37 @@ That is exactly the code most exposed to upstream churn, because `HamlibTranscei
 and `Configuration` are upstream-owned. A rebase that silently breaks the pin filter
 would not be caught by any current test — only by a human with a radio.
 
-**Suggested minimum before the first rebase:** a test that drives `GateLogic` through
-the state machine a `do_ptt` caller would (intent on → hold → intent still on →
-release → assert), plus a fake-transceiver test for gate start/stop lifecycle. Neither
-needs hardware.
+**DONE 2026-08-09** — `tests/test_tx_inhibit_gate.cpp`, 8 cases over a real UDP socket
+and event loop, no hardware:
+
+| Test | Guards |
+|---|---|
+| `pinFollowsHoldWhileIntentStaysOn` | the core equation end to end, with `want_tx` held constant and only the hold moving |
+| `holdTimeoutRecoversWithoutRelease` | deadman — an agent that dies must not hold PTT off forever |
+| `releaseWithoutIntentDoesNotKey` | a clearing hold must not key a station that never wanted to transmit |
+| `reportsStateChangesOnce` | badge text and counters reach the GUI, and keepalives are not state changes |
+| `shutdownWithoutPinEmitIsSilent` | the teardown ordering `stop_tx_inhibit_gate` depends on |
+| `holdTimingUsesMonotonicBase` | expiry tracks elapsed time |
+
+**Verified the harness actually bites.** Mutating the pin formula to
+`radiate = intent_` — ignoring holds entirely, the precise regression this feature
+exists to prevent — fails 3 of the 6:
+
+```
+FAIL!  : pinFollowsHoldWhileIntentStaysOn()
+FAIL!  : holdTimeoutRecoversWithoutRelease()
+FAIL!  : holdTimingUsesMonotonicBase()
+Totals: 5 passed, 3 failed
+```
+
+Reverted; all green again. A test suite that cannot fail is worse than none, because
+it licenses confidence it has not earned.
+
+**Honest limit:** `holdTimingUsesMonotonicBase` asserts that expiry tracks elapsed
+time, not that the base is monotonic — a wall-clock base still passes on a quiet
+machine, since a test cannot step the system clock. The real protection is the
+`QElapsedTimer` in `now_ms()`; the test fails loudly only if that timing is wired to
+something that does not advance.
 
 This compounds with **C1** (monotonic clock): making time injectable for testing and
 making it robust against clock steps are the same change.

@@ -2,7 +2,6 @@
 
 #include <exception>
 
-#include <QDateTime>
 #include <QHostAddress>
 #include <QTimer>
 #include <QUdpSocket>
@@ -10,6 +9,7 @@
 TxInhibitGate::TxInhibitGate (QObject * parent)
   : QObject {parent}
 {
+  uptime_.start ();
 }
 
 TxInhibitGate::~TxInhibitGate ()
@@ -20,7 +20,20 @@ TxInhibitGate::~TxInhibitGate ()
 
 qint64 TxInhibitGate::now_ms () const
 {
-  return QDateTime::currentMSecsSinceEpoch ();
+  // MONOTONIC, deliberately. Hold expiry compares against an absolute value in
+  // this same time base, so a wall clock would let a clock *step* corrupt it:
+  //
+  //   step backwards  -> the hold outlives its timeout by the step size. PTT
+  //                      stays off with no packet to explain it.
+  //   step forwards   -> the hold ends early. PTT can assert while the priority
+  //                      station is still keyed -- the exact failure this
+  //                      feature exists to prevent.
+  //
+  // Not hypothetical for this audience: WSJT-X operators run Meinberg NTP,
+  // Dimension4, BktTimeSync and similar, all of which step the system clock,
+  // often repeatedly. QElapsedTimer is unaffected by clock changes.
+  // See docs/REVIEW-rc2.md C1.
+  return uptime_.isValid () ? uptime_.elapsed () : 0;
 }
 
 void TxInhibitGate::start_listening ()
