@@ -499,6 +499,16 @@ the tooltip can lag until the next signal. Fixing it needs a new signal on
 
 Verified: builds clean and starts.
 
+**On-air-adjacent verification, Linux, 2026-08-09.** With a hold latched on
+(`inhibit-test`, `~`), an **RX → Tune → RX** cycle on real hardware behaved correctly:
+the radio did not key while `want_tx` was asserted via Tune, and PTT was not left
+stranded on the way back to receive. That exercises the pin filter through a state
+transition rather than a static hold, and covers the no-stuck-PTT path.
+
+Still to confirm: the *label* during that Tune — red `Inhibit` (fix working) versus
+yellow `Tx: TUNE` (function right, label still lying, i.e. the original defect
+surviving). The functional result above does not distinguish the two.
+
 **Recommended order:** 1 and 2 together (same edit region, and 1 is a defect fix).
 3 only when someone needs to debug an agent — the UDP telemetry already exists, so an
 external tool can serve that need first and prove whether an in-app dialog is wanted.
