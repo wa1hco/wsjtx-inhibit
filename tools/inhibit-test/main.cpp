@@ -971,8 +971,10 @@ int main (int argc, char * argv[])
           want_quit = quit_requested_stdin ();
         }
 #elif defined (Q_OS_UNIX)
-      raw_space = space_down_stdin (t);
-      want_quit = quit_requested_stdin ();
+      // Non-Linux UNIX refuses to start (see the input-setup block
+      // above), so there is nothing to poll; the TTY helpers are
+      // compiled only on Linux.
+      Q_UNUSED (t);
 #elif defined (Q_OS_WIN)
       if (input_mode == InputMode::StdinTerminal)
         {
