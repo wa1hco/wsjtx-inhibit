@@ -40,7 +40,7 @@ add_test (test_tx_inhibit_logic test_tx_inhibit_logic)
 # members this test drags in (Configuration -> FileDownload on MinGW)
 # reference the sys/data global loggers it defines.
 add_executable (test_tx_inhibit_gate test_tx_inhibit_gate.cpp ${CMAKE_SOURCE_DIR}/Logger.cpp)
-target_link_libraries (test_tx_inhibit_gate wsjt_qt Qt5::Test Qt5::Network)
+target_link_libraries (test_tx_inhibit_gate wsjt_qt Boost::log_setup Qt5::Test Qt5::Network)
 add_test (test_tx_inhibit_gate test_tx_inhibit_gate)
 
 add_executable (test_bwf_file test_bwf_file.cpp)
