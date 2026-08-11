@@ -64,48 +64,13 @@ jobs:
           fi
           echo "Parity check PASSED."
 
-  # ── Build all five platforms ───────────────────────────────────────
-  macos-arm64-qt:
-    needs: prepare
-    uses: ./.github/workflows/prepare-macos-qt.yml
-    with:
-      arch: "arm64"
-      runner: "macos-15"
-      deployment_target: "11.0"
-
-  macos-intel-qt:
-    needs: prepare
-    uses: ./.github/workflows/prepare-macos-qt.yml
-    with:
-      arch: "x86_64"
-      runner: "macos-15-intel"
-      deployment_target: "10.13"
-
-  macos:
-    needs: [prepare, macos-arm64-qt]
-    uses: ./.github/workflows/build-macos.yml
-    with:
-      version: ${{ needs.prepare.outputs.version }}
-      hamlib_branch: "4.7.1"
-      arch: "arm64"
-      runner: "macos-15"
-      deployment_target: "11.0"
-      release_channel: ${{ needs.prepare.outputs.release_channel }}
-      rc_number: ${{ needs.prepare.outputs.rc_number }}
-    secrets: inherit
-
-  macos-intel:
-    needs: [prepare, macos-intel-qt]
-    uses: ./.github/workflows/build-macos.yml
-    with:
-      version: ${{ needs.prepare.outputs.version }}
-      hamlib_branch: "4.7.1"
-      arch: "x86_64"
-      release_channel: ${{ needs.prepare.outputs.release_channel }}
-      rc_number: ${{ needs.prepare.outputs.rc_number }}
-      runner: "macos-15-intel"
-      deployment_target: "10.13"
-    secrets: inherit
+  # ── Build release platforms ────────────────────────────────────────
+  # macOS is deliberately absent here: nobody on the project can run a
+  # macOS build, so publishing untested .pkg installers would waste
+  # testers' time. CI (ci.yml) still compiles macOS on every push to
+  # main as a portability check. Restore the macos/macos-intel jobs
+  # (and their prepare-macos-qt feeders), the gate entries, and the
+  # .pkg asset filter if a macOS tester ever joins.
 
   linux:
     needs: prepare
@@ -141,7 +106,7 @@ jobs:
 
   # ── Publish release + sync to public repo ──────────────────────────
   release:
-    needs: [prepare, macos, macos-intel, linux, linux-arm, windows]
+    needs: [prepare, linux, linux-arm, windows]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -181,24 +146,25 @@ jobs:
         run: find artifacts -type f | sort
 
       # ── All-platforms-ready gate ───────────────────────────────────────
-      # Refuse to publish unless every platform produced an installer-grade
-      # artifact. The release job's `needs:` already enforces structural
-      # success (all 5 builds ran and exited 0), but a build can exit 0
-      # without actually packaging — e.g. a packaging step behind an `if:`
-      # that evaluated false, or an upload-artifact step that silently
-      # matched zero files. This gate fails the release job BEFORE any
-      # asset upload so partial releases never reach GitHub Releases or
-      # the public mirror.
+      # Refuse to publish unless every release platform produced an
+      # installer-grade artifact. The release job's `needs:` already
+      # enforces structural success (all builds ran and exited 0), but a
+      # build can exit 0 without actually packaging — e.g. a packaging
+      # step behind an `if:` that evaluated false, or an upload-artifact
+      # step that silently matched zero files. This gate fails the
+      # release job BEFORE any asset upload so partial releases never
+      # reach GitHub Releases or the public mirror.
       #
       # Expected artifact layout (one installer per platform, per the
-      # five build-*.yml upload-artifact steps):
-      #   artifacts/wsjtx-<ver>-arm64-macOS.pkg/*.pkg
-      #   artifacts/wsjtx-<ver>-x86_64-macOS.pkg/*.pkg
+      # build-*.yml upload-artifact steps):
       #   artifacts/wsjtx-<ver>-linux-x86_64-AppImage/*.AppImage
       #   artifacts/wsjtx-<ver>-linux-aarch64-AppImage/*.AppImage
       #   artifacts/wsjtx-<ver>-windows-x86_64-installer/*.exe
       #
-      # Policy: publish only when all five platforms have produced an
+      # macOS is intentionally not a release platform (untestable —
+      # see the build-jobs comment above).
+      #
+      # Policy: publish only when all release platforms have produced an
       # installer-grade artifact. Adjust or remove this step if the
       # policy evolves (e.g. to publish any-platform-ready).
       - name: Verify installer-grade artifacts (all-platforms-ready gate)
@@ -207,21 +173,17 @@ jobs:
         run: |
           shopt -s nullglob
           labels=(
-            "macOS arm64 .pkg"
-            "macOS x86_64 .pkg"
             "Linux x86_64 .AppImage"
             "Linux aarch64 .AppImage"
             "Windows x86_64 .exe"
           )
           patterns=(
-            "artifacts/wsjtx-${VERSION}-arm64-macOS.pkg/*.pkg"
-            "artifacts/wsjtx-${VERSION}-x86_64-macOS.pkg/*.pkg"
             "artifacts/wsjtx-${VERSION}-linux-x86_64-AppImage/*.AppImage"
             "artifacts/wsjtx-${VERSION}-linux-aarch64-AppImage/*.AppImage"
             "artifacts/wsjtx-${VERSION}-windows-x86_64-installer/*.exe"
           )
           missing=0
-          echo "Installer-grade artifact gate — checking 5 platforms…"
+          echo "Installer-grade artifact gate — checking ${#labels[@]} platforms…"
           for i in "${!labels[@]}"; do
             # shellcheck disable=SC2206 # word-split is intentional; nullglob makes it safe.
             matches=( ${patterns[$i]} )
@@ -234,11 +196,11 @@ jobs:
             fi
           done
           if [ "$missing" -gt 0 ]; then
-            echo "::error::All-platforms-ready gate FAILED — $missing of 5 platform(s) missing installer-grade artifact."
+            echo "::error::All-platforms-ready gate FAILED — $missing of ${#labels[@]} platform(s) missing installer-grade artifact."
             echo "::error::Refusing to publish a partial release. Fix the failing build job(s) and retry the tag."
             exit 1
           fi
-          echo "All-platforms-ready gate PASSED — all 5 installer-grade artifacts present. Proceeding to publish."
+          echo "All-platforms-ready gate PASSED — all ${#labels[@]} installer-grade artifacts present. Proceeding to publish."
 
       - name: Create GitHub Release
         env:
@@ -253,7 +215,7 @@ jobs:
           # create` uses basenames as asset names and duplicates cause
           # upload failures.
           mapfile -t files < <(find artifacts -maxdepth 2 -type f \
-            \( -name "*.pkg" -o -name "*.AppImage" -o -name "*.deb" \
+            \( -name "*.AppImage" -o -name "*.deb" \
                -o -name "*.exe" -o -name "*.tar.gz" -o -name "*.rpm" \))
           # SemVer pre-release tags contain a hyphen after the version
           # (e.g., v3.0.1-rc1, v3.0.1-rc2, v3.0.1-beta1). Flag those as
@@ -359,7 +321,7 @@ jobs:
           # carrying a list — keeps the all-platforms-ready gate, internal
           # release, and public release mechanically aligned on one filter.
           mapfile -t files < <(find artifacts -maxdepth 2 -type f \
-            \( -name "*.pkg" -o -name "*.AppImage" -o -name "*.deb" \
+            \( -name "*.AppImage" -o -name "*.deb" \
                -o -name "*.exe" -o -name "*.tar.gz" -o -name "*.rpm" \))
           gh release create "$PUBLIC_TAG" \
             -R WSJTX/wsjtx \
