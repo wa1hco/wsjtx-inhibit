@@ -169,9 +169,14 @@ jobs:
           fi
           ls -lh "$DEB"
           file "$DEB"
-          dpkg-deb --info "$DEB" | head -20
-          dpkg-deb -c "$DEB" | grep -qE '/usr/bin/map65$'
-          dpkg-deb -f "$DEB" Depends | grep -Eq 'libportaudio|portaudio'
+          # Avoid piping dpkg-deb into early-exiting readers (head/grep -q):
+          # the closed pipe SIGPIPEs its tar subprocess and prints scary
+          # "tar: stdout: write error" noise into the log.
+          dpkg-deb --info "$DEB" > deb-info.txt
+          head -20 deb-info.txt
+          dpkg-deb -c "$DEB" > deb-contents.txt
+          grep -qE '/usr/bin/map65$' deb-contents.txt
+          grep -Eq 'libportaudio|portaudio' <<< "$(dpkg-deb -f "$DEB" Depends)"
 
       - name: Upload .deb
         uses: actions/upload-artifact@v7
@@ -192,13 +197,18 @@ jobs:
           VERSION: ${{ inputs.version }}
           ARCH: ${{ inputs.arch }}
         run: |
+          # Like the DEB generator, the RPM generator ignores
+          # CPACK_PACKAGE_FILE_NAME and names the package from the spec
+          # (wsjtx-inhibit-<ver>-devel.<arch>.rpm); its own
+          # CPACK_RPM_FILE_NAME (full filename, .rpm included) wins.
           cpack -G RPM \
-            -D "CPACK_PACKAGE_FILE_NAME=wsjtx-${VERSION}-linux-${ARCH}"
+            -D "CPACK_RPM_FILE_NAME=wsjtx-${VERSION}-linux-${ARCH}.rpm"
           RPM="wsjtx-${VERSION}-linux-${ARCH}.rpm"
-          # Some CPack versions append release suffix; normalize filename
+          # Older CPack versions ignore CPACK_RPM_FILE_NAME from -D;
+          # fall back to whatever single .rpm was generated.
           if [ ! -f "$RPM" ]; then
-            gen=$(ls -1 wsjtx-${VERSION}-linux-${ARCH}*.rpm 2>/dev/null | head -1 || true)
-            if [ -n "$gen" ] && [ "$gen" != "$RPM" ]; then
+            gen=$(ls -1 ./*.rpm 2>/dev/null | head -1 || true)
+            if [ -n "$gen" ] && [ "$gen" != "./$RPM" ]; then
               mv "$gen" "$RPM"
             fi
           fi

@@ -98,12 +98,12 @@ enum class InputMode
   GlobalKeys      // system-wide keyboard (evdev / GetAsyncKeyState)
 };
 
+#if defined (Q_OS_LINUX) || defined (Q_OS_UNIX)
+
 static bool is_key_char (unsigned char c)
 {
   return c == '`' || c == '~'; // grave / shifted grave on many layouts
 }
-
-#if defined (Q_OS_LINUX) || defined (Q_OS_UNIX)
 
 #if defined (Q_OS_LINUX)
 static int g_evdev_fd = -1;
@@ -694,13 +694,14 @@ int main (int argc, char * argv[])
       return 2;
     }
 
-  InputMode input_mode = global_keys ? InputMode::GlobalKeys : InputMode::StdinTerminal;
+  // Some of these are only read inside platform-specific blocks below.
+  [[maybe_unused]] InputMode input_mode = global_keys ? InputMode::GlobalKeys : InputMode::StdinTerminal;
 
   QString input_note;
   // Linux: require EVIOCGKEY (group 'input'). No stdin-sticky fallback - that
   // cannot measure KEY level and always reports ~40 WPM marks.
-  bool use_evdev_level = false;
-  bool focus_arm_evdev = false; // arm only after stdin grave when not --global-keys
+  [[maybe_unused]] bool use_evdev_level = false;
+  [[maybe_unused]] bool focus_arm_evdev = false; // arm only after stdin grave when not --global-keys
 #if defined (Q_OS_LINUX)
   if (!open_evdev_keyboard ())
     {
@@ -772,8 +773,8 @@ int main (int argc, char * argv[])
   bool hold_active = false;   // Hold sender SM
   qint64 hang_until_ms = -1;  // EOT after KEY open (break-in hang)
   // Focus-arm: once a grave reaches this TTY, track EVIOCGKEY until KEY up.
-  bool key_armed = false;
-  qint64 key_arm_ms = -1;
+  [[maybe_unused]] bool key_armed = false;
+  [[maybe_unused]] qint64 key_arm_ms = -1;
 
   auto now_ms = [] () { return QDateTime::currentMSecsSinceEpoch (); };
 
