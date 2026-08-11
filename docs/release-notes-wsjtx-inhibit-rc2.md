@@ -41,11 +41,13 @@ Under **Assets** on this release:
 
 | File | Type | What you do |
 |---|---|---|
-| `wsjtx-inhibit-3.0.2-rc2-win64.exe` | **Installer** (recommended) | Double-click, follow the wizard |
-| `wsjtx-inhibit-3.0.2-rc2-windows-x86_64.zip` | Portable | Unzip, run `bin\wsjtx.exe` |
+| `wsjtx-inhibit-3.0.2-rc2-win64.exe` | **Installer** | Double-click, follow the wizard |
 
-Linux `.AppImage` / `.deb` / `.rpm` are listed under Assets when that release built
-them.
+rc2 is installer-only on Windows (rc1's portable ZIP returns in a later build).
+
+Linux packages are under Assets too: `.deb` (Debian/Ubuntu/Mint), `.rpm`
+(Fedora/openSUSE), and `.AppImage` (any distro — `chmod +x`, then run), each for
+x86_64 and aarch64 (Raspberry Pi 4/5 and other 64-bit ARM).
 
 Windows may show **SmartScreen** on an unsigned test build: **More info** →
 **Run anyway**, if you trust `wa1hco/wsjtx-inhibit`.
