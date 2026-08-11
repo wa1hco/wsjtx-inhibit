@@ -159,7 +159,9 @@ jobs:
       # build-*.yml upload-artifact steps):
       #   artifacts/wsjtx-<ver>-linux-x86_64-AppImage/*.AppImage
       #   artifacts/wsjtx-<ver>-linux-aarch64-AppImage/*.AppImage
-      #   artifacts/wsjtx-<ver>-windows-x86_64-installer/*.exe
+      #   artifacts/wsjtx-inhibit-<ver>-windows-x86_64-installer/*.exe
+      # (Windows packages carry the wsjtx-inhibit- prefix per the rc2
+      # renaming; Linux artifact folders kept the plain wsjtx- prefix.)
       #
       # macOS is intentionally not a release platform (untestable —
       # see the build-jobs comment above).
@@ -180,7 +182,7 @@ jobs:
           patterns=(
             "artifacts/wsjtx-${VERSION}-linux-x86_64-AppImage/*.AppImage"
             "artifacts/wsjtx-${VERSION}-linux-aarch64-AppImage/*.AppImage"
-            "artifacts/wsjtx-${VERSION}-windows-x86_64-installer/*.exe"
+            "artifacts/wsjtx-inhibit-${VERSION}-windows-x86_64-installer/*.exe"
           )
           missing=0
           echo "Installer-grade artifact gate — checking ${#labels[@]} platforms…"
