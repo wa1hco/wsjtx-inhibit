@@ -98,7 +98,7 @@ enum class InputMode
   GlobalKeys      // system-wide keyboard (evdev / GetAsyncKeyState)
 };
 
-#if defined (Q_OS_LINUX) || defined (Q_OS_UNIX)
+#if defined (Q_OS_LINUX)
 
 static bool is_key_char (unsigned char c)
 {
@@ -1017,7 +1017,7 @@ int main (int argc, char * argv[])
           end_hold ("quit");
           out << "quit\n";
           out.flush ();
-#if defined (Q_OS_LINUX) || defined (Q_OS_UNIX)
+#if defined (Q_OS_LINUX)
           restore_stdin_termios ();
 #endif
           QCoreApplication::quit ();
@@ -1082,7 +1082,7 @@ int main (int argc, char * argv[])
   poll.start ();
 
   int rc = app.exec ();
-#if defined (Q_OS_LINUX) || defined (Q_OS_UNIX)
+#if defined (Q_OS_LINUX)
   restore_stdin_termios ();
 #endif
   return rc;

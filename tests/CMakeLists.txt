@@ -36,7 +36,10 @@ add_executable (test_tx_inhibit_logic test_tx_inhibit_logic.cpp)
 target_link_libraries (test_tx_inhibit_logic wsjt_qt Qt5::Test Qt5::Network)
 add_test (test_tx_inhibit_logic test_tx_inhibit_logic)
 
-add_executable (test_tx_inhibit_gate test_tx_inhibit_gate.cpp)
+# Logger.cpp is compiled into the wsjtx app, not wsjt_qt, but archive
+# members this test drags in (Configuration -> FileDownload on MinGW)
+# reference the sys/data global loggers it defines.
+add_executable (test_tx_inhibit_gate test_tx_inhibit_gate.cpp ${CMAKE_SOURCE_DIR}/Logger.cpp)
 target_link_libraries (test_tx_inhibit_gate wsjt_qt Qt5::Test Qt5::Network)
 add_test (test_tx_inhibit_gate test_tx_inhibit_gate)
 
