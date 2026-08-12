@@ -327,6 +327,6 @@ jobs:
                -o -name "*-win64.exe" -o -name "*.tar.gz" -o -name "*.rpm" \))
           gh release create "$PUBLIC_TAG" \
             -R WSJTX/wsjtx \
-            --title "WSJT-X ${VERSION}" \
+            --title "wsjtx-inhibit ${VERSION}" \
             --generate-notes \
             "${files[@]}"

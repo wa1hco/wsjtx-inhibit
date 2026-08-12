@@ -661,6 +661,35 @@ robustly skip unknown types. Worth offering to gate `InhibitStatus` emission beh
 same Settings checkbox (it already is — `mainwindow.cpp:4386-4392` only fires inside
 the `tx_inhibit_changed` handler, which only fires when the gate exists).
 
+#### ☐ D17. `release.yml` force-pushes to upstream's repository on GA tags
+
+**Found 2026-08-12** while chasing a missing Linux asset. The release title was already
+fixed (`77d6ffa`); this is the part underneath it.
+
+The "Public mirror" block (`release.yml:243-331`) is inherited verbatim from upstream's
+CI and targets **`WSJTX/wsjtx`** — the WSJT-X project's own repository. On a GA tag
+(`build/vX.Y.Z`, no hyphen) this fork would:
+
+- add `https://…@github.com/WSJTX/wsjtx.git` as a remote (line 280),
+- **force-push** to it — the file's own comment at line 253 says the step "would
+  overwrite `WSJTX/wsjtx:master` with arbitrary content",
+- and create a release there (line 329, `-R WSJTX/wsjtx`).
+
+**Why it has not fired:** GA-gated, and it needs `secrets.CROSS_REPO_TOKEN`, which this
+fork presumably does not hold — so it fails rather than succeeds. That is luck, not
+design.
+
+**Recommended: delete the block from this fork.** It is upstream's release machinery,
+meaningless here, and a project that intends to *ask* the WSJT-X maintainers to accept
+a feature must not carry code that force-pushes to their master. Confirm
+`CROSS_REPO_TOKEN` is unset in repo settings while you are there.
+
+Left undone: it is a ~90-line structural change to release machinery, and rc2 is
+mid-flight. **Decide before the first GA tag** — the hazard is dormant, not absent.
+
+Title on the mirror path fixed to `wsjtx-inhibit` in passing, so that if the block does
+survive it at least does not announce itself as WSJT-X.
+
 #### ☐ D2. Branding is interleaved with the feature
 
 `revision_utils.cpp`, `widgets/about.cpp`, `widgets/about.ui`, `widgets/mainwindow.ui`,
