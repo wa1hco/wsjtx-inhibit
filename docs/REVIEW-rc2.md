@@ -661,7 +661,7 @@ robustly skip unknown types. Worth offering to gate `InhibitStatus` emission beh
 same Settings checkbox (it already is — `mainwindow.cpp:4386-4392` only fires inside
 the `tx_inhibit_changed` handler, which only fires when the gate exists).
 
-#### ☐ D17. `release.yml` force-pushes to upstream's repository on GA tags
+#### ☑ D17. `release.yml` force-pushed to upstream's repository on GA tags
 
 **Found 2026-08-12** while chasing a missing Linux asset. The release title was already
 fixed (`77d6ffa`); this is the part underneath it.
@@ -684,8 +684,21 @@ meaningless here, and a project that intends to *ask* the WSJT-X maintainers to 
 a feature must not carry code that force-pushes to their master. Confirm
 `CROSS_REPO_TOKEN` is unset in repo settings while you are there.
 
-Left undone: it is a ~90-line structural change to release machinery, and rc2 is
-mid-flight. **Decide before the first GA tag** — the hazard is dormant, not absent.
+**REMOVED 2026-08-12**, once the upstream PR was open. Three steps deleted —
+"Verify release tag format (GA only)", "Push to public repo (GA only)", and
+"Create public GitHub Release (GA only)" — ~90 lines, the whole tail of the file.
+Verified afterwards: no `WSJTX/wsjtx`, no `--force`, no `CROSS_REPO_TOKEN`, no
+`PUBLIC_TAG` anywhere in the workflow, and it still parses with the same five jobs and
+a `release` job ending at "Create GitHub Release".
+
+**What tipped it from "before the first GA tag" to "today":** the PR is live at
+`WSJTX/wsjtx`. Reviewers look at contributors' repositories. A maintainer evaluating
+this patch, finding CI in the author's repo that force-pushes to their own `master`,
+is a bad impression at exactly the wrong moment — and one that no explanation fully
+undoes. The dormancy of the code was never the point.
+
+Worth checking once in repo settings that `CROSS_REPO_TOKEN` is genuinely unset, since
+nothing references it now and a stray secret is only a liability.
 
 Title on the mirror path fixed to `wsjtx-inhibit` in passing, so that if the block does
 survive it at least does not announce itself as WSJT-X.
