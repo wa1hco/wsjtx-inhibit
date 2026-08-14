@@ -417,6 +417,22 @@ bool quit_requested_evdev ()
 
 #elif defined (Q_OS_WIN)
 
+// Windows KEY input
+// ------------------
+// Older builds used GetAsyncKeyState only when GetForegroundWindow() ==
+// GetConsoleWindow(). That fails under Windows Terminal / ConPTY (and many VM
+// consoles): the foreground HWND is the outer terminal frame, while
+// GetConsoleWindow() is a different host window — so KEY and even q/Esc never
+// fire. Linux uses TTY stdin to arm + true key level; mirror that here:
+//
+//   default: arm on ` / ~ / q / Esc read via _kbhit/_getch (this console only),
+//            then track VK_OEM_3 with GetAsyncKeyState until release.
+//   --global-keys: GetAsyncKeyState only (system-wide), no arm step.
+
+static bool g_win_key_armed = false;
+static bool g_win_stdin_quit = false;
+static bool g_win_latch_req = false;
+
 bool space_down_global ()
 {
   // US/PC keyboard: VK_OEM_3 is the `~ key (left of 1). Rare in normal typing.
@@ -435,25 +451,72 @@ bool quit_requested_global ()
     || (GetAsyncKeyState (VK_ESCAPE) & 0x8000) != 0;
 }
 
-// Console focus: only count KEY when this console is foreground.
+// Drain console input buffer (only keys sent to *this* console session).
+void poll_win_console_chars ()
+{
+  while (_kbhit ())
+    {
+      int c = _getch ();
+      // Function/arrow keys produce a 0 or 0xE0 lead-in then a second code.
+      if (c == 0 || c == 0xE0)
+        {
+          if (_kbhit ())
+            {
+              (void) _getch ();
+            }
+          continue;
+        }
+      if (c == '`' || c == '~')
+        {
+          g_win_key_armed = true;
+          g_win_latch_req = (c == '~');
+        }
+      else if (c == 'q' || c == 'Q' || c == 27)
+        {
+          g_win_stdin_quit = true;
+        }
+    }
+}
+
+bool take_win_latch_request ()
+{
+  bool const v = g_win_latch_req;
+  g_win_latch_req = false;
+  return v;
+}
+
+// Default (this-console) KEY level: arm from console chars, then AsyncKeyState.
 bool space_down_console ()
 {
-  HWND con = GetConsoleWindow ();
-  if (!con || GetForegroundWindow () != con)
+  poll_win_console_chars ();
+  if (!g_win_key_armed)
     {
       return false;
     }
-  return space_down_global ();
+  if (space_down_global ())
+    {
+      return true;
+    }
+  // Key released — require another console ` / ~ to arm again.
+  g_win_key_armed = false;
+  return false;
 }
 
 bool quit_requested_console ()
 {
-  HWND con = GetConsoleWindow ();
-  if (!con || GetForegroundWindow () != con)
+  poll_win_console_chars ();
+  if (g_win_stdin_quit)
     {
-      return false;
+      return true;
     }
-  return quit_requested_global ();
+  // Also accept AsyncKeyState quit when console has focus (optional assist).
+  HWND con = GetConsoleWindow ();
+  HWND fg = GetForegroundWindow ();
+  if (con && fg == con && quit_requested_global ())
+    {
+      return true;
+    }
+  return false;
 }
 
 #endif
@@ -741,12 +804,15 @@ int main (int argc, char * argv[])
   if (input_mode == InputMode::StdinTerminal)
     {
       input_note = QStringLiteral (
-          "Windows: KEY = `~ (VK_OEM_3) when *this console* is foreground.");
+          "Windows: type ` / ~ into *this* console to KEY (then hold/release "
+          "tracked via VK_OEM_3). q/Esc from this console. "
+          "Works with Windows Terminal/ConPTY (not FG-window gated). "
+          "--global-keys for system-wide KEY.");
     }
   else
     {
       input_note = QStringLiteral (
-          "Windows: KEY = `~ (VK_OEM_3) SYSTEM-WIDE.");
+          "Windows: KEY = `~ (VK_OEM_3) SYSTEM-WIDE; q/Esc system-wide.");
     }
 #else
   QTextStream err_plat (stderr);
@@ -978,8 +1044,12 @@ int main (int argc, char * argv[])
 #elif defined (Q_OS_WIN)
       if (input_mode == InputMode::StdinTerminal)
         {
+          // Console arm sets latch_request from '~' byte; level uses VK_OEM_3.
           raw_space = space_down_console ();
-          latch_request = raw_space && shift_down_global ();
+          if (raw_space)
+            {
+              latch_request = take_win_latch_request () || shift_down_global ();
+            }
           want_quit = quit_requested_console ();
         }
       else

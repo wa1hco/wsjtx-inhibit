@@ -283,12 +283,16 @@ static int send_datagram(HWND hwnd, int ttl_ms_arg, int is_keepalive,
   addr.sin_addr.s_addr = inet_addr(host);
   if (addr.sin_addr.s_addr == INADDR_NONE) {
     struct hostent *he = gethostbyname(host);
-    if (!he || !he->h_addr_list || !he->h_addr_list[0]) {
+    /* sockaddr_in holds IPv4 only; refuse non-AF_INET (e.g. IPv6) so we
+     * never memcpy past sin_addr (was using he->h_length unchecked). */
+    if (!he || he->h_addrtype != AF_INET
+        || he->h_length != (int)sizeof(addr.sin_addr)
+        || !he->h_addr_list || !he->h_addr_list[0]) {
       set_text(g_status, "ERROR: bad host");
       g_errors++;
       return 0;
     }
-    memcpy(&addr.sin_addr, he->h_addr_list[0], (size_t)he->h_length);
+    memcpy(&addr.sin_addr, he->h_addr_list[0], sizeof(addr.sin_addr));
   }
 
   sent = sendto(g_sock, payload, n, 0, (struct sockaddr *)&addr, sizeof addr);
