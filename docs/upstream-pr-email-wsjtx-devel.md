@@ -19,13 +19,20 @@ an opt-in, low-latency TX Inhibit function to WSJT-X:
 
     https://github.com/WSJTX/wsjtx/pull/61
 
-Motivation in brief: WSJT-X and SSB/CW stations sharing a band in the ARRL VHF contest group, must keep only one transmitter keyed at a time. TX Inhibit instead holds off the radio's PTT key line within milliseconds while sequencing and audio continue, releasing PTT when the interlock clears. Off by default; zero behavior change unless enabled.
+Motivation in brief: WSJT-X and SSB/CW stations sharing a band — in our
+case an ARRL VHF contest multi-op — must keep only one transmitter keyed
+at a time. Halt Tx is the wrong instrument, since it aborts the QSO
+sequence. TX Inhibit instead holds off the radio's PTT key line within
+milliseconds while sequencing and audio continue, releasing PTT when the
+interlock clears. Off by default; zero behavior change unless enabled.
 
 The PR is based on released v3.0.2, includes two QtTest suites and a
 bench-test helper, and has been field-tested through two release
-candidates with the W2SZ group. I'm glad to adjust protocol, UI, or
-structure to fit the project's direction — review comments welcome on
-the PR or here.
+candidates with the W2SZ group. The same feature ported to WSJT-X
+Improved has since been exercised on the air, holding off PTT
+mid-transmission during a live QSO with sequencing carrying on
+underneath. I'm glad to adjust protocol, UI, or structure to fit the
+project's direction — review comments welcome on the PR or here.
 
 73,
 Jeff, WA1HCO

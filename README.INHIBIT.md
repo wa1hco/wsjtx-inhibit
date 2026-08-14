@@ -66,13 +66,22 @@ stage. Artifacts are named `wsjtx-inhibit-<version>-win64.exe` and install to
 |----------|--------|
 | `wa1hco/wsjtx-mainline-wims` | Renamed → **`wsjtx-inhibit`** (GitHub redirects) |
 | `wa1hco/wsjtx-wims` | Legacy; archived pointer to this repo |
+| `wa1hco/wsjtx-improved-wims` | Obsolete; superseded by **`wsjtx-improved-inhibit`** |
+
+## Sibling trees
+
+| Tree | Baseline | Purpose |
+|------|----------|---------|
+| **`wsjtx-inhibit`** (this repo) | Official mainline v3.0.2 | Reference implementation; source of the upstream PR |
+| `wsjtx-improved-inhibit` | WSJT-X Improved 3.1.0 AL_PLUS_260522 | Same TX Inhibit feature carried on the Improved lineage |
 
 ## Branches / tags
 
 | Ref | Meaning |
 |-----|---------|
-| `baseline-v3.0.2` | Clean mainline import, no inhibit code |
+| `26e8bf5` (root commit) | Clean mainline v3.0.2 import, no inhibit code |
 | `main` | Mainline + TX Inhibit |
+| `tx-inhibit-upstream` | Rebased series for the upstream PR |
 
 ## License
 

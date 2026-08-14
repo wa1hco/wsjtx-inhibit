@@ -69,13 +69,19 @@ application tree than against a nested `build/wsjtx-prefix/src/wsjtx` extract
 from a superbuild. When a new official tag ships, we re-import that application
 tree (or merge from `WSJTX/wsjtx`) and re-apply the `TxInhibit` commit.
 
-## Historical Improved superbuild drop
+## The Improved lineage
 
-The local Improved drop used for analysis was:
-
-`~/ham/wsjtx-3.1.0_improved_AL_PLUS_260522/wsjtx-3.1.0/`
-
-Its extracted application sources were also published as
-[wa1hco/wsjtx-improved-wims](https://github.com/wa1hco/wsjtx-improved-wims).
 **This repo (`wsjtx-inhibit`) is based on official mainline**, not Improved, so the
-inhibit patch can be offered cleanly to either lineage.
+inhibit patch can be offered cleanly to either lineage. The Improved-based port
+lives in its own tree, `wsjtx-improved-inhibit`.
+
+The Improved superbuild drop it is built from:
+
+| Item | Value |
+|------|-------|
+| Tarball | `wsjtx-3.1.0_improved_AL_PLUS_260522.tgz` (Qt5 source) |
+| Source | <https://sourceforge.net/projects/wsjt-x-improved/> |
+| Unpacked superbuild | `~/ham/wsjtx-3.1.0_improved_AL_PLUS_260522/wsjtx-3.1.0/` |
+| Extracted app tree | `~/ham/wsjtx-improved-inhibit/`, tag `base-3.1.0-improved-AL-PLUS-260522` |
+
+The earlier `wsjtx-*-wims` repositories are obsolete and superseded by the above.
