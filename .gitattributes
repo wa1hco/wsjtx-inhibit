@@ -4,3 +4,7 @@
 /lib/fsk4hf	export-ignore
 /robots		export-ignore
 /plots		export-ignore
+
+# Improved-list submission patches are CRLF to match the Improved drop.
+# Store verbatim so git does not normalize them to LF.
+contrib/improved-list-submission/*.patch -text
