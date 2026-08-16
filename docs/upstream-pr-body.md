@@ -44,6 +44,28 @@ The branch is based on the released v3.0.2 (`ccdfaf3`), per the
 Programmer's Overview. Happy to split into a review-friendly series,
 rename the protocol/UI, or adjust to fit the project's direction.
 
+## Since first posting
+
+A later review of the same feature on the WSJT-X Improved port
+produced three small gate seams. They are now on this branch (commit
+`2f6d07c`). Hold policy and wire format are unchanged.
+
+- `accept()` takes `enable_tx_inhibit_` from `gather_rig_data()`
+  (RTS/DTR only). The raw Settings checkbox could stay true under
+  CAT/VOX while no gate was running.
+- `close_rig()` now emits `tx_inhibit_changed(false)` so the status
+  badge cannot stick after the transceiver is torn down.
+- A failed `rig_set_ptt` while the gate is driving the pin is
+  `pttApplyFailed` → `Transceiver::failure`, not a logged bind error.
+
+The same commit restores Help → About to "About WSJT-X" (fork
+branding that had leaked into the first posting).
+
+Left in the `wa1hco/wsjtx-inhibit` fork, not this PR: packaging /
+CI / install docs, the standalone `inhibit-agent` KEY agent (USB-serial
+CTS → hold), and the `inhibit-test` keyboard bench tool. Happy to
+follow up with any of those if useful.
+
 ---
 
 ## Notes for you (not part of the PR)

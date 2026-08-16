@@ -1,38 +1,47 @@
-# Draft: TX Inhibit heads-up for wsjt-devel
+# Draft: TX Inhibit update for wsjt-devel
 
-The team moved to GitHub (June 2026 announcement): code contributions
-are now pull requests against WSJTX/wsjtx based on the latest released
-code. The PR itself carries the technical detail (see
-upstream-pr-body.md); this email is a short heads-up to the list,
-where the team watches for discussion. Send from your subscribed
-address to wsjt-devel@lists.sourceforge.net.
+Send from your subscribed address to wsjt-devel@lists.sourceforge.net.
+If the first heads-up was never sent, this note stands alone.
 
 ---
 
-Subject: TX Inhibit for WSJT-X, a single-transmitter interlock — PR opened
+Subject: TX Inhibit PR #61 updated — three gate seams from Improved review
 
 Hello all,
 
-Following the team's move to GitHub and the call for contributions on
-the new Programmer's Overview page, I've opened a pull request adding
-an opt-in, low-latency TX Inhibit function to WSJT-X:
+Follow-up on the TX Inhibit pull request:
 
     https://github.com/WSJTX/wsjtx/pull/61
 
-Motivation in brief: WSJT-X and SSB/CW stations sharing a band — in our
-case an ARRL VHF contest multi-op — must keep only one transmitter keyed
-at a time. Halt Tx is the wrong instrument, since it aborts the QSO
-sequence. TX Inhibit instead holds off the radio's PTT key line within
-milliseconds while sequencing and audio continue, releasing PTT when the
-interlock clears. Off by default; zero behavior change unless enabled.
+The PR is still an opt-in, low-latency PTT hold-off for multi-op
+stations that share a band with SSB/CW (W2SZ VHF contest use). Off by
+default; sequencing and audio continue under a hold. Based on released
+v3.0.2.
 
-The PR is based on released v3.0.2, includes two QtTest suites and a
-bench-test helper, and has been field-tested through two release
-candidates with the W2SZ group. The same feature ported to WSJT-X
-Improved has since been exercised on the air, holding off PTT
-mid-transmission during a live QSO with sequencing carrying on
-underneath. I'm glad to adjust protocol, UI, or structure to fit the
-project's direction — review comments welcome on the PR or here.
+A review of the same feature on the WSJT-X Improved port produced three
+small gate seams. Those are now on the PR. Hold policy and the UDP
+datagram format are unchanged.
+
+1. Settings accept now takes enable-inhibit from the same RTS/DTR
+   test as the transceiver, so CAT/VOX cannot look "protected" when
+   no gate is running.
+
+2. Closing the rig clears the Inhibit badge. Previously the port was
+   zeroed without emitting, so the status line could stick.
+
+3. If rig_set_ptt fails while the gate is driving the pin, that is
+   now a transceiver failure (same visibility as stock PTT errors),
+   not a logged UDP-bind warning.
+
+Help → About is "About WSJT-X" again; fork branding had leaked into
+the first posting.
+
+Still only in the working fork (https://github.com/wa1hco/wsjtx-inhibit),
+not in this PR: packaging, and a standalone KEY agent that reads USB-
+serial CTS and sends the hold datagrams. Glad to follow up with either
+if the team wants them.
+
+Review comments welcome on the PR or here.
 
 73,
 Jeff, WA1HCO
