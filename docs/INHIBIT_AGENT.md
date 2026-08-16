@@ -1,8 +1,12 @@
 # inhibit-agent — design
 
 **Status:** implemented in this tree (`tools/inhibit-agent/`).  
-**Audience:** operators who use TX Inhibit on a dual-radio seat.  
+**Audience:** operators who use TX Inhibit on a dual-radio seat **without WIMS**.  
 **Scope:** this program only. Gate internals live in [TX_INHIBIT.md](TX_INHIBIT.md).
+
+**KEY agent** is the role. This program is the standalone KEY agent: the operator
+supplies the serial port and dest `host:port`. The WIMS tree’s KEY agent is
+**`wims-key-agent`** (destinations from WIMS discovery).
 
 ---
 
@@ -11,9 +15,10 @@
 | Program | Role |
 |---------|------|
 | **inhibit-test** | Lab / bench: keyboard KEY → hold. Proves the gate and protocol. |
-| **inhibit-agent** | **This program.** Production sense of SSB/CW KEY (USB-serial **CTS**) → hold. |
+| **inhibit-agent** | **This program.** Standalone KEY agent: USB-serial **CTS** → hold. Operator setup. |
+| **wims-key-agent** | WIMS KEY agent (WIMS tree). Same protocol; destinations from discovery. |
 
-Both speak the same `tx_inhibit` datagrams.
+All speak the same `tx_inhibit` datagrams.
 
 **Name:** `inhibit-agent` (CLI) and `inhibit-agent-gui` (GUI). Linux and Windows.
 

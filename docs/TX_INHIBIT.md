@@ -12,7 +12,11 @@ Design authority for this repository: how **wsjtx-inhibit** implements
 
 | Term | Meaning |
 |------|---------|
-| **WSJT-X station** | One digi position: this app + PC + network + radio + antenna (CAT/PTT). Multi-op has several. May be an unattended go-box, remote from the priority SSB/CW station and KEY agent. |
+| **WSJT-X station** | One digi position: this app + PC + network + radio + antenna (CAT/PTT). Multi-op has several. May be an unattended go-box, remote from the priority SSB/CW station and the KEY agent. |
+| **KEY agent** | Role: any process that sees the priority KEY and sends hold / keepalive / **release hold**. Not a binary name. |
+| **`inhibit-agent`** | Standalone KEY agent in this tree. Operator supplies the serial port and dest `host:port`. [INHIBIT_AGENT.md](INHIBIT_AGENT.md). |
+| **`wims-key-agent`** | WIMS KEY agent (WIMS tree, not this repo). Destinations come from WIMS discovery. |
+| **`inhibit-test`** | Bench KEY agent (keyboard). |
 | **TX Inhibit** | Product / feature name (Settings, badge, this build). |
 | **want_tx** | Software wants to transmit (FT8 sequence, “Enable Tx”, audio path). |
 | **hold** | KEY agent has told WSJT-X stations not to transmit (UDP timed request active). |
@@ -59,11 +63,15 @@ Wire format: JSON fields `tx_inhibit`, `ttl_ms`, … (§4). No hang field.
 | Role | Where | Job |
 |------|--------|-----|
 | **WSJT-X station** (wsjtx-inhibit) | App + PC + network + radio + antenna (may be remote go-box) | When TX Inhibit is enabled and PTT is RTS/DTR: apply the equation (when may this station **assert PTT**). |
-| **KEY agent** | Process that sees the priority radio’s KEY (often near SSB/CW / WIMS server) | While KEY is asserted (and during agent **hang** after **release KEY**), sends hold keepalives; when hang finishes, **releases hold** (`ttl_ms: 0`). |
-| **Bench helper** | Same PC or LAN | **`inhibit-test`** (keyboard stand-in) or `tools/send_inhibit_hold.py`. |
-| **inhibit-agent** | Same PC or LAN | Production CTS KEY → hold. CLI (`--port` + `--addr`) or GUI (no args). [INHIBIT_AGENT.md](INHIBIT_AGENT.md). |
+| **KEY agent** | Process that sees the priority radio’s KEY | While KEY is asserted (and during agent **hang** after **release KEY**), sends hold keepalives; when hang finishes, **releases hold** (`ttl_ms: 0`). |
 
-Any program that speaks §4 is a valid KEY agent.
+Any program that speaks §4 is a valid KEY agent. Two production programs and a bench stand-in:
+
+| Program | Tree | Setup |
+|---------|------|--------|
+| **`inhibit-agent`** / **`inhibit-agent-gui`** | this repo | Operator supplies USB-serial and dest `host:port`. [INHIBIT_AGENT.md](INHIBIT_AGENT.md). |
+| **`wims-key-agent`** | WIMS | Destinations from WIMS discovery. Spoken: “the WIMS KEY agent.” |
+| **`inhibit-test`** / **`inhibit-test-gui`**, `send_inhibit_hold.py` | this repo | Keyboard / scripted bench. |
 
 ```text
   Priority radio
@@ -460,14 +468,15 @@ Enable TX Inhibit, RTS/DTR on a real serial port, then send the same UDP a KEY
 agent would (default **127.0.0.1:22372**). Expect red **TX INHIBITED**; WSJT-X station
 does not **assert PTT** while hold is active.
 
-### `inhibit-agent` (production KEY) / `inhibit-test` (bench)
+### KEY agent programs (`inhibit-agent`, `wims-key-agent`, `inhibit-test`)
 
-| Binary | Platform | Notes |
-|--------|----------|--------|
-| **`inhibit-agent`** | Linux / Windows console | Scripting: `--port` + `--addr host:port`. CTS KEY. |
-| **`inhibit-agent-gui`** | Linux / Windows GUI | No args. Auto-picks Keyline + `127.0.0.1:22372`. |
-| **`inhibit-test`** | Linux / Windows console | Keyboard KEY stand-in. |
-| **`inhibit-test-gui`** | Windows GUI | Native Win32; mouse or grave; same protocol. |
+| Binary | Tree | Notes |
+|--------|------|--------|
+| **`inhibit-agent`** | this repo | Standalone CLI. `--port` + `--addr host:port`. CTS KEY. |
+| **`inhibit-agent-gui`** | this repo | Standalone GUI. No args. Auto-picks Keyline + `127.0.0.1:22372`. |
+| **`wims-key-agent`** | WIMS | Same role; destinations from WIMS discovery. Not shipped here. |
+| **`inhibit-test`** | this repo | Keyboard KEY stand-in. |
+| **`inhibit-test-gui`** | this repo (Windows) | Native Win32; mouse or grave; same protocol. |
 
 ```text
 inhibit-agent --port /dev/ttyUSB0 --addr 127.0.0.1:22372

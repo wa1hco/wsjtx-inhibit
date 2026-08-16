@@ -7,13 +7,14 @@
 
 | Name | Role |
 |------|------|
-| **`inhibit-agent`** | **Production CLI.** USB-serial CTS + dest `host:port`. Linux and Windows. |
-| **`inhibit-agent-gui`** | **Production GUI.** No args (auto Keyline + localhost). Linux and Windows. |
+| **`inhibit-agent`** | **Standalone KEY agent (CLI).** USB-serial CTS + dest `host:port`. Operator setup; no WIMS. |
+| **`inhibit-agent-gui`** | **Standalone KEY agent (GUI).** No args (auto Keyline + localhost). |
+| **`wims-key-agent`** | **WIMS KEY agent.** Destinations from WIMS discovery. WIMS tree, not this repo. |
 | **`inhibit-test`** | **Bench console.** Keyboard KEY stand-in. |
 | **`inhibit-test-gui`** | **Bench Windows GUI.** Mouse or grave `` ` ``. |
 | `send_inhibit_hold.py` | Python stand-in (dev / scripted tests). |
 
-Production KEY agent: [docs/INHIBIT_AGENT.md](../docs/INHIBIT_AGENT.md).
+**KEY agent** is the role. Standalone program: [docs/INHIBIT_AGENT.md](../docs/INHIBIT_AGENT.md).
 
 Prefer **`inhibit-test`** (console) or **`inhibit-test-gui`** (Windows GUI) in docs and scripts.
 

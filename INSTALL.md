@@ -154,7 +154,8 @@ You can exercise TX Inhibit **without** a full multi-op system by simulating a p
 |------|--------|
 | **wsjtx-inhibit** running | **PTT = RTS/DTR**, **Enable TX Inhibit** on (see checklist above) |
 | **KEY helper (bench)** | **`bin/inhibit-test`** (console) or **`bin/inhibit-test-gui.exe`** (Windows GUI); Python `tools/send_inhibit_hold.py` |
-| **inhibit-agent (production)** | **`bin/inhibit-agent`** (CLI: serial + `host:port`) or **`bin/inhibit-agent-gui`** (no args). Linux and Windows. |
+| **`inhibit-agent` (standalone KEY agent)** | **`bin/inhibit-agent`** (CLI: serial + `host:port`) or **`bin/inhibit-agent-gui`** (no args). Linux and Windows. Operator setup; no WIMS. |
+| **`wims-key-agent` (WIMS KEY agent)** | WIMS tree, not this package. Destinations from WIMS discovery. |
 
 ### `inhibit-agent` / `inhibit-agent-gui` (same folder as the app)
 
@@ -224,7 +225,7 @@ Script on GitHub: [tools/send_inhibit_hold.py](https://github.com/wa1hco/wsjtx-i
 
 ### Production use
 
-Day-to-day multi-op use is a **KEY agent**: senses the priority KEY and tells WSJT-X stations not to transmit (UDP keepalives + **release hold**; see [docs/TX_INHIBIT.md](docs/TX_INHIBIT.md) §3). These helpers are **bench stand-ins**.
+Day-to-day multi-op use is a **KEY agent** (UDP keepalives + **release hold**; [docs/TX_INHIBIT.md](docs/TX_INHIBIT.md) §3). This package ships **`inhibit-agent`** (operator supplies the serial port and gate address). The WIMS tree ships **`wims-key-agent`** (destinations from WIMS discovery). `inhibit-test` and the Python helper are **bench stand-ins**.
 
 ---
 

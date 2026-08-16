@@ -169,7 +169,7 @@ python3 tools/send_inhibit_hold.py --ttl-ms 3000 --station TEST
 python3 tools/send_inhibit_hold.py --ttl-ms 0   # release
 ```
 
-You do **not** need the script for normal use — a **KEY agent** tells WSJT-X stations not to transmit (keepalive + release). See [docs/TX_INHIBIT.md](docs/TX_INHIBIT.md).
+You do **not** need the script for normal use — a **KEY agent** tells WSJT-X stations not to transmit (keepalive + release). This package ships **`inhibit-agent`** (operator setup); the WIMS tree ships **`wims-key-agent`** (discovery). See [docs/TX_INHIBIT.md](docs/TX_INHIBIT.md).
 
 ### Quick check
 

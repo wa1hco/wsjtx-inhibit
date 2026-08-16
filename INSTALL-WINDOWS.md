@@ -166,7 +166,7 @@ bin\inhibit-test.exe         optional console KEY agent
 3. Release → hang then badge clears (hold ≥500 ms for hang 0 / continuous). Short taps ≈ break-in CW hang.
 4. **Esc** / Force RELEASE ends hold immediately. Console: **q** or **Esc** to quit.
 
-Default UDP target is `127.0.0.1:22372`. Day-to-day multi-op uses a real **KEY agent** (tells WSJT-X stations not to transmit); this helper is a bench stand-in. See [docs/TX_INHIBIT.md](docs/TX_INHIBIT.md).
+Default UDP target is `127.0.0.1:22372`. Day-to-day multi-op uses a **KEY agent**: **`inhibit-agent`** in this package (operator setup) or **`wims-key-agent`** in the WIMS tree (discovery). This helper is a bench stand-in. See [docs/TX_INHIBIT.md](docs/TX_INHIBIT.md).
 
 ---
 

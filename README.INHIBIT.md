@@ -4,7 +4,7 @@
 
 WSJT-X mainline plus **TX Inhibit**: when a **KEY agent** **tells WSJT-X stations not to transmit** (priority radio keyed), co-band stations (app + PC + network + radio + antenna; may be remote go-boxes) will not **assert PTT** within milliseconds — **without** aborting FT8 sequencing (Halt Tx ends the QSO; TX Inhibit only filters whether to **assert PTT**).
 
-A KEY agent senses the priority KEY and sends the UDP protocol in [docs/TX_INHIBIT.md](docs/TX_INHIBIT.md).
+A **KEY agent** (the role) senses the priority KEY and sends the UDP protocol in [docs/TX_INHIBIT.md](docs/TX_INHIBIT.md). This tree ships **`inhibit-agent`** (operator supplies serial port and dest). The WIMS tree ships **`wims-key-agent`** (destinations from WIMS discovery).
 
 ---
 
