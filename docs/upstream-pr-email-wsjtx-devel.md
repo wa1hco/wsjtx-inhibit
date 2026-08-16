@@ -5,7 +5,7 @@ If the first heads-up was never sent, this note stands alone.
 
 ---
 
-Subject: TX Inhibit PR #61 updated — three gate seams from Improved review
+Subject: TX Inhibit PR #61 updated — standalone KEY agent, no WIMS required
 
 Hello all,
 
@@ -18,28 +18,28 @@ stations that share a band with SSB/CW (W2SZ VHF contest use). Off by
 default; sequencing and audio continue under a hold. Based on released
 v3.0.2.
 
-A review of the same feature on the WSJT-X Improved port produced three
-small gate seams. Those are now on the PR. Hold policy and the UDP
-datagram format are unchanged.
+The first posting was only the gate. That is not enough: something
+must see the priority KEY and send the hold datagrams. WIMS already
+has that program. The PR now ships a standalone KEY agent so a
+dual-radio seat works with only WSJT-X — no WIMS required.
 
-1. Settings accept now takes enable-inhibit from the same RTS/DTR
-   test as the transceiver, so CAT/VOX cannot look "protected" when
-   no gate is running.
+- inhibit-agent (CLI): USB-serial CTS + dest host:port
+    inhibit-agent --port /dev/ttyUSB0 --addr 127.0.0.1:22372
+- inhibit-agent-gui: dest host:port in the window (default
+  127.0.0.1:22372); CTS port auto-picked or --port
+- Hang: break-in CW 1.5 × word gap so PTT does not follow dits;
+  SSB / continuous KEY releases immediately
+- Fail-safe: lost agent or dongle → gate deadman (~600 ms) opens
 
-2. Closing the rig clears the Inhibit badge. Previously the port was
-   zeroed without emitting, so the status line could stick.
+Qt SerialPort is already a WSJT-X dependency. Wire format is
+unchanged. Design: docs/INHIBIT_AGENT.md on the PR.
 
-3. If rig_set_ptt fails while the gate is driving the pin, that is
-   now a transceiver failure (same visibility as stock PTT errors),
-   not a logged UDP-bind warning.
+The Improved-review gate seams from the last update are still there
+(RTS/DTR enable, close_rig clears the badge, rig_set_ptt failure is
+a transceiver failure). Help → About is "About WSJT-X".
 
-Help → About is "About WSJT-X" again; fork branding had leaked into
-the first posting.
-
-Still only in the working fork (https://github.com/wa1hco/wsjtx-inhibit),
-not in this PR: packaging, and a standalone KEY agent that reads USB-
-serial CTS and sends the hold datagrams. Glad to follow up with either
-if the team wants them.
+Still only in the working fork (https://github.com/wa1hco/wsjtx-inhibit):
+packaging, and a keyboard bench tool. Glad to follow up if useful.
 
 Review comments welcome on the PR or here.
 
