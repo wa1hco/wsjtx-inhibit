@@ -1687,11 +1687,6 @@ if (NOT WSJT_SKIP_MAP65)
 endif ()
 add_subdirectory (qmap)
 
-# Windows KEY-agent GUI stand-in (native .exe; no Python). bin/inhibit-test-gui.exe
-if (WIN32)
-  add_subdirectory (tools/inhibit_spacebar)
-endif ()
-
 # build the main application
 generate_version_info (wsjtx_VERSION_RESOURCES
   NAME wsjtx
@@ -1804,7 +1799,6 @@ add_executable (wsjtx_app_version AppVersion/AppVersion.cpp ${wsjtx_app_version_
 target_link_libraries (wsjtx_app_version wsjt_qt)
 
 # TX Inhibit KEY-agent stand-in — installed as bin/inhibit-test(.exe) next to wsjtx.
-# (Formerly inhibit-spacebar; grave/` KEY, not Space.)
 add_executable (inhibit-test tools/inhibit-test/main.cpp)
 target_link_libraries (inhibit-test Qt5::Core Qt5::Network)
 # Console subsystem on Windows (keyboard KEY test).

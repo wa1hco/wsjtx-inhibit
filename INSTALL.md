@@ -153,7 +153,7 @@ You can exercise TX Inhibit **without** a full multi-op system by simulating a p
 | Item | Notes |
 |------|--------|
 | **wsjtx-inhibit** running | **PTT = RTS/DTR**, **Enable TX Inhibit** on (see checklist above) |
-| **KEY helper (bench)** | **`bin/inhibit-test`** (console) or **`bin/inhibit-test-gui.exe`** (Windows GUI); Python `tools/send_inhibit_hold.py` |
+| **KEY helper (bench)** | **`bin/inhibit-test`** (console); Python `tools/send_inhibit_hold.py` |
 | **`inhibit-agent` (standalone KEY agent)** | **`bin/inhibit-agent`** (CLI: serial + `host:port`) or **`bin/inhibit-agent-gui`** (no args). Linux and Windows. Operator setup; no WIMS. |
 | **`wims-key-agent` (WIMS KEY agent)** | WIMS tree, not this package. Destinations from WIMS discovery. |
 
@@ -168,24 +168,23 @@ You can exercise TX Inhibit **without** a full multi-op system by simulating a p
 
 Design: [docs/INHIBIT_AGENT.md](docs/INHIBIT_AGENT.md).
 
-### `inhibit-test` / `inhibit-test-gui` (same folder as the app)
+### `inhibit-test` (same folder as the app)
 
 Installed with the package (portable ZIP / installer stage):
 
 ```text
 …\bin\wsjtx.exe
-…\bin\inhibit-test-gui.exe  ← Windows GUI (grave ` or mouse)
 …\bin\inhibit-test.exe      ← Windows console
 …/bin/wsjtx
 …/bin/inhibit-test          ← Linux console
 ```
 
 1. Start **wsjtx-inhibit** with **PTT = RTS or DTR**, **Enable TX Inhibit** checked, real serial port.
-2. **Windows:** run **`bin\inhibit-test-gui.exe`** (or console `inhibit-test.exe`). **Linux:** `./bin/inhibit-test` — you must be in group **`input`** (`sudo usermod -aG input $USER`, then full log out/in); otherwise the console tool refuses to start.
-3. With the helper focused, hold **grave** (`` ` ``, left of 1) or the GUI button → **assert KEY**. Red **TX INHIBITED**. **Not Space.**
+2. Run **`bin/inhibit-test`**. **Linux:** you must be in group **`input`** (`sudo usermod -aG input $USER`, then full log out/in); otherwise the console tool refuses to start.
+3. With the helper focused, hold **grave** (`` ` ``, left of 1) → **assert KEY**. Red **TX INHIBITED**. **Not Space.**
 4. Release → hang then **release hold**; badge clears. For a clean digi RF check use a long hold (≥500 ms) or fixed hang 0.
 5. Short taps ≈ break-in CW; long hold ≈ continuous / SSB (hang 0).
-6. **Esc** / Force RELEASE ends hold. Console: **q** or **Esc** also quits.
+6. **q** or **Esc** ends hold and quits.
 
 Default target: `127.0.0.1:22372`. Detail: [docs/TX_INHIBIT.md §6](docs/TX_INHIBIT.md#6-testing-locally).
 

@@ -11,23 +11,21 @@
 | **`inhibit-agent-gui`** | **Standalone KEY agent (GUI).** No args (auto Keyline + localhost). |
 | **`wims-key-agent`** | **WIMS KEY agent.** Destinations from WIMS discovery. WIMS tree, not this repo. |
 | **`inhibit-test`** | **Bench console.** Keyboard KEY stand-in. |
-| **`inhibit-test-gui`** | **Bench Windows GUI.** Mouse or grave `` ` ``. |
 | `send_inhibit_hold.py` | Python stand-in (dev / scripted tests). |
 
 **KEY agent** is the role. Standalone program: [docs/INHIBIT_AGENT.md](../docs/INHIBIT_AGENT.md).
 
-Prefer **`inhibit-test`** (console) or **`inhibit-test-gui`** (Windows GUI) in docs and scripts.
+Prefer **`inhibit-test`** (console) in docs and scripts.
 
 ## Build / install
 
 ```text
 tools/inhibit-test/main.cpp       →  target inhibit-test       →  bin/inhibit-test[.exe]
-tools/inhibit_spacebar/*.c        →  target inhibit-test-gui   →  bin/inhibit-test-gui.exe  (Windows only)
 ```
 
-## Behaviour (both tools)
+## Behaviour
 
-**KEY key = grave/backtick `` ` ``** (not Space — avoids false holds while typing). GUI also accepts mouse on the big button.
+**KEY key = grave/backtick `` ` ``** (not Space — avoids false holds while typing).
 
 1. **KEY assert** → **hold** immediately (`ttl_ms` = hold_timeout_ms, default 600) + keepalives ~200 ms.  
 2. **KEYing monitor** classifies break-in CW vs continuous KEY; measures dit if break-in.  
@@ -70,15 +68,6 @@ sudo usermod -aG input "$USER"   # Linux; then full log out/in
 inhibit-test --host 127.0.0.1 --port 22372 --station TEST-KEY --ttl-ms 600
 inhibit-test --fixed-hang-ms 0
 inhibit-test --global-keys             # ` and ~ readable from any window
-```
-
-### Windows GUI (`inhibit-test-gui`)
-
-Keys only when the GUI window is focused. Optional **fixed hang ms** field (empty = KEYing monitor). Esc / Force RELEASE skips hang.
-
-```text
-bin\inhibit-test-gui.exe
-bin\inhibit-test.exe          optional console sibling (Qt)
 ```
 
 **Tip:** hold `` ` `` ≥500 ms for hang=0 (continuous). Short taps use break-in hang unless fixed hang is 0.

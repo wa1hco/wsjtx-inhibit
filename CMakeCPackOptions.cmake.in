@@ -13,7 +13,6 @@ set (CPACK_PACKAGE_INSTALL_DIRECTORY ${CPACK_PACKAGE_NAME})
 set (CPACK_PACKAGE_INSTALL_REGISTRY_KEY ${CPACK_PACKAGE_NAME})
 set (CPACK_PACKAGE_EXECUTABLES
   wsjtx "@PROJECT_NAME@"
-  inhibit-test-gui "TX Inhibit KEY tester (GUI)"
   )
 set (CPACK_CREATE_DESKTOP_LINKS wsjtx)
 set (CPACK_STRIP_FILES TRUE)
@@ -40,7 +39,6 @@ if (CPACK_GENERATOR MATCHES "NSIS")
   set (CPACK_NSIS_MENU_LINKS
     "@PROJECT_MANUAL_DIRECTORY_URL@/@PROJECT_MANUAL@" "@PROJECT_NAME@ Documentation"
     "@PROJECT_HOMEPAGE@" "@PROJECT_NAME@ Web Site"
-    "bin\\\\inhibit-test-gui.exe" "TX Inhibit KEY tester (GUI)"
     )
   # Use the icon from wsjtx for add-remove programs
   set (CPACK_NSIS_INSTALLED_ICON_NAME "bin\\\\wsjtx.exe")

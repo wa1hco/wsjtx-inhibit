@@ -157,14 +157,13 @@ With this build running and settings as above, use the helper **next to the app*
 
 ```text
 bin\wsjtx.exe
-bin\inhibit-test-gui.exe     Windows GUI (mouse or grave ` KEY)
-bin\inhibit-test.exe         optional console KEY agent
+bin\inhibit-test.exe         console KEY stand-in
 ```
 
-1. Run **`bin\inhibit-test-gui.exe`** (or `inhibit-test.exe`) from the same install folder as `wsjtx.exe`.
-2. With the helper focused, hold **grave `` ` ``** (or the big button) → red **TX INHIBITED**; attempt TX (dummy load) — WSJT-X station does not assert PTT. **Not Space.**
+1. Run **`bin\inhibit-test.exe`** from the same install folder as `wsjtx.exe`.
+2. With the helper focused, hold **grave `` ` ``** → red **TX INHIBITED**; attempt TX (dummy load) — WSJT-X station does not assert PTT. **Not Space.**
 3. Release → hang then badge clears (hold ≥500 ms for hang 0 / continuous). Short taps ≈ break-in CW hang.
-4. **Esc** / Force RELEASE ends hold immediately. Console: **q** or **Esc** to quit.
+4. **q** or **Esc** ends hold and quits.
 
 Default UDP target is `127.0.0.1:22372`. Day-to-day multi-op uses a **KEY agent**: **`inhibit-agent`** in this package (operator setup) or **`wims-key-agent`** in the WIMS tree (discovery). This helper is a bench stand-in. See [docs/TX_INHIBIT.md](docs/TX_INHIBIT.md).
 

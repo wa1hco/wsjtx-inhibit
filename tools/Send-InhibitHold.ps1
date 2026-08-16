@@ -6,10 +6,10 @@
   Sends the UDP hold protocol from docs/TX_INHIBIT.md so TX Inhibit can be
   exercised while you are driving the WSJT-X window with mouse and keyboard.
 
-  The interactive helpers (inhibit-test, inhibit-test-gui) read a held key and
-  therefore need focus themselves, which makes it impossible to hold the KEY
-  and press Tune in WSJT-X at the same time. This script holds from a separate
-  window instead, leaving WSJT-X free.
+  The interactive helper (inhibit-test) reads a held key and therefore
+  needs focus itself, which makes it impossible to hold the KEY and
+  press Tune in WSJT-X at the same time. This script holds from a
+  separate window instead, leaving WSJT-X free.
 
   Mirrors the Hold-sender half of a real KEY agent (docs/TX_INHIBIT.md 3):
   an immediate hold, keepalives about every 200 ms, and an explicit release

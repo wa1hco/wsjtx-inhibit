@@ -1,7 +1,7 @@
 // inhibit-test — KEY-agent stand-in for TX Inhibit (docs/TX_INHIBIT.md §3)
 //
 // Canonical name: inhibit-test (installed as bin/inhibit-test next to wsjtx).
-// Formerly inhibit-spacebar. Implements two cooperating roles on one rare KEY:
+// Implements two cooperating roles on one rare KEY:
 //
 //   KEY stand-in key: left quote / grave accent `  (not Space — typing
 //   spaces must not false-trigger holds).

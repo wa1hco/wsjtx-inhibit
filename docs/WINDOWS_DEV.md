@@ -52,7 +52,7 @@ Windows-specific attention:
 | **COM path** | Hamlib wants `COMn` or `\\.\COMn` for ports ≥10 — verify open failures on USB serial. |
 | **Handle inheritance** | `NonInheritingProcess` (Win32 `STARTUPINFOEX`) used so child processes do not steal COM handles. |
 | **Shared CAT+PTT USB** | Handshake None; only one app owns modem lines. |
-| **Helpers** | `inhibit-test.exe` / `inhibit-test-gui.exe` next to `wsjtx.exe`. |
+| **Helpers** | `inhibit-test.exe` next to `wsjtx.exe`. |
 
 ### Candidate Windows hardening (implement as needed)
 

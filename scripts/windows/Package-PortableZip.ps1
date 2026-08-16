@@ -43,9 +43,8 @@ WSJT-X + TX Inhibit.
 3. Settings → Radio: PTT method RTS or DTR (real COMx — may be same COM as CAT).
 
 ## Local inhibit test
-With wsjtx running, run bin\inhibit-test-gui.exe and hold the grave/backtick key
-(` , left of the 1 key) or the big button to hold/release. Not the Spacebar.
-Console sibling: bin\inhibit-test.exe
+With wsjtx running, run bin\inhibit-test.exe and hold the grave/backtick key
+(` , left of the 1 key) to hold/release. Not the Spacebar.
 (Default UDP 127.0.0.1:22372.) See docs/TX_INHIBIT.md in the source repo.
 
 https://github.com/wa1hco/wsjtx-inhibit
