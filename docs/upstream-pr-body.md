@@ -6,12 +6,8 @@ Title: Add low-latency TX Inhibit for multi-op single-transmitter interlock
 
 ## Motivation
 
-Multi-op stations sharing a band — in our case the W2SZ VHF contest
-group interleaving FT8 with SSB/CW — must keep only one transmitter
-keyed at a time. Halt Tx is the wrong tool for that job: it aborts the
-QSO sequence. An interlock needs to hold off the radio's PTT key line
-within milliseconds while FT8/FT4 sequencing and audio continue
-untouched, then release PTT the moment the band is free.
+WSJTX and SSB/CW stations sharing a band — in our case the W2SZ VHF contest group interleaving FT8 with SSB/CW — must keep only one transmitter keyed at a time. We have found that WSJTX can listen through SSB/CW station activity.  The next goal is FT8 working stations while SSB/CW continues to operate with priority. An interlock needs to hold off the radio's PTT key line within milliseconds whenever SSB/CW transmits. 
+
 
 ## Design
 

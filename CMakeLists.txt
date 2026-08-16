@@ -1812,6 +1812,9 @@ if (WIN32)
   set_target_properties (inhibit-test PROPERTIES WIN32_EXECUTABLE OFF)
 endif ()
 
+# Production KEY agent: CTS -> UDP hold. CLI + GUI, Linux and Windows.
+add_subdirectory (tools/inhibit-agent)
+
 generate_version_info (message_aggregator_VERSION_RESOURCES
   NAME message_aggregator
   BUNDLE ${PROJECT_BUNDLE_NAME}
@@ -1886,6 +1889,7 @@ install (TARGETS inhibit-test
   RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT runtime
   BUNDLE DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT runtime
   )
+# inhibit-agent / inhibit-agent-gui install from tools/inhibit-agent/CMakeLists.txt
 
 install (TARGETS qmap
   RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT runtime

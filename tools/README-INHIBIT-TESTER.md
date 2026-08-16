@@ -7,9 +7,13 @@
 
 | Name | Role |
 |------|------|
-| **`inhibit-test`** | **Canonical console.** Cross-platform; installed as `bin/inhibit-test` next to `wsjtx`. |
-| **`inhibit-test-gui`** | **Windows GUI.** Same protocol/hang policy; mouse or grave `` ` ``. `bin/inhibit-test-gui.exe`. (Source still under `tools/inhibit_spacebar/`.) |
+| **`inhibit-agent`** | **Production CLI.** USB-serial CTS + dest `host:port`. Linux and Windows. |
+| **`inhibit-agent-gui`** | **Production GUI.** No args (auto Keyline + localhost). Linux and Windows. |
+| **`inhibit-test`** | **Bench console.** Keyboard KEY stand-in. |
+| **`inhibit-test-gui`** | **Bench Windows GUI.** Mouse or grave `` ` ``. |
 | `send_inhibit_hold.py` | Python stand-in (dev / scripted tests). |
+
+Production KEY agent: [docs/INHIBIT_AGENT.md](../docs/INHIBIT_AGENT.md).
 
 Prefer **`inhibit-test`** (console) or **`inhibit-test-gui`** (Windows GUI) in docs and scripts.
 

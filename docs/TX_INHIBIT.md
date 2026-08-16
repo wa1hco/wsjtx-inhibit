@@ -60,7 +60,8 @@ Wire format: JSON fields `tx_inhibit`, `ttl_ms`, … (§4). No hang field.
 |------|--------|-----|
 | **WSJT-X station** (wsjtx-inhibit) | App + PC + network + radio + antenna (may be remote go-box) | When TX Inhibit is enabled and PTT is RTS/DTR: apply the equation (when may this station **assert PTT**). |
 | **KEY agent** | Process that sees the priority radio’s KEY (often near SSB/CW / WIMS server) | While KEY is asserted (and during agent **hang** after **release KEY**), sends hold keepalives; when hang finishes, **releases hold** (`ttl_ms: 0`). |
-| **Bench helper** | Same PC or LAN | **`inhibit-test`** (canonical KEY-agent stand-in) or `tools/send_inhibit_hold.py`. |
+| **Bench helper** | Same PC or LAN | **`inhibit-test`** (keyboard stand-in) or `tools/send_inhibit_hold.py`. |
+| **inhibit-agent** | Same PC or LAN | Production CTS KEY → hold. CLI (`--port` + `--addr`) or GUI (no args). [INHIBIT_AGENT.md](INHIBIT_AGENT.md). |
 
 Any program that speaks §4 is a valid KEY agent.
 
@@ -459,14 +460,24 @@ Enable TX Inhibit, RTS/DTR on a real serial port, then send the same UDP a KEY
 agent would (default **127.0.0.1:22372**). Expect red **TX INHIBITED**; WSJT-X station
 does not **assert PTT** while hold is active.
 
-### `inhibit-test` / `inhibit-test-gui` (KEY-agent stand-ins)
+### `inhibit-agent` (production KEY) / `inhibit-test` (bench)
 
 | Binary | Platform | Notes |
 |--------|----------|--------|
-| **`inhibit-test`** | Linux / Windows console | Canonical CLI (Qt). |
+| **`inhibit-agent`** | Linux / Windows console | Scripting: `--port` + `--addr host:port`. CTS KEY. |
+| **`inhibit-agent-gui`** | Linux / Windows GUI | No args. Auto-picks Keyline + `127.0.0.1:22372`. |
+| **`inhibit-test`** | Linux / Windows console | Keyboard KEY stand-in. |
 | **`inhibit-test-gui`** | Windows GUI | Native Win32; mouse or grave; same protocol. |
 
-Implements §3 (Hold sender + KEYing monitor):
+```text
+inhibit-agent --port /dev/ttyUSB0 --addr 127.0.0.1:22372
+inhibit-agent COM7 192.168.1.40:22372
+inhibit-agent-gui
+```
+
+Design: [INHIBIT_AGENT.md](INHIBIT_AGENT.md).
+
+`inhibit-test` implements §3 (Hold sender + KEYing monitor) from the keyboard:
 
 | Action | Effect |
 |--------|--------|

@@ -153,7 +153,19 @@ You can exercise TX Inhibit **without** a full multi-op system by simulating a p
 | Item | Notes |
 |------|--------|
 | **wsjtx-inhibit** running | **PTT = RTS/DTR**, **Enable TX Inhibit** on (see checklist above) |
-| **KEY helper** | **`bin/inhibit-test`** (console) or **`bin/inhibit-test-gui.exe`** (Windows GUI); Python `tools/send_inhibit_hold.py` |
+| **KEY helper (bench)** | **`bin/inhibit-test`** (console) or **`bin/inhibit-test-gui.exe`** (Windows GUI); Python `tools/send_inhibit_hold.py` |
+| **inhibit-agent (production)** | **`bin/inhibit-agent`** (CLI: serial + `host:port`) or **`bin/inhibit-agent-gui`** (no args). Linux and Windows. |
+
+### `inhibit-agent` / `inhibit-agent-gui` (same folder as the app)
+
+```text
+…\bin\inhibit-agent.exe      Windows CLI  —  inhibit-agent COM7 127.0.0.1:22372
+…\bin\inhibit-agent-gui.exe  Windows GUI  —  no args (auto Keyline + localhost)
+…/bin/inhibit-agent          Linux CLI
+…/bin/inhibit-agent-gui      Linux GUI
+```
+
+Design: [docs/INHIBIT_AGENT.md](docs/INHIBIT_AGENT.md).
 
 ### `inhibit-test` / `inhibit-test-gui` (same folder as the app)
 
