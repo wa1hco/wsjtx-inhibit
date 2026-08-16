@@ -472,8 +472,8 @@ does not **assert PTT** while hold is active.
 
 | Binary | Tree | Notes |
 |--------|------|--------|
-| **`inhibit-agent`** | this repo | Standalone CLI. `--port` + `--addr host:port`. CTS KEY. |
-| **`inhibit-agent-gui`** | this repo | Standalone GUI. No args. Auto-picks Keyline + `127.0.0.1:22372`. |
+| **`inhibit-agent`** | this repo | Standalone CLI. CTS KEY `--port` + dest `--addr host:port`. |
+| **`inhibit-agent-gui`** | this repo | CTS KEY; dest `host:port` in the window (default `127.0.0.1:22372`). |
 | **`wims-key-agent`** | WIMS | Same role; destinations from WIMS discovery. Not shipped here. |
 | **`inhibit-test`** | this repo | Keyboard KEY stand-in. |
 

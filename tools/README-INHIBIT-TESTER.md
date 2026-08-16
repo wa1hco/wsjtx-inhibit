@@ -7,8 +7,8 @@
 
 | Name | Role |
 |------|------|
-| **`inhibit-agent`** | **Standalone KEY agent (CLI).** USB-serial CTS + dest `host:port`. Operator setup; no WIMS. |
-| **`inhibit-agent-gui`** | **Standalone KEY agent (GUI).** No args (auto Keyline + localhost). |
+| **`inhibit-agent`** | **Standalone KEY agent (CLI).** USB-serial **CTS** + dest `host:port`. |
+| **`inhibit-agent-gui`** | **Standalone KEY agent (GUI).** CTS in; dest `host:port` in the window. |
 | **`wims-key-agent`** | **WIMS KEY agent.** Destinations from WIMS discovery. WIMS tree, not this repo. |
 | **`inhibit-test`** | **Bench console.** Keyboard KEY stand-in. |
 | `send_inhibit_hold.py` | Python stand-in (dev / scripted tests). |

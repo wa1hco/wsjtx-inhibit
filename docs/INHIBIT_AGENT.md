@@ -28,7 +28,7 @@ All speak the same `tx_inhibit` datagrams.
 
 Give **SSB/CW KEY priority over WSJT-X transmit** on a dual-radio station:
 
-1. Sense the SSB/CW **KEY/PTT line** (USB-serial **CTS**).
+1. Sense the SSB/CW **KEY** line on USB-serial **CTS**.
 2. While KEY is asserted, send **TX Inhibit hold** datagrams to the gate.
 3. On KEY release: **hang only for break-in CW**, then **release** (`ttl_ms: 0`).
    Continuous KEY (SSB / PTT / non-break-in) releases **immediately**.
@@ -41,10 +41,21 @@ Give **SSB/CW KEY priority over WSJT-X transmit** on a dual-radio station:
 
 | Form | Binary | Who | Required inputs |
 |------|--------|-----|-----------------|
-| **CLI** | `inhibit-agent` | Scripts, SSH, startup files | **USB-serial port** and **network addr** (`host:port`) |
-| **GUI** | `inhibit-agent-gui` | Operators | **None.** Auto-picks a Keyline (or the only USB-serial) and `127.0.0.1:22372` |
+| **CLI** | `inhibit-agent` | Scripts, SSH, startup files | USB-serial **CTS** port and dest `host:port` |
+| **GUI** | `inhibit-agent-gui` | Operators | Dest **host:port** in the window (default `127.0.0.1:22372`). CTS port auto-picked or `--port`. |
 
-GUI may take `--port` / `--addr` as overrides; it does not need them.
+Keyboard KEY (grave / tilde) is **`inhibit-test`**, not this program.
+
+---
+
+## 2a. Bench the gate without a KEY dongle
+
+Use **`inhibit-test`** (grave / tilde). That is the keyboard KEY stand-in.
+
+`inhibit-agent` always needs a **CTS** source (USB-serial KEY line). A PTY does
+not provide CTS. To run WSJT-X with no radio so the gate still starts:
+
+- Rig **None**, PTT **RTS**, PTT port **`inhibit-sim`**, Enable TX Inhibit.
 
 ---
 
@@ -60,7 +71,7 @@ inhibit-agent --list-ports
 
 | Flag | Default | Notes |
 |------|---------|--------|
-| `--port` / first positional | **required** | COM / tty device |
+| `--port` / first positional | **required** | COM / tty device (CTS = KEY) |
 | `--addr` / second positional | **required** | `host:port` of the WSJT-X gate |
 | `--invert` | false | CTS polarity |
 | `--ttl-ms` | `600` | Wire hold timeout (not hang) |
@@ -78,10 +89,10 @@ Double-click `inhibit-agent-gui` (Windows) or run it from the install `bin/`
 
 1. Prefers a serial device whose USB strings look like **Keyline** / **WA1HCO**.
 2. Else uses the only non-builtin USB-serial port.
-3. Sends to **`127.0.0.1:22372`**.
+3. **Gate** field is dest `host:port`, default **`127.0.0.1:22372`**. Apply to change.
 4. Shows **OPEN** / **INHIBITING** / **HANG** / **SENSE FAULT** in a large badge.
 
-No COM number or IP to type for the usual same-PC dual-radio seat.
+Usual same-PC seat: leave Gate at localhost; only the CTS port is auto-picked.
 
 ---
 

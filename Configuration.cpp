@@ -1,4 +1,5 @@
 #include "Configuration.hpp"
+#include "TxInhibit/TxInhibitSimPort.hpp"
 
 //
 // Read me!
@@ -1982,6 +1983,11 @@ Configuration::impl::impl (Configuration * self, QNetworkAccessManager * network
   fill_port_combo_box (ui_->PTT_port_combo_box);
   ui_->PTT_port_combo_box->addItem ("CAT");
   ui_->PTT_port_combo_box->setItemData (ui_->PTT_port_combo_box->count () - 1, "Delegate to proxy CAT service", Qt::ToolTipRole);
+  ui_->PTT_port_combo_box->addItem (QString::fromLatin1 (inhibit_sim_port_name ()));
+  ui_->PTT_port_combo_box->setItemData (
+      ui_->PTT_port_combo_box->count () - 1,
+      "Dummy PTT port: Radio None + RTS/DTR starts TX Inhibit with no UART.",
+      Qt::ToolTipRole);
 
   //
   // setup hooks to keep audio channels aligned with devices

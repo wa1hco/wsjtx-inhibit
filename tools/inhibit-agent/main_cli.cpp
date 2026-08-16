@@ -52,7 +52,7 @@ int main (int argc, char * argv[])
   parser.setApplicationDescription (
       QStringLiteral (
           "SSB/CW KEY (USB-serial CTS) -> TX Inhibit hold.\n"
-          "CLI for scripting: pass the serial port and dest host:port.\n"
+          "CLI: pass the serial port and dest host:port.\n"
           "Same hang policy as inhibit-test (CW hang; SSB hang 0)."));
   parser.addHelpOption ();
   parser.addVersionOption ();

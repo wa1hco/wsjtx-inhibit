@@ -1,6 +1,6 @@
-// inhibit-agent-gui — operator window. No required serial/addr.
-// Auto-picks a Keyline (or the only USB-serial) and 127.0.0.1:22372.
-// Optional overrides: --port / --addr (same as CLI).
+// inhibit-agent-gui — CTS KEY in, dest host:port out.
+// Gate address is editable (default 127.0.0.1:22372). Serial KEY is
+// auto-picked (Keyline / only USB-serial) unless --port is given.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -13,6 +13,7 @@
 #include <QFont>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QLineEdit>
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QVBoxLayout>
@@ -52,16 +53,16 @@ int main (int argc, char * argv[])
   parser.setApplicationDescription (
       QStringLiteral (
           "SSB/CW KEY (USB-serial CTS) -> TX Inhibit hold.\n"
-          "GUI needs no arguments: auto-selects Keyline + 127.0.0.1:22372."));
+          "Set dest host:port in the window (default 127.0.0.1:22372)."));
   parser.addHelpOption ();
   parser.addVersionOption ();
   QCommandLineOption portOpt {
     QStringList () << "p" << "port",
-    QStringLiteral ("Override USB-serial device"),
+    QStringLiteral ("Override USB-serial device (CTS = KEY)"),
     QStringLiteral ("device")};
   QCommandLineOption addrOpt {
     QStringList () << "a" << "addr",
-    QStringLiteral ("Override gate address (host:port)"),
+    QStringLiteral ("Initial gate address (host:port)"),
     QStringLiteral ("host:port")};
   QCommandLineOption invertOpt {
     QStringList () << "invert",
@@ -95,7 +96,7 @@ int main (int argc, char * argv[])
 
   QWidget win;
   win.setWindowTitle (QStringLiteral ("inhibit-agent"));
-  win.resize (520, 360);
+  win.resize (560, 400);
 
   auto * state = new QLabel (QStringLiteral ("STARTING"));
   state->setAlignment (Qt::AlignCenter);
@@ -105,6 +106,18 @@ int main (int argc, char * argv[])
   state->setFont (sf);
   state->setMinimumHeight (88);
   state->setStyleSheet (state_stylesheet (AgentState::Open));
+
+  auto * dest_edit = new QLineEdit (
+      cfg.dest_host + QLatin1Char (':') + QString::number (cfg.dest_port));
+  dest_edit->setPlaceholderText (QStringLiteral ("127.0.0.1:22372"));
+  dest_edit->setClearButtonEnabled (true);
+  auto * dest_apply = new QPushButton (QStringLiteral ("Apply"));
+  dest_apply->setToolTip (QStringLiteral ("Send holds to this WSJT-X gate"));
+
+  auto * dest_row = new QHBoxLayout;
+  dest_row->addWidget (new QLabel (QStringLiteral ("Gate")));
+  dest_row->addWidget (dest_edit, 1);
+  dest_row->addWidget (dest_apply);
 
   auto * info = new QLabel;
   QFont bf = info->font ();
@@ -125,6 +138,7 @@ int main (int argc, char * argv[])
 
   auto * layout = new QVBoxLayout (&win);
   layout->addWidget (state);
+  layout->addLayout (dest_row);
   layout->addWidget (info);
   layout->addWidget (log, 1);
   auto * row = new QHBoxLayout;
@@ -140,9 +154,9 @@ int main (int argc, char * argv[])
 
   InhibitAgent * agent = new InhibitAgent (cfg, &win);
 
-  auto refresh_info = [info, agent, &pick_note] () {
+  auto refresh_info = [info, &agent, &pick_note] () {
     info->setText (
-        QStringLiteral ("KEY CTS on %1\nGate %2\n%3")
+        QStringLiteral ("CTS KEY on %1\nGate %2\n%3")
             .arg (agent->serial_port ().isEmpty ()
                   ? QStringLiteral ("(none)")
                   : agent->serial_port ())
@@ -150,41 +164,73 @@ int main (int argc, char * argv[])
             .arg (pick_note));
   };
 
-  QObject::connect (agent, &InhibitAgent::stateChanged, &win,
-                    [state] (AgentState s, QString detail) {
-                      QString t = InhibitAgent::state_name (s);
-                      if (!detail.isEmpty ())
-                        {
-                          t += QLatin1Char ('\n') + detail;
-                        }
-                      state->setText (t);
-                      state->setStyleSheet (state_stylesheet (s));
-                    });
-  QObject::connect (agent, &InhibitAgent::logLine, &win, append_log);
+  auto hook_agent = [&] () {
+    QObject::connect (agent, &InhibitAgent::stateChanged, &win,
+                      [state] (AgentState s, QString detail) {
+                        QString t = InhibitAgent::state_name (s);
+                        if (!detail.isEmpty ())
+                          {
+                            t += QLatin1Char ('\n') + detail;
+                          }
+                        state->setText (t);
+                        state->setStyleSheet (state_stylesheet (s));
+                      });
+    QObject::connect (agent, &InhibitAgent::logLine, &win, append_log);
+  };
+  hook_agent ();
+
+  auto start_agent = [&] () {
+    refresh_info ();
+    if (cfg.serial_port.isEmpty ())
+      {
+        state->setText (QStringLiteral ("SENSE FAULT"));
+        state->setStyleSheet (state_stylesheet (AgentState::SenseFault));
+        append_log (pick_note.isEmpty ()
+                    ? QStringLiteral ("no KEY serial")
+                    : pick_note);
+        return;
+      }
+    if (!agent->start ())
+      {
+        state->setText (QStringLiteral ("SENSE FAULT"));
+        state->setStyleSheet (state_stylesheet (AgentState::SenseFault));
+        append_log (agent->fault_reason ());
+      }
+    else
+      {
+        append_log (pick_note.isEmpty ()
+                    ? QStringLiteral ("started")
+                    : pick_note);
+      }
+  };
+
+  auto apply_dest = [&] () {
+    QString err;
+    QString host;
+    quint16 port = 0;
+    if (!InhibitAgent::parse_dest_addr (dest_edit->text ().trimmed (),
+                                        &host, &port, &err))
+      {
+        append_log (err);
+        return;
+      }
+    cfg.dest_host = host;
+    cfg.dest_port = port;
+    pick_note = QStringLiteral ("gate %1").arg (dest_edit->text ().trimmed ());
+    agent->stop ();
+    delete agent;
+    agent = new InhibitAgent (cfg, &win);
+    hook_agent ();
+    start_agent ();
+  };
+
+  QObject::connect (dest_apply, &QPushButton::clicked, &win, apply_dest);
+  QObject::connect (dest_edit, &QLineEdit::returnPressed, &win, apply_dest);
   QObject::connect (quit, &QPushButton::clicked, &app, &QCoreApplication::quit);
-  QObject::connect (&app, &QCoreApplication::aboutToQuit, agent,
-                    [agent] () { agent->stop (); });
+  QObject::connect (&app, &QCoreApplication::aboutToQuit, &win,
+                    [&] () { agent->stop (); });
 
-  refresh_info ();
-  if (cfg.serial_port.isEmpty ())
-    {
-      state->setText (QStringLiteral ("SENSE FAULT"));
-      state->setStyleSheet (state_stylesheet (AgentState::SenseFault));
-      append_log (pick_note);
-    }
-  else if (!agent->start ())
-    {
-      state->setText (QStringLiteral ("SENSE FAULT"));
-      state->setStyleSheet (state_stylesheet (AgentState::SenseFault));
-      append_log (agent->fault_reason ());
-    }
-  else
-    {
-      append_log (pick_note.isEmpty ()
-                  ? QStringLiteral ("started")
-                  : pick_note);
-    }
-
+  start_agent ();
   win.show ();
   return app.exec ();
 }

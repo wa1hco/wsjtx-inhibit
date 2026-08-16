@@ -1,5 +1,6 @@
 #include "HamlibTransceiver.hpp"
 #include "TxInhibit/TxInhibitGate.hpp"
+#include "TxInhibit/TxInhibitSimPort.hpp"
 
 #include <cstring>
 #include <cmath>
@@ -438,6 +439,12 @@ HamlibTransceiver::HamlibTransceiver (logger_type * logger,
     case TransceiverFactory::PTT_method_RTS:
       // Stock Hamlib RTS/DTR (shared CAT port uses same fd). TX Inhibit
       // filters do_ptt → apply_physical_ptt; it does not open the port.
+      if (is_inhibit_sim_port (ptt_port))
+        {
+          // Dummy PTT port: start the gate, do not open a UART.
+          m_->set_conf ("ptt_type", "None");
+          break;
+        }
       if (!ptt_port.isEmpty ())
         {
 #if defined (WIN32)
@@ -555,6 +562,12 @@ HamlibTransceiver::HamlibTransceiver (logger_type * logger,
 
     case TransceiverFactory::PTT_method_DTR:
     case TransceiverFactory::PTT_method_RTS:
+      if (is_inhibit_sim_port (params.ptt_port))
+        {
+          // Dummy PTT port: start the gate, do not open a UART.
+          m_->set_conf ("ptt_type", "None");
+          break;
+        }
       if (params.ptt_port.size ()
           && params.ptt_port != "None"
           && (m_->is_dummy_
