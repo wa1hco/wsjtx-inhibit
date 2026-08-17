@@ -127,9 +127,9 @@ netstat -ano -p UDP | findstr 22372
 ## 4. The inhibit indicator — the new UI
 
 Hold from a **separate PowerShell window** so WSJT-X keeps keyboard focus. The
-interactive helpers (`inhibit-test`, `inhibit-test-gui`) read a held key and therefore
-need focus themselves, which makes it impossible to hold the KEY *and* press Tune at
-the same time.
+interactive helper (`inhibit-test`) reads a held key and therefore
+needs focus itself, which makes it impossible to hold the KEY *and* press Tune at
+the same time. Use **`inhibit-agent`** for a real CTS KEY (no keyboard focus).
 
 ```powershell
 cd C:\src\wsjtx-inhibit\tools

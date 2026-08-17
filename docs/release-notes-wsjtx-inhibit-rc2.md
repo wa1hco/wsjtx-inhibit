@@ -90,8 +90,9 @@ Default UDP port: **22372**.
 Helpers ship next to the app:
 
 ```text
-bin\inhibit-test-gui.exe    Windows GUI — grave/backtick ` or the big button
-bin\inhibit-test.exe        console
+bin\inhibit-agent-gui.exe   KEY agent GUI (CTS)
+bin\inhibit-agent.exe       KEY agent CLI
+bin\inhibit-test.exe        console KEY stand-in (grave/backtick)
 ```
 
 Hold **grave** (`` ` ``, left of the **1** key — **not Space**) → red badge, radio must
