@@ -2,7 +2,7 @@
 
 **You are an operator / tester.** You do not need to build anything from source.
 
-**wsjtx-inhibit** is a modified **WSJT-X** with **TX Inhibit** for multi-op and same-band stations. A **WSJT-X station** is one digi position (this app, PC, radio, antenna). A **KEY agent** (or the `inhibit-test` KEY helper) **tells WSJT-X stations not to transmit** when a priority radio is keyed. It is **not** an official WSJT-X / ARRL release.
+**wsjtx-inhibit** is a modified **WSJT-X** with **TX Inhibit** for multi-op and same-band stations. A **WSJT-X station** is one digi position (this app, PC, radio, antenna). A **KEY agent** (or the `inhibit-test` KEY helper) **tells WSJT-X stations to inhibit transmit** when a priority radio is keyed. It is **not** an official WSJT-X / ARRL release.
 
 ---
 
@@ -29,10 +29,10 @@ Check **Assets** on the release you opened. Currently typical:
 | Your computer | What you should see under Assets | Status |
 |---------------|----------------------------------|--------|
 | **Windows 64-bit** | `wsjtx-inhibit-…-win64.exe` and/or `wsjtx-inhibit-…-windows-x86_64.zip` | **Published** on recent test releases |
-| **Linux** (AppImage / `.deb` / `.rpm`) | Names ending in `.AppImage`, `.deb`, or `.rpm` | Only if that release lists them — **not every release has Linux yet** |
-| **macOS** | `.pkg` files | Only on full multi-platform releases |
+| **Linux** (AppImage / `.deb` / `.rpm`) | Names ending in `.AppImage`, `.deb`, or `.rpm` | Published when that release’s Linux jobs run |
+| **macOS** | `.pkg` files | **Not published.** CI still compiles macOS as a portability check. No operator packages. |
 
-**If Linux or macOS files are missing from Assets**, there is nothing to download for that OS on that release. Ask the maintainer for a Linux/macOS build, or wait for a release that lists those files.
+**If Linux files are missing from Assets**, there is nothing to download for that OS on that release. Ask the maintainer for a Linux build, or wait for a release that lists those files.
 
 You never need to compile code or install a tool called “NSIS.” The Windows `.exe` **is** the installer program (double-click it). “NSIS” is only the software *developers* use to *create* that `.exe`.
 
@@ -66,11 +66,14 @@ Set callsign, radio, audio as usual under **File → Settings**.
 **For TX Inhibit testing** (required checklist):
 
 1. **PTT method** = **RTS** or **DTR** (not **CAT** method, not **VOX** alone).
-2. **Enable TX Inhibit** = checked (Settings → Radio; default is **off**).
-3. **PTT port** = a real serial device (`COMx` on Windows, `/dev/ttyUSBx` on Linux) — **not** the special list value **CAT**.  
-   That COM may be the **same** as the CAT port (shared USB CAT + RTS/DTR — valid and common) or a separate PTT adapter.
-4. Wire RTS or DTR to the radio’s PTT/SEND (or use the radio’s USB SEND / PC KEYING map). Turn **radio VOX off** for tests so only the key line can key the rig.
-5. When the KEY agent has said **not to transmit**, the **status bar** shows a red **TX INHIBITED** badge. Software sequencing/audio may continue; this WSJT-X station does not **assert PTT**.
+2. **PTT port** = a real serial device (`COMx` on Windows, `/dev/ttyUSBx` on Linux) — **not** the special list value **CAT**.  
+   That COM may be the **same** as the CAT port (shared USB CAT + RTS/DTR — valid and common) or a separate PTT adapter.  
+   If the device is missing from the list, type the full path. Set the port **before** Enable.
+3. **Enable TX Inhibit** = checked (Settings → Radio; default is **off**).  
+   The checkbox is available only after PTT method is RTS/DTR **and** PTT port is set. Clear the port and Enable clears too.
+4. Wire RTS or DTR to the radio’s PTT/SEND (or use the radio’s USB SEND / PC KEYING map).
+5. **WARNING — turn radio VOX off.** TX Inhibit only gates the RTS/DTR PTT line. If VOX is on, audio can still key the radio while the badge says **INHIBIT**.
+6. When the KEY agent has said **inhibit transmit**, the **status bar** shows a red **INHIBIT** badge. Software sequencing/audio may continue; this WSJT-X station does not **assert PTT**.
 
 **Shared radio USB (CAT + RTS/DTR on one COM):** Valid on Icom / Elecraft / Yaesu and similar. Use **Handshake = None**, map the line to SEND/PTT (not flow control), and let only one app drive the modem lines. Brand menus and pitfalls:  
 [docs/TX_INHIBIT.md — Shared USB CAT + RTS/DTR](docs/TX_INHIBIT.md#shared-usb-cat--rtsdtr).
@@ -133,14 +136,13 @@ sudo dnf install ./wsjtx-*-linux-*.rpm
 
 ## 4. macOS (operators)
 
-When a release’s **Assets** list includes `.pkg` files, download the one for your Mac (Apple Silicon or Intel), open it, and follow the installer.  
-If there is no `.pkg` in Assets, macOS is not available on that release.
+**Not a supported operator platform.** Current releases do not ship `.pkg` installers. CI compiles macOS (Apple Silicon and Intel) on every main push as a portability check only. If you need a Mac build, ask the maintainer.
 
 ---
 
 ## 5. What TX Inhibit is (one paragraph)
 
-WSJT-X sequencing and audio stay the same. When a KEY agent (or the `inhibit-test` helper) **tells the WSJT-X station not to transmit**, this build does not **assert PTT** (RTS/DTR) within milliseconds. That is **not** **Halt Tx** (which aborts the QSO sequence). Those requests arrive as short UDP messages to an **ephemeral** listen port announced in **InhibitStatus** (type 17) / the status-bar tooltip; they expire unless refreshed. Local CTS KEY sensing is **not** used (see [docs/TX_INHIBIT.md](docs/TX_INHIBIT.md) §5).
+WSJT-X sequencing and audio stay the same. When a KEY agent (or the `inhibit-test` helper) **tells the WSJT-X station to inhibit transmit**, this build does not **assert PTT** (RTS/DTR) within milliseconds. That is **not** **Halt Tx** (which aborts the QSO sequence). Those requests arrive as short UDP messages to an **ephemeral** listen port announced in **InhibitStatus** (type 17) / the status-bar tooltip; they expire unless refreshed. Local CTS KEY sensing is **not** used (see [docs/TX_INHIBIT.md](docs/TX_INHIBIT.md) §5).
 
 ---
 
@@ -181,7 +183,7 @@ Installed with the package (portable ZIP / installer stage):
 
 1. Start **wsjtx-inhibit** with **PTT = RTS or DTR**, **Enable TX Inhibit** checked, real serial port.
 2. Run **`bin/inhibit-test`**. **Linux:** you must be in group **`input`** (`sudo usermod -aG input $USER`, then full log out/in); otherwise the console tool refuses to start.
-3. With the helper focused, hold **grave** (`` ` ``, left of 1) → **assert KEY**. Red **TX INHIBITED**. **Not Space.**
+3. With the helper focused, hold **grave** (`` ` ``, left of 1) → **assert KEY**. Red **INHIBIT**. **Not Space.**
 4. Release → hang then **release hold**; badge clears. For a clean digi RF check use a long hold (≥500 ms) or fixed hang 0.
 5. Short taps ≈ break-in CW; long hold ≈ continuous / SSB (hang 0).
 6. **q** or **Esc** ends hold and quits.
@@ -235,7 +237,7 @@ Please include:
 - Installer / SmartScreen / antivirus issues  
 - OS, rig, and **PTT method + PTT port** (exact `COMx` / `/dev/tty…`)  
 - Whether normal FT8 receive/TX worked  
-- Whether the red **TX INHIBITED** badge appeared and whether the radio keyed or not  
+- Whether the red **INHIBIT** badge appeared and whether the radio keyed or not  
 
 Report here: [https://github.com/wa1hco/wsjtx-inhibit/issues](https://github.com/wa1hco/wsjtx-inhibit/issues)  
 Do **not** report this fork to the official WSJT-X project as a stock bug.
@@ -248,7 +250,7 @@ Operators can ignore this section.
 
 | How packages get onto the Releases page | Artifacts |
 |-----------------------------------------|-----------|
-| Tag `build/v…` or CI release workflow | Windows installer + ZIP; Linux AppImage/deb/rpm when that job runs; macOS when configured |
+| Tag `build/v…` or CI release workflow | Windows installer + ZIP; Linux AppImage/deb/rpm when that job runs. macOS is CI-only (no release `.pkg`) |
 | Tag `packages/v…` or **Actions → Tester packages** | Often Windows + Linux x86_64 only |
 
 Maintainer detail: [INSTALL-WINDOWS.md](INSTALL-WINDOWS.md) (bottom), [INSTALL-LINUX.md](INSTALL-LINUX.md) (bottom), [docs/BUILDING.md](docs/BUILDING.md).
