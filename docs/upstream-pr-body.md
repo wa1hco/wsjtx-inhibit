@@ -30,8 +30,9 @@ Settings.
 - `TxInhibit/TxInhibitLogic.hpp` — pure gate logic with injected time.
   Invariant: assert PTT iff (want_tx and not hold).
 - `TxInhibit/TxInhibitGate.cpp` — binds the logic to a UDP socket
-  (default port 22372). Holds arrive as small JSON datagrams carrying
-  a TTL, so a lost release packet fails safe: the hold expires.
+  (default port 22372). Holds arrive as `NetworkMessage::TxInhibit`
+  (type 18) with a per-controller lease TTL; lost refresh fails safe
+  when that lease expires. Hold is the OR of live leases.
 - Transceiver `do_ptt` paths consult the gate before keying; rig
   backend exceptions are contained so a CAT hiccup cannot leave PTT
   stuck asserted.

@@ -31,6 +31,8 @@
 #include <QtGlobal>
 #include <QSocketNotifier>
 
+#include "TxInhibit/TxInhibitLogic.hpp"
+
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -73,21 +75,7 @@ static int const kContinuousMarkMs = 500;
 // Letter gap = 3 dits; use up to ~5 dits as "still break-in" open.
 static double const kMaxIntraTxGapDits = 5.0;
 
-QByteArray encode_hold (QString const& station, QString const& band,
-                        qint64 seq, int ttl_ms)
-{
-  QByteArray body;
-  body += "{\"tx_inhibit\":1,\"ttl_ms\":";
-  body += QByteArray::number (ttl_ms);
-  body += ",\"station\":\"";
-  body += station.toUtf8 ();
-  body += "\",\"band\":\"";
-  body += band.toUtf8 ();
-  body += "\",\"seq\":";
-  body += QByteArray::number (seq);
-  body += '}';
-  return body;
-}
+
 
 // --- KEY level readers (grave/backtick ` — rare key, not Space) ------------
 // Linux: KEY_GRAVE. Windows: VK_OEM_3 (US `~ key). Stdin: '`' (or '~').
@@ -709,14 +697,14 @@ int main (int argc, char * argv[])
                               QStringLiteral ("Inhibit UDP port (default 22372)"),
                               QStringLiteral ("port"),
                               QString::number (kDefaultPort)};
+  QCommandLineOption controllerOpt {
+    QStringList () << "controller-id",
+    QStringLiteral ("Lease Controller ID (default TEST-KEY)"),
+    QStringLiteral ("id"),
+    QStringLiteral ("TEST-KEY")};
   QCommandLineOption stationOpt {QStringList () << "s" << "station",
-                                 QStringLiteral ("Badge station id"),
-                                 QStringLiteral ("name"),
-                                 QStringLiteral ("TEST-KEY")};
-  QCommandLineOption bandOpt {QStringList () << "b" << "band",
-                              QStringLiteral ("Band field (informational)"),
-                              QStringLiteral ("band"),
-                              QStringLiteral ("144")};
+                                 QStringLiteral ("Badge station text (default: controller-id)"),
+                                 QStringLiteral ("name")};
   QCommandLineOption ttlOpt {QStringList () << "t" << "ttl-ms",
                              QStringLiteral ("hold_timeout_ms on hold/keepalive packets (default 600)"),
                              QStringLiteral ("ms"),
@@ -733,8 +721,8 @@ int main (int argc, char * argv[])
     QStringLiteral ("Log every keepalive (default: HOLD, KEY events, RELEASE only).")};
   parser.addOption (hostOpt);
   parser.addOption (portOpt);
+  parser.addOption (controllerOpt);
   parser.addOption (stationOpt);
-  parser.addOption (bandOpt);
   parser.addOption (ttlOpt);
   parser.addOption (fixedHangOpt);
   parser.addOption (globalKeysOpt);
@@ -743,10 +731,17 @@ int main (int argc, char * argv[])
 
   QString const host = parser.value (hostOpt);
   quint16 const port = static_cast<quint16> (parser.value (portOpt).toUInt ());
-  QString const station = parser.value (stationOpt);
-  QString const band = parser.value (bandOpt);
+  QString const controller_id = parser.value (controllerOpt);
+  QString const station = parser.isSet (stationOpt) ? parser.value (stationOpt)
+                                                    : controller_id;
   int const hold_timeout_ms = parser.value (ttlOpt).toInt ();
   bool const fixed_hang_set = parser.isSet (fixedHangOpt);
+  if (controller_id.isEmpty ())
+    {
+      QTextStream err (stderr);
+      err << "controller-id must be non-empty\n";
+      return 2;
+    }
   int const fixed_hang_ms = fixed_hang_set ? parser.value (fixedHangOpt).toInt () : 0;
   bool const global_keys = parser.isSet (globalKeysOpt);
   bool const verbose_ka = parser.isSet (quietKaOpt);
@@ -855,7 +850,9 @@ int main (int argc, char * argv[])
       {
         return; // END_HOLD already cleared hold_active
       }
-    QByteArray payload = encode_hold (station, band, seq++, ttl);
+    QByteArray payload = TxInhibit::build_datagram (
+        controller_id, static_cast<quint32> (ttl), station);
+    ++seq;
     qint64 n = sock.writeDatagram (payload, QHostAddress (host), port);
     QTextStream out (stdout);
     char const * tag = ttl == 0 ? "RELEASE" : (is_keepalive ? "KEEPALIVE" : "HOLD");
@@ -932,7 +929,7 @@ int main (int argc, char * argv[])
       << "  ` (grave) = KEY level: hold to assert, release to open  - not Space\n"
       << "  ~ (shift+grave) = LATCH on; press ` or ~ again to release\n"
       << "  q or Esc  = release hold and quit\n"
-      << "  station=" << station << "  band=" << band << '\n'
+      << "  controller_id=" << controller_id << "  station=" << station << '\n'
       << "  hold_timeout_ms=" << hold_timeout_ms
       << "  keepalive every " << kKeepaliveMs << " ms while hold active\n"
       << "  key poll=" << poll_ms << " ms"

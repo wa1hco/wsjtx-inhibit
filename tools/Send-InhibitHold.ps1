@@ -3,32 +3,28 @@
   Minimal TX Inhibit KEY-agent stand-in for Windows. Needs no keyboard focus.
 
 .DESCRIPTION
-  Sends the UDP hold protocol from docs/TX_INHIBIT.md so TX Inhibit can be
-  exercised while you are driving the WSJT-X window with mouse and keyboard.
+  Sends NetworkMessage::TxInhibit (type 18) UDP to the dedicated inhibit port
+  (docs/TX_INHIBIT.md) so TX Inhibit can be exercised while you drive WSJT-X.
 
   The interactive helper (inhibit-test) reads a held key and therefore
   needs focus itself, which makes it impossible to hold the KEY and
   press Tune in WSJT-X at the same time. This script holds from a
   separate window instead, leaving WSJT-X free.
 
-  Mirrors the Hold-sender half of a real KEY agent (docs/TX_INHIBIT.md 3):
+  Mirrors the Hold-sender half of a real KEY agent (docs/TX_INHIBIT.md §3):
   an immediate hold, keepalives about every 200 ms, and an explicit release
-  (ttl_ms 0) on exit.
+  (TTL 0) on exit for this Controller ID only.
 
-  Fail-safe: if this script is killed without releasing, the station's own hold
-  timeout clears the hold after -TtlMs (default 600 ms). That is the deadman
-  path, and it is the reason keepalives exist.
+  Fail-safe: if this script is killed without releasing, the station's own
+  lease timeout clears this controller's row after -TtlMs (default 600 ms).
 
 .EXAMPLE
-  # Hold until Ctrl+C. Start this, then go press Tune in WSJT-X.
   .\Send-InhibitHold.ps1
 
 .EXAMPLE
-  # Hold for 20 seconds, then release automatically.
   .\Send-InhibitHold.ps1 -Seconds 20
 
 .EXAMPLE
-  # Clear a stuck hold.
   .\Send-InhibitHold.ps1 -Release
 
 .NOTES
@@ -38,11 +34,12 @@
 param(
   [string]$TargetHost = '127.0.0.1',
   [int]$Port = 22372,
-  [string]$Station = 'PS-TEST',
+  [string]$ControllerId = 'PS-TEST',
+  [string]$Station = '',
   # 0 = hold until Ctrl+C
   [int]$Seconds = 0,
-  # Wire ttl_ms: how long the station keeps the hold without a new packet.
-  # Protocol range is 100..30000.
+  # Wire TTL ms: how long the station keeps this lease without a new packet.
+  # Protocol range is 100..30000 (0 = release this controller).
   [int]$TtlMs = 600,
   [int]$KeepaliveMs = 200,
   [switch]$Release
@@ -50,61 +47,70 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-if ($TtlMs -lt 100 -or $TtlMs -gt 30000) {
-  throw "TtlMs must be 100..30000 (protocol range); got $TtlMs"
+if ([string]::IsNullOrEmpty($ControllerId)) {
+  throw 'ControllerId must be non-empty (lease key)'
 }
-if ($Station -match '["\\]') {
-  throw 'Station must not contain quotes or backslashes (the payload is hand-built JSON)'
+if ($Station -eq '') {
+  $Station = $ControllerId
+}
+if ($TtlMs -ne 0 -and ($TtlMs -lt 100 -or $TtlMs -gt 30000)) {
+  throw "TtlMs must be 0 or 100..30000 (protocol range); got $TtlMs"
+}
+
+function Encode-QByteArray([byte[]]$Data) {
+  $len = [BitConverter]::GetBytes([uint32]$Data.Length)
+  if ([BitConverter]::IsLittleEndian) { [Array]::Reverse($len) }
+  return $len + $Data
+}
+
+function Encode-TxInhibit([string]$Controller, [uint32]$Ttl, [string]$StationText) {
+  # magic, schema 3, type 18 — big-endian quint32
+  $hdr = New-Object byte[] 12
+  $vals = @([uint32]0xADBCCBDA, [uint32]3, [uint32]18)
+  for ($i = 0; $i -lt 3; $i++) {
+    $b = [BitConverter]::GetBytes($vals[$i])
+    if ([BitConverter]::IsLittleEndian) { [Array]::Reverse($b) }
+    [Array]::Copy($b, 0, $hdr, $i * 4, 4)
+  }
+  $utf8 = [Text.Encoding]::UTF8
+  $targetId = Encode-QByteArray @()   # empty Id (ignored on 22372)
+  $controller = Encode-QByteArray ($utf8.GetBytes($Controller))
+  $ttlBytes = [BitConverter]::GetBytes($Ttl)
+  if ([BitConverter]::IsLittleEndian) { [Array]::Reverse($ttlBytes) }
+  $station = Encode-QByteArray ($utf8.GetBytes($StationText))
+  return $hdr + $targetId + $controller + $ttlBytes + $station
 }
 
 $udp = [System.Net.Sockets.UdpClient]::new()
-$seq = 0
 
 function Send-Hold {
   param([int]$Ttl)
-  $script:seq++
-  $json = '{"tx_inhibit":1,"ttl_ms":' + $Ttl +
-          ',"station":"' + $Station +
-          '","seq":' + $script:seq + '}'
-  $bytes = [Text.Encoding]::UTF8.GetBytes($json)
+  $bytes = Encode-TxInhibit -Controller $ControllerId -Ttl ([uint32]$Ttl) -StationText $Station
   [void]$udp.Send($bytes, $bytes.Length, $TargetHost, $Port)
-  return $json
+  return $bytes.Length
 }
 
 try {
   if ($Release) {
-    $sent = Send-Hold -Ttl 0
-    Write-Host "release -> ${TargetHost}:${Port}  $sent"
+    $n = Send-Hold -Ttl 0
+    Write-Host "release controller=$ControllerId -> ${TargetHost}:${Port}  ($n bytes type-18)"
     return
   }
 
-  Write-Host "Holding TX Inhibit on ${TargetHost}:${Port} (ttl ${TtlMs} ms, keepalive ${KeepaliveMs} ms)"
-  if ($Seconds -gt 0) {
-    Write-Host "Auto-release after $Seconds s."
-  } else {
-    Write-Host 'Ctrl+C to release. WSJT-X keeps focus - go press Tune.'
-  }
-
-  $deadline = if ($Seconds -gt 0) { (Get-Date).AddSeconds($Seconds) } else { $null }
-  $ticks = 0
-  while ($true) {
-    [void](Send-Hold -Ttl $TtlMs)
-    $ticks++
-    # One line per second, so the console shows it is alive without scrolling.
-    if (($ticks * $KeepaliveMs) % 1000 -lt $KeepaliveMs) {
-      Write-Host ('  holding... {0:n0}s' -f ($ticks * $KeepaliveMs / 1000))
-    }
-    if ($deadline -and (Get-Date) -ge $deadline) { break }
+  Write-Host "HOLD controller=$ControllerId station=$Station ttl_ms=$TtlMs -> ${TargetHost}:${Port}"
+  [void](Send-Hold -Ttl $TtlMs)
+  $deadline = if ($Seconds -gt 0) { [datetime]::UtcNow.AddSeconds($Seconds) } else { [datetime]::MaxValue }
+  while ([datetime]::UtcNow -lt $deadline) {
     Start-Sleep -Milliseconds $KeepaliveMs
+    [void](Send-Hold -Ttl $TtlMs)
   }
 }
 finally {
-  # Normal end of a hold is an explicit release, not a timeout.
-  try {
-    $sent = Send-Hold -Ttl 0
-    Write-Host "released  $sent"
-  } catch {
-    Write-Warning "release failed: $_  (the hold will expire after ${TtlMs} ms anyway)"
+  if (-not $Release) {
+    try {
+      [void](Send-Hold -Ttl 0)
+      Write-Host "RELEASE controller=$ControllerId -> ${TargetHost}:${Port}"
+    } catch {}
   }
-  $udp.Close()
+  $udp.Dispose()
 }

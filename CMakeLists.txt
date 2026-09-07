@@ -1799,7 +1799,8 @@ add_executable (wsjtx_app_version AppVersion/AppVersion.cpp ${wsjtx_app_version_
 target_link_libraries (wsjtx_app_version wsjt_qt)
 
 # TX Inhibit KEY-agent stand-in — installed as bin/inhibit-test(.exe) next to wsjtx.
-add_executable (inhibit-test tools/inhibit-test/main.cpp)
+add_executable (inhibit-test tools/inhibit-test/main.cpp Network/NetworkMessage.cpp)
+target_include_directories (inhibit-test PRIVATE ${CMAKE_SOURCE_DIR})
 target_link_libraries (inhibit-test Qt5::Core Qt5::Network)
 # Console subsystem on Windows (keyboard KEY test).
 if (WIN32)
