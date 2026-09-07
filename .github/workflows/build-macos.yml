@@ -491,7 +491,9 @@ jobs:
           trap 'status=$?; dump_bundle_context "$status" "$LINENO" "$BASH_COMMAND"; exit "$status"' ERR
 
           run_logged() {
-            echo "+ $*"
+            # Log to stderr so command substitutions (ensure_app_rpath) only
+            # capture the install-name prefix on stdout.
+            echo "+ $*" >&2
             "$@"
           }
 
@@ -553,8 +555,13 @@ jobs:
             esac
           }
 
+          # change_prefix is "@rpath" when the binary has an LC_RPATH to
+          # Frameworks, or "@executable_path/../Frameworks" when it does
+          # not (prebuilt Hamlib tools sometimes lack headerpad room for
+          # a new rpath load command).
           bundle_dylib() {
             local binary="$1"
+            local change_prefix="${2:-@rpath}"
             local lib
             while IFS= read -r lib; do
               should_bundle_ref "$lib" || continue
@@ -577,17 +584,22 @@ jobs:
                 run_logged cp "$resolved" "${FRAMEWORKS}/${libname}"
                 run_logged chmod 644 "${FRAMEWORKS}/${libname}"
                 run_logged install_name_tool -id "@rpath/${libname}" "${FRAMEWORKS}/${libname}"
-                bundle_dylib "${FRAMEWORKS}/${libname}"
+                bundle_dylib "${FRAMEWORKS}/${libname}" "@rpath"
               fi
-              if [ "$lib" != "@rpath/${libname}" ]; then
-                run_logged install_name_tool -change "$lib" "@rpath/${libname}" "$binary"
+              local target="${change_prefix}/${libname}"
+              if [ "$lib" != "$target" ]; then
+                run_logged install_name_tool -change "$lib" "$target" "$binary"
               fi
             done < <(otool -L "$binary" | awk 'NR > 1 {print $1}' || true)
           }
 
+          # Prints the install-name prefix to use for this binary:
+          # @rpath when Frameworks rpath is present/added, otherwise
+          # @executable_path/../Frameworks (no new LC_RPATH required).
           ensure_app_rpath() {
             local binary="$1"
             local rpath
+            local add_status
 
             while IFS= read -r rpath; do
               [ -n "$rpath" ] || continue
@@ -598,15 +610,33 @@ jobs:
               esac
             done < <(otool -l "$binary" | awk '/LC_RPATH/{getline; getline; print $2}' || true)
 
-            if ! otool -l "$binary" | awk '/LC_RPATH/{getline; getline; print $2}' | grep -Fxq "@executable_path/../Frameworks"; then
-              run_logged install_name_tool -add_rpath "@executable_path/../Frameworks" "$binary"
+            if otool -l "$binary" | awk '/LC_RPATH/{getline; getline; print $2}' | grep -Fxq "@executable_path/../Frameworks"; then
+              echo "@rpath"
+              return 0
             fi
+
+            # Prebuilt Hamlib tools may lack headerpad; -add_rpath can fail
+            # with "larger updated load commands do not fit". Fall back to
+            # @executable_path rewrites that need no new LC_RPATH.
+            trap - ERR
+            set +e
+            run_logged install_name_tool -add_rpath "@executable_path/../Frameworks" "$binary"
+            add_status=$?
+            set -e
+            trap 'status=$?; dump_bundle_context "$status" "$LINENO" "$BASH_COMMAND"; exit "$status"' ERR
+            if [ "$add_status" -eq 0 ]; then
+              echo "@rpath"
+              return 0
+            fi
+
+            echo "::warning::No room for LC_RPATH on ${binary}; rewriting deps with @executable_path/../Frameworks" >&2
+            echo "@executable_path/../Frameworks"
           }
 
           for exe in "${APP}/Contents/MacOS/"*; do
             [ -f "$exe" ] && [ -x "$exe" ] && {
-              ensure_app_rpath "$exe"
-              bundle_dylib "$exe"
+              change_prefix="$(ensure_app_rpath "$exe")"
+              bundle_dylib "$exe" "$change_prefix"
               for fw in $(otool -L "$exe" | awk '{print $1}' | grep '\.framework/' || true); do
                 fwname=$(basename "$fw")
                 bundled=$(find "${FRAMEWORKS}" -name "${fwname}" -path "*.framework/*" 2>/dev/null | head -1)
@@ -622,11 +652,17 @@ jobs:
           done
 
           for fw in "${FRAMEWORKS}"/*.dylib; do
-            [ -f "$fw" ] && bundle_dylib "$fw"
+            [ -f "$fw" ] && bundle_dylib "$fw" "@rpath"
           done
 
           for exe in "${APP}/Contents/MacOS/"*; do
-            [ -f "$exe" ] && [ -x "$exe" ] && bundle_dylib "$exe"
+            [ -f "$exe" ] && [ -x "$exe" ] && {
+              if otool -l "$exe" | awk '/LC_RPATH/{getline; getline; print $2}' | grep -Fxq "@executable_path/../Frameworks"; then
+                bundle_dylib "$exe" "@rpath"
+              else
+                bundle_dylib "$exe" "@executable_path/../Frameworks"
+              fi
+            }
           done
 
           echo "Checking for remaining external references..."
