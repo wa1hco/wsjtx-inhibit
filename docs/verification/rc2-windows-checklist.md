@@ -1,5 +1,9 @@
 # rc2 Windows verification checklist
 
+> **Historical (rc2 era).** Current wire is type **18** + ephemeral inhibit listen
+> port announced via InhibitStatus type **17**. See `docs/TX_INHIBIT.md`. Do not
+> use the JSON / fixed-22372 steps below against current builds.
+
 Everything still unverified for rc2, in priority order. Self-contained: no scratch
 files, no context from the review conversation needed.
 

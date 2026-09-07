@@ -4382,9 +4382,7 @@ void MainWindow::update_inhibit_status ()
       return;
     }
 
-  // Read the port from Configuration every time rather than caching it:
-  // close_rig() zeroes it without emitting, and a stale copy would describe a
-  // station as protected when nothing is listening.
+  // Always read from Configuration; a cached copy can disagree after bind/clear.
   auto const port = m_config.tx_inhibit_port ();
 
   if (m_tx_inhibited)
@@ -4484,9 +4482,7 @@ void MainWindow::createStatusBar()                           //createStatusBar
            });
   connect (&m_config, &Configuration::tx_inhibit_port_changed, this,
            [this] (quint16) {
-             // Enable on → bind emits port only (no hold change). That used to
-             // update the tooltip and never send type 17 — late listeners saw
-             // nothing after a settings toggle. Announce immediately.
+             // Announce on bind/clear so controllers learn the port without a hold.
              update_inhibit_status ();
              send_inhibit_status_announce ();
            });

@@ -1,5 +1,8 @@
 # wsjtx-inhibit — pre-rc2 review findings
 
+> **Historical review notes.** Current wire/hold model: `docs/TX_INHIBIT.md`
+> (type 18, leases, ephemeral listen + InhibitStatus type 17).
+
 **Reviewed at:** commit `eeae769` (`main`), 2026-08-09
 **Baseline compared against:** `26e8bf5` (WSJT-X mainline v3.0.2, `ccdfaf3`)
 **Scope:** all 54 changed files, 14 markdown docs, CI workflows, packaging scripts.

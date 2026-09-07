@@ -126,7 +126,9 @@ SSB/CW station and the KEY agent host.
 4. Wire RTS/DTR → radio PTT/SEND (or USB SEND / PC KEYING). Radio **VOX** off
    for clean tests.
 5. Point the KEY agent at this WSJT-X station **host:port from InhibitStatus**
-   (tooltip / type 17), not a fixed port number.
+   (tooltip / type 17). If your PTT serial device is missing from the Port list
+   (for example a udev symlink), type the full path into **PTT port** (the field
+   is editable). **Enable TX Inhibit** is available only when RTS/DTR Port is set.
 
 ### Shared USB CAT + RTS/DTR
 
@@ -397,10 +399,11 @@ logical **OR**. A release clears **only that controller’s** lease.
 **Type:** `NetworkMessage::TxInhibit` = **18** (inbound). Outbound announce/telemetry is
 `InhibitStatus` = **17** on the normal UDP Server path (unicast or multicast).
 
-**InhibitStatus cadence:** type **17** is sent when hold/badge/counters change,
-when the inhibit listen port binds or clears (Enable TX Inhibit apply / rig
-close), and **periodically every `NetworkMessage::pulse` seconds (15 s)** while
-TX Inhibit stays enabled. With an always-ephemeral listen port, type 17 is how
+**InhibitStatus cadence:** type **17** is sent when the hold level or badge text
+changes, when the inhibit listen port binds or clears (Enable TX Inhibit apply /
+rig close), and **periodically every `NetworkMessage::pulse` seconds (15 s)**
+while TX Inhibit stays enabled. Counter-only updates (keepalives, invalids)
+appear on the next pulse or the next level/badge change. Type 17 is how
 controllers learn `inhibit_port`. Holds still go **unicast** to that
 `host:port` — type 17 is discovery and triage, not the hold path.
 

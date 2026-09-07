@@ -23,16 +23,17 @@ must see the priority KEY and send the hold datagrams. WIMS already
 has that program. The PR now ships a standalone KEY agent so a
 dual-radio seat works with only WSJT-X — no WIMS required.
 
-- inhibit-agent (CLI): USB-serial CTS + dest host:port
-    inhibit-agent --port /dev/ttyUSB0 --addr 127.0.0.1:22372
-- inhibit-agent-gui: dest host:port in the window (default
-  127.0.0.1:22372); CTS port auto-picked or --port
+- inhibit-agent (CLI): USB-serial CTS + dest host:port from
+  InhibitStatus / tooltip (ephemeral listen port)
+    inhibit-agent --port /dev/ttyUSB0 --addr 127.0.0.1:<port>
+- inhibit-agent-gui: Apply Gate host:port before KEY is armed
+  (NEED GATE until then); CTS port auto-picked or --port
 - Hang: break-in CW 1.5 × word gap so PTT does not follow dits;
   SSB / continuous KEY releases immediately
 - Fail-safe: lost agent or dongle → gate deadman (~600 ms) opens
 
-Qt SerialPort is already a WSJT-X dependency. Wire format is
-unchanged. Design: docs/INHIBIT_AGENT.md on the PR.
+Qt SerialPort is already a WSJT-X dependency. Wire is NetworkMessage
+type 18 (leases). Design: docs/INHIBIT_AGENT.md / docs/TX_INHIBIT.md.
 
 The Improved-review gate seams from the last update are still there
 (RTS/DTR enable, close_rig clears the badge, rig_set_ptt failure is

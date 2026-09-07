@@ -42,7 +42,7 @@ Give **SSB/CW KEY priority over WSJT-X transmit** on a dual-radio station:
 | Form | Binary | Who | Required inputs |
 |------|--------|-----|-----------------|
 | **CLI** | `inhibit-agent` | Scripts, SSH, startup files | USB-serial **CTS** port and dest `host:port` |
-| **GUI** | `inhibit-agent-gui` | Operators | Dest **host:port** in the window (port from InhibitStatus type 17 / tooltip). CTS port auto-picked or `--port`. |
+| **GUI** | `inhibit-agent-gui` | Operators | Dest **host:port** in the window (from InhibitStatus type 17 / tooltip). Shows **NEED GATE** until Apply; KEY is not armed before that. CTS port auto-picked or `--port`. |
 
 Keyboard KEY (grave / tilde) is **`inhibit-test`**, not this program.
 

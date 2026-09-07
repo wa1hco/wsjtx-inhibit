@@ -29,10 +29,11 @@ Settings.
 
 - `TxInhibit/TxInhibitLogic.hpp` — pure gate logic with injected time.
   Invariant: assert PTT iff (want_tx and not hold).
-- `TxInhibit/TxInhibitGate.cpp` — binds the logic to a UDP socket
-  (default port 22372). Holds arrive as `NetworkMessage::TxInhibit`
-  (type 18) with a per-controller lease TTL; lost refresh fails safe
-  when that lease expires. Hold is the OR of live leases.
+- `TxInhibit/TxInhibitGate.cpp` — binds the logic to an **ephemeral** UDP
+  socket (port announced in `InhibitStatus` type 17). Holds arrive as
+  `NetworkMessage::TxInhibit` (type 18) with a per-controller lease TTL;
+  lost refresh fails safe when that lease expires. Hold is the OR of live
+  leases.
 - Transceiver `do_ptt` paths consult the gate before keying; rig
   backend exceptions are contained so a CAT hiccup cannot leave PTT
   stuck asserted.
@@ -50,16 +51,18 @@ ships a standalone agent so a dual-radio seat works with only WSJT-X —
 no WIMS required.
 
 - USB-serial **CTS** is the KEY input. The operator supplies the port.
-- Destination is the WSJT-X gate `host:port` (default `127.0.0.1:22372`).
+- Destination is the WSJT-X gate `host:port` from InhibitStatus / tooltip
+  (ephemeral; no fixed default).
 - Hang policy matches the design doc: break-in CW hangs 1.5 × word gap
   so WSJT-X PTT does not follow dits; SSB / continuous KEY releases
   immediately. No software PTT debounce — the sense path is for
   switches that already debounce.
 - **CLI** (`inhibit-agent`) for scripts, SSH, and startup files:
-  `inhibit-agent --port /dev/ttyUSB0 --addr 127.0.0.1:22372`
-- **GUI** (`inhibit-agent-gui`) for operators: dest `host:port` is
-  editable in the window; CTS port is auto-picked (Keyline / WA1HCO
-  USB strings, else the only non-builtin USB-serial) or `--port`.
+  `inhibit-agent --port /dev/ttyUSB0 --addr 127.0.0.1:<port-from-type-17>`
+- **GUI** (`inhibit-agent-gui`) for operators: dest `host:port` must be
+  Applied before KEY is armed (**NEED GATE** until then); CTS port is
+  auto-picked (Keyline / WA1HCO USB strings, else the only non-builtin
+  USB-serial) or `--port`.
 - Fail-safe: process exit or a missing dongle stops keepalives; the
   gate deadman (~600 ms) opens. Wrong or missing COM is SENSE FAULT,
   never silent protection.

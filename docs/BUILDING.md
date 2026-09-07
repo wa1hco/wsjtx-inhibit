@@ -89,12 +89,14 @@ GitHub Release. Those are the “download for testing” binaries for multiple W
 
 1. Run `wsjtx` with PTT method **RTS** on a USB-serial port (or UDP-only if
    you only need badge/datagram tests without RF).
-2. Send a hold:
+2. Note the inhibit listen port from the status-bar tooltip (or InhibitStatus
+   type 17). Send a type-18 hold (requires `--port`):
 
 ```bash
-echo -n '{"tx_inhibit":1,"ttl_ms":2000,"station":"TEST","band":"144","seq":1}' \
-  | nc -u -w1 127.0.0.1 22372
+python3 tools/send_inhibit_hold.py --ttl-ms 2000 --station TEST \
+  --controller-id TEST --port <port-from-tooltip>
 ```
 
-3. Status bar should show **TX INHIBITED — held by TEST** for ~2 s, then clear.
+3. Status bar should show **TX INHIBITED — held by TEST** for ~2 s, then clear
+   (or send `--ttl-ms 0` to release).
 4. With a PTT dongle, confirm RTS drops while held even if Enable Tx is on.

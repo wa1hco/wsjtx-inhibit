@@ -45,7 +45,7 @@ WSJT-X + TX Inhibit.
 ## Local inhibit test
 With wsjtx running, run bin\inhibit-test.exe and hold the grave/backtick key
 (` , left of the 1 key) to hold/release. Not the Spacebar.
-(Default UDP 127.0.0.1:22372.) See docs/TX_INHIBIT.md in the source repo.
+(Inhibit listen port is ephemeral; use InhibitStatus / status-bar tooltip.) See docs/TX_INHIBIT.md.
 
 https://github.com/wa1hco/wsjtx-inhibit
 

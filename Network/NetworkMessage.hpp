@@ -542,12 +542,13 @@
  *                         Invalid                quint32
  *
  *      Optional telemetry when TX Inhibit is enabled (Settings → Radio).
- *      Emitted on hold/badge/counter changes, when the inhibit listen port
- *      binds or clears, and periodically every NetworkMessage::pulse
- *      seconds while the feature remains enabled (same cadence as
- *      Heartbeat) so late joiners learn the inhibit port without waiting
- *      for a hold transition. Travels on the configured UDP Server path
- *      (unicast or multicast).
+ *      Emitted on hold-level or badge-text changes, when the inhibit
+ *      listen port binds or clears, and periodically every
+ *      NetworkMessage::pulse seconds while the feature remains enabled
+ *      (same cadence as Heartbeat) so late joiners learn the inhibit
+ *      port. Counter-only bumps wait for the next pulse or level/badge
+ *      change. Travels on the configured UDP Server path (unicast or
+ *      multicast).
  *
  *      Inhibit port: OS-assigned ephemeral UDP listen port for KEY-agent
  *      holds. Inhibited: any per-controller lease active. Source station:

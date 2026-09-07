@@ -65,10 +65,13 @@ return focus to the terminal, or use `--global-keys` to press from anywhere.
 
 ```bash
 sudo usermod -aG input "$USER"   # Linux; then full log out/in
-inhibit-test --host 127.0.0.1 --port 22372 --station TEST-KEY --ttl-ms 600
+inhibit-test --host 127.0.0.1 --port <from-tooltip> --station TEST-KEY --ttl-ms 600
 inhibit-test --fixed-hang-ms 0
 inhibit-test --global-keys             # ` and ~ readable from any window
 ```
+
+`--port` is required: use the inhibit listen port from the WSJT-X status-bar
+tooltip or InhibitStatus (type 17).
 
 **Tip:** hold `` ` `` ≥500 ms for hang=0 (continuous). Short taps use break-in hang unless fixed hang is 0.
 

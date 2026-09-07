@@ -1,5 +1,8 @@
 # wsjtx-inhibit 3.0.2-rc2
 
+> **Historical RC2 notes.** Current protocol: `docs/TX_INHIBIT.md` (type 18,
+> per-controller leases, ephemeral listen port + InhibitStatus type 17).
+
 **Who this is for:** operators who already use WSJT-X and want to try **TX Inhibit**.
 
 **What this is:** WSJT-X mainline v3.0.2 plus a low-latency **TX Inhibit** function.
