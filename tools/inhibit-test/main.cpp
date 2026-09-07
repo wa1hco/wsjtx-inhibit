@@ -57,7 +57,7 @@
 
 namespace {
 
-static int const kDefaultPort = 22372;
+// --port is required (from InhibitStatus / tooltip).
 // hold_timeout_ms (wire ttl_ms) — safety on lost hold packets, not hang.
 static int const kDefaultHoldTimeoutMs = 600;
 static int const kKeepaliveMs = 200;
@@ -694,9 +694,8 @@ int main (int argc, char * argv[])
                               QStringLiteral ("host"),
                               QStringLiteral ("127.0.0.1")};
   QCommandLineOption portOpt {QStringList () << "p" << "port",
-                              QStringLiteral ("Inhibit UDP port (default 22372)"),
-                              QStringLiteral ("port"),
-                              QString::number (kDefaultPort)};
+                              QStringLiteral ("Inhibit UDP port from InhibitStatus / tooltip (required)"),
+                              QStringLiteral ("port")};
   QCommandLineOption controllerOpt {
     QStringList () << "controller-id",
     QStringLiteral ("Lease Controller ID (default TEST-KEY)"),
@@ -730,7 +729,19 @@ int main (int argc, char * argv[])
   parser.process (app);
 
   QString const host = parser.value (hostOpt);
+  if (!parser.isSet (portOpt))
+    {
+      QTextStream err (stderr);
+      err << "inhibit-test: --port is required (value from InhibitStatus / tooltip)\n";
+      return 2;
+    }
   quint16 const port = static_cast<quint16> (parser.value (portOpt).toUInt ());
+  if (port == 0)
+    {
+      QTextStream err (stderr);
+      err << "inhibit-test: --port must be non-zero\n";
+      return 2;
+    }
   QString const controller_id = parser.value (controllerOpt);
   QString const station = parser.isSet (stationOpt) ? parser.value (stationOpt)
                                                     : controller_id;

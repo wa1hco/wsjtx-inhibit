@@ -33,7 +33,9 @@
 [CmdletBinding()]
 param(
   [string]$TargetHost = '127.0.0.1',
-  [int]$Port = 22372,
+  # Required: inhibit listen port from InhibitStatus / status-bar tooltip.
+  [Parameter(Mandatory = $true)]
+  [int]$Port,
   [string]$ControllerId = 'PS-TEST',
   [string]$Station = '',
   # 0 = hold until Ctrl+C
@@ -73,7 +75,7 @@ function Encode-TxInhibit([string]$Controller, [uint32]$Ttl, [string]$StationTex
     [Array]::Copy($b, 0, $hdr, $i * 4, 4)
   }
   $utf8 = [Text.Encoding]::UTF8
-  $targetId = Encode-QByteArray @()   # empty Id (ignored on 22372)
+  $targetId = Encode-QByteArray @()   # empty Id = any instance at this port
   $controller = Encode-QByteArray ($utf8.GetBytes($Controller))
   $ttlBytes = [BitConverter]::GetBytes($Ttl)
   if ([BitConverter]::IsLittleEndian) { [Array]::Reverse($ttlBytes) }
