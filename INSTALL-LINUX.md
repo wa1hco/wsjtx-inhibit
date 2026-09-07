@@ -150,23 +150,25 @@ Same as stock WSJT-X:
 
 When the KEY agent has said **not to transmit**, the status bar shows a red **TX INHIBITED** badge. The WSJT-X station should **not assert PTT** even if WSJT-X is in a TX cycle.
 
-Default UDP port is **22372** (if free). Design: [docs/TX_INHIBIT.md](docs/TX_INHIBIT.md).
+Inhibit listen port is **ephemeral** (OS-assigned), announced in **InhibitStatus**
+(type 17) and the status-bar tooltip. Design: [docs/TX_INHIBIT.md](docs/TX_INHIBIT.md).
 
-**Trust model.** The listener accepts a hold from any host that can reach it — no
+**Trust model.** The listener accepts a hold from any host that can reach that port — no
 authentication, deliberately, for a trusted multi-op LAN. The protocol can only *stop*
 you transmitting, never cause transmission, so the worst case is a rig that will not
-key. Firewall UDP 22372 to your LAN and never expose it to the internet. Details:
+key. Firewall the announced inhibit ports to your LAN and never expose them to the
+internet. Details:
 [docs/TX_INHIBIT.md §4.1](docs/TX_INHIBIT.md#41-trust-model--read-this-before-exposing-the-port).
 
 ### Optional smoke test
 
-With the program running and settings as above, send a hold request to UDP port **22372**.  
-If you have a **git clone** of this repository and Python 3:
+With the program running and settings as above, send a hold to the **port from the
+tooltip / type 17**. If you have a **git clone** of this repository and Python 3:
 
 ```bash
-python3 tools/send_inhibit_hold.py --ttl-ms 3000 --station TEST
+python3 tools/send_inhibit_hold.py --ttl-ms 3000 --station TEST --port <from tooltip>
 # attempt TX — WSJT-X station should not assert PTT; red badge should show
-python3 tools/send_inhibit_hold.py --ttl-ms 0   # release
+python3 tools/send_inhibit_hold.py --ttl-ms 0 --port <from tooltip>   # release
 ```
 
 You do **not** need the script for normal use — a **KEY agent** tells WSJT-X stations not to transmit (keepalive + release). This package ships **`inhibit-agent`** (operator setup); the WIMS tree ships **`wims-key-agent`** (discovery). See [docs/TX_INHIBIT.md](docs/TX_INHIBIT.md).
@@ -190,7 +192,7 @@ You do **not** need the script for normal use — a **KEY agent** tells WSJT-X s
 | Serial PTT / device permissions | Add your user to the `dialout` (or `uucp`) group, log out/in |
 | Error opening serial / “TX Inhibit: cannot open …” | Wrong device node, permissions, or another program already has the port open |
 | PTT never keys at all | **PTT method** RTS/DTR and **PTT port** a real `/dev/tty…` (**not** the special value “CAT”); check USB SEND / wiring |
-| TX Inhibit never stops PTT | Need **Enable TX Inhibit**, RTS/DTR on a real serial PTT port; **CAT-only PTT is not filtered**. Confirm agent UDP reaches port **22372** |
+| TX Inhibit never stops PTT | Need **Enable TX Inhibit**, RTS/DTR on a real serial PTT port; **CAT-only PTT is not filtered**. Confirm agent UDP reaches the **announced** inhibit port (tooltip / type 17) |
 | Radio keys on port open / CAT flaky with RTS PTT | Handshake **None**; polarity; multi-app; see [shared USB CAT + RTS/DTR](docs/TX_INHIBIT.md#shared-usb-cat--rtsdtr) |
 | Radio still keys while TX INHIBITED | Radio **VOX** may still key from audio — turn VOX off |
 

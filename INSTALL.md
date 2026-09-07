@@ -140,7 +140,7 @@ If there is no `.pkg` in Assets, macOS is not available on that release.
 
 ## 5. What TX Inhibit is (one paragraph)
 
-WSJT-X sequencing and audio stay the same. When a KEY agent (or the `inhibit-test` helper) **tells the WSJT-X station not to transmit**, this build does not **assert PTT** (RTS/DTR) within milliseconds. That is **not** **Halt Tx** (which aborts the QSO sequence). Those requests arrive as short UDP messages (default port **22372**); they expire unless refreshed. Local CTS KEY sensing is **not** used (see [docs/TX_INHIBIT.md](docs/TX_INHIBIT.md) §5).
+WSJT-X sequencing and audio stay the same. When a KEY agent (or the `inhibit-test` helper) **tells the WSJT-X station not to transmit**, this build does not **assert PTT** (RTS/DTR) within milliseconds. That is **not** **Halt Tx** (which aborts the QSO sequence). Those requests arrive as short UDP messages to an **ephemeral** listen port announced in **InhibitStatus** (type 17) / the status-bar tooltip; they expire unless refreshed. Local CTS KEY sensing is **not** used (see [docs/TX_INHIBIT.md](docs/TX_INHIBIT.md) §5).
 
 ---
 
@@ -160,8 +160,8 @@ You can exercise TX Inhibit **without** a full multi-op system by simulating a p
 ### `inhibit-agent` / `inhibit-agent-gui` (same folder as the app)
 
 ```text
-…\bin\inhibit-agent.exe      Windows CLI  —  inhibit-agent COM7 127.0.0.1:22372
-…\bin\inhibit-agent-gui.exe  Windows GUI  —  no args (auto Keyline + localhost)
+…\bin\inhibit-agent.exe      Windows CLI  —  inhibit-agent COM7 127.0.0.1:<port from type 17>
+…\bin\inhibit-agent-gui.exe  Windows GUI  —  set Gate host:port from tooltip / type 17, then Apply
 …/bin/inhibit-agent          Linux CLI
 …/bin/inhibit-agent-gui      Linux GUI
 ```
@@ -186,7 +186,7 @@ Installed with the package (portable ZIP / installer stage):
 5. Short taps ≈ break-in CW; long hold ≈ continuous / SSB (hang 0).
 6. **q** or **Esc** ends hold and quits.
 
-Default target: `127.0.0.1:22372`. Detail: [docs/TX_INHIBIT.md §6](docs/TX_INHIBIT.md#6-testing-locally).
+Target `host:port` must match the InhibitStatus / status-bar tooltip. Detail: [docs/TX_INHIBIT.md §6](docs/TX_INHIBIT.md#6-testing-locally).
 
 ### Python — `tools/send_inhibit_hold.py`
 
@@ -203,14 +203,14 @@ python tools\send_inhibit_hold.py --interactive
 Same **level** KEY behaviour as `inhibit-test` — grave/backtick `` ` ``, **not Space**. Optional flags:
 
 ```bash
-python3 tools/send_inhibit_hold.py -i --station SSB-TEST --host 127.0.0.1 --port 22372
+python3 tools/send_inhibit_hold.py -i --station SSB-TEST --host 127.0.0.1 --port <from tooltip>
 ```
 
 | Flag | Purpose |
 |------|---------|
 | `-i` / `--interactive` | grave/backtick KEY **level** + hang |
 | `--station NAME` | Text shown in the badge (`held by …`) |
-| `--host` / `--port` | WSJT-X station address (default `127.0.0.1:22372`) |
+| `--host` / `--port` | WSJT-X station address (`--port` required; from type 17 / tooltip) |
 | `--fixed-hang-ms N` | Fixed hang after KEY up (disable adaptive) |
 
 One-shot hold (no interactive KEY loop):

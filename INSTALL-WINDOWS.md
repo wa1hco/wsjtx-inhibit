@@ -131,7 +131,8 @@ Click **OK**. Try receive first, then a careful TX test (dummy load recommended)
 - Red status-bar badge: **`TX INHIBITED`** or **`TX INHIBITED — held by …`**.
 - The WSJT-X station **must not assert PTT** (no RF) even if WSJT-X is in a TX cycle and audio is still playing.
 
-Default UDP port is **22372** (if free). Design: [docs/TX_INHIBIT.md](docs/TX_INHIBIT.md).
+Inhibit listen port is **ephemeral** (OS-assigned), announced in **InhibitStatus**
+(type 17) and the status-bar tooltip. Design: [docs/TX_INHIBIT.md](docs/TX_INHIBIT.md).
 
 ### Four things that surprise people
 
@@ -145,11 +146,14 @@ Default UDP port is **22372** (if free). Design: [docs/TX_INHIBIT.md](docs/TX_IN
 **3. Anyone who can reach the port can hold your station off the air.** There is no
 authentication — that is a deliberate choice for a trusted multi-op LAN. The risk is
 bounded in the direction that matters: the protocol can only *stop* you transmitting,
-never cause transmission, so the worst case is a rig that will not key. Keep UDP 22372
-on the **private** firewall profile, and never port-forward it from the internet.
+never cause transmission, so the worst case is a rig that will not key. Keep the
+announced inhibit ports on the **private** firewall profile, and never port-forward
+them from the internet.
 Details: [docs/TX_INHIBIT.md §4.1](docs/TX_INHIBIT.md#41-trust-model--read-this-before-exposing-the-port).
 
-**4. One WSJT-X per PC can receive on port 22372.** If you run two copies on one computer, only one reliably gets the hold packets — which one is decided by Windows, not by you. For multi-op, run one WSJT-X station per PC, or give each a different port and point the agent at both.
+**4. Each WSJT-X instance gets its own inhibit listen port.** Two copies on one PC
+are fine: each announces its port in type 17. Point the KEY agent (or WIMS list)
+at each instance’s announced `host:port`.
 
 ### Optional local test
 
@@ -165,7 +169,7 @@ bin\inhibit-test.exe         console KEY stand-in
 3. Release → hang then badge clears (hold ≥500 ms for hang 0 / continuous). Short taps ≈ break-in CW hang.
 4. **q** or **Esc** ends hold and quits.
 
-Default UDP target is `127.0.0.1:22372`. Day-to-day multi-op uses a **KEY agent**: **`inhibit-agent`** in this package (operator setup) or **`wims-key-agent`** in the WIMS tree (discovery). This helper is a bench stand-in. See [docs/TX_INHIBIT.md](docs/TX_INHIBIT.md).
+Target `host:port` must match the tooltip / type 17. Day-to-day multi-op uses a **KEY agent**: **`inhibit-agent`** in this package (operator setup) or **`wims-key-agent`** in the WIMS tree (discovery). This helper is a bench stand-in. See [docs/TX_INHIBIT.md](docs/TX_INHIBIT.md).
 
 ---
 
@@ -189,7 +193,7 @@ Default UDP target is `127.0.0.1:22372`. Day-to-day multi-op uses a **KEY agent*
 | PTT never keys at all after install | Check **PTT method** is RTS/DTR and **PTT port** is a real `COMx` (**not** the special value “CAT”). Confirm USB SEND / PC KEYING and wiring |
 | Radio keys when the program opens the COM | DTR/RTS polarity or another app forcing the line — see [shared USB CAT + RTS/DTR](docs/TX_INHIBIT.md#shared-usb-cat--rtsdtr) |
 | CAT flaky after enabling RTS PTT | Handshake must be **None**; radio must not use RTS for CAT flow control |
-| TX Inhibit never stops PTT | Need **Enable TX Inhibit**, RTS/DTR on a real serial PTT port; **CAT-only PTT is not filtered**. Confirm agent UDP reaches port **22372** |
+| TX Inhibit never stops PTT | Need **Enable TX Inhibit**, RTS/DTR on a real serial PTT port; **CAT-only PTT is not filtered**. Confirm agent UDP reaches the **announced** inhibit port (tooltip / type 17) |
 | Radio still keys while TX INHIBITED | Radio **VOX** may still key from audio — turn VOX off; confirm you are not using a second PTT path |
 | “I can’t find Linux files here” | Correct — this page is Windows only. See [INSTALL.md](INSTALL.md) |
 
