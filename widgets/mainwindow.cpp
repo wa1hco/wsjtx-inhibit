@@ -4362,7 +4362,7 @@ bool MainWindow::eventFilter (QObject * object, QEvent * event)
 }
 
 // TX Inhibit has no status-bar widget of its own: the operator-visible signal
-// is tx_status_label turning red and reading INHIBITED (see guiUpdate), and a
+// is tx_status_label turning red and reading INHIBIT (see guiUpdate), and a
 // second box merely disrupted the spacing of the whole line.
 //
 // Everything else lives here, costing no layout space:
@@ -8564,7 +8564,7 @@ void MainWindow::guiUpdate()
       // Last, so it overrides every style/text chosen above.
       if (m_tx_inhibited) {
         tx_status_label.setStyleSheet("QLabel{color: #ffffff; background-color: #cc0000; font-weight: bold}");
-        tx_status_label.setText (tr ("Inhibit"));
+        tx_status_label.setText (tr ("INHIBIT"));
       }
     } else if(m_monitoring) {
       if (!m_tx_watchdog) {
@@ -8607,7 +8607,7 @@ void MainWindow::guiUpdate()
         // family keeps the escalation to red (transmit branch) as the signal.
         if (m_tx_inhibited) {
           tx_status_label.setStyleSheet("QLabel{color: #000000; background-color: #b3ffb3}");
-          tx_status_label.setText (tr ("Inhibit"));
+          tx_status_label.setText (tr ("INHIBIT"));
         }
       }
       transmitDisplay(false);

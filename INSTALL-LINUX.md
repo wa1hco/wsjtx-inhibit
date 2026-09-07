@@ -139,16 +139,18 @@ Same as stock WSJT-X:
 **TX Inhibit** only decides whether this **WSJT-X station** (app, PC, radio, antenna) may **assert PTT** (RTS or DTR). It is **not** **Halt Tx**.
 
 1. **Settings → Radio** → **PTT method** = **RTS** or **DTR** (not **CAT** method, not **VOX** alone).
-2. **Enable TX Inhibit** = checked (default is **off** — stock PTT until you opt in).
-3. **PTT port** = a real serial device (for example `/dev/ttyUSB0`).  
+2. **PTT port** = a real serial device (for example `/dev/ttyUSB0`).  
    - Do **not** choose the special list value **CAT**.  
-   - **Same device as CAT** is valid (shared USB CAT + RTS/DTR); a separate PTT adapter is also fine.
+   - **Same device as CAT** is valid (shared USB CAT + RTS/DTR); a separate PTT adapter is also fine.  
+   - If the device is missing from the list, type the full path. Set the port **before** Enable.
+3. **Enable TX Inhibit** = checked (default is **off** — stock PTT until you opt in).  
+   Available only after PTT method is RTS/DTR **and** PTT port is set.
 4. Wire RTS or DTR to the radio’s PTT/SEND, or use the radio’s USB SEND / PC KEYING map.
-5. On the radio, turn **VOX off** for the test so only the key line can key the transmitter.
+5. **WARNING — turn radio VOX off.** TX Inhibit only gates the RTS/DTR PTT line. If VOX is on, audio can still key the radio while the badge says **INHIBIT**.
 6. Your user may need membership in the **`dialout`** group (or **`uucp`** on some distros); log out and back in after changing groups.
 7. **Shared USB checklist:** **Handshake = None**; radio menu maps the line to SEND/PTT; one app owns the modem lines. Brand notes: [docs/TX_INHIBIT.md — Shared USB CAT + RTS/DTR](docs/TX_INHIBIT.md#shared-usb-cat--rtsdtr).
 
-When the KEY agent has said **not to transmit**, the status bar shows a red **TX INHIBITED** badge. The WSJT-X station should **not assert PTT** even if WSJT-X is in a TX cycle.
+When the KEY agent has said **inhibit transmit**, the status bar shows a red **INHIBIT** badge. The WSJT-X station should **not assert PTT** even if WSJT-X is in a TX cycle.
 
 Inhibit listen port is **ephemeral** (OS-assigned), announced in **InhibitStatus**
 (type 17) and the status-bar tooltip. Design: [docs/TX_INHIBIT.md](docs/TX_INHIBIT.md).
@@ -171,14 +173,14 @@ python3 tools/send_inhibit_hold.py --ttl-ms 3000 --station TEST --port <from too
 python3 tools/send_inhibit_hold.py --ttl-ms 0 --port <from tooltip>   # release
 ```
 
-You do **not** need the script for normal use — a **KEY agent** tells WSJT-X stations not to transmit (keepalive + release). This package ships **`inhibit-agent`** (operator setup); the WIMS tree ships **`wims-key-agent`** (discovery). See [docs/TX_INHIBIT.md](docs/TX_INHIBIT.md).
+You do **not** need the script for normal use — a **KEY agent** tells WSJT-X stations to inhibit transmit (keepalive + release). This package ships **`inhibit-agent`** (operator setup); the WIMS tree ships **`wims-key-agent`** (discovery). See [docs/TX_INHIBIT.md](docs/TX_INHIBIT.md).
 
 ### Quick check
 
 - You launched **this** package (AppImage or installed `wsjtx`), not a distro stock binary by mistake.
 - **Help → About** shows **wsjtx-inhibit** and base version **3.0.x** (mainline + TX Inhibit). The main window title starts with **wsjtx-inhibit**.
-- Receive and TX behave like normal WSJT-X when the agent has not said “don’t transmit.”
-- When it has, the red **TX INHIBITED** badge appears and the WSJT-X station does not assert PTT.
+- Receive and TX behave like normal WSJT-X when the agent has not said “inhibit transmit.”
+- When it has, the red **INHIBIT** badge appears and the WSJT-X station does not assert PTT.
 
 ---
 
@@ -194,7 +196,7 @@ You do **not** need the script for normal use — a **KEY agent** tells WSJT-X s
 | PTT never keys at all | **PTT method** RTS/DTR and **PTT port** a real `/dev/tty…` (**not** the special value “CAT”); check USB SEND / wiring |
 | TX Inhibit never stops PTT | Need **Enable TX Inhibit**, RTS/DTR on a real serial PTT port; **CAT-only PTT is not filtered**. Confirm agent UDP reaches the **announced** inhibit port (tooltip / type 17) |
 | Radio keys on port open / CAT flaky with RTS PTT | Handshake **None**; polarity; multi-app; see [shared USB CAT + RTS/DTR](docs/TX_INHIBIT.md#shared-usb-cat--rtsdtr) |
-| Radio still keys while TX INHIBITED | Radio **VOX** may still key from audio — turn VOX off |
+| Radio still keys while **INHIBIT** badge is showing | Radio **VOX** may still key from audio — turn VOX off |
 
 ---
 

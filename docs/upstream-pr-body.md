@@ -37,7 +37,7 @@ Settings.
 - Transceiver `do_ptt` paths consult the gate before keying; rig
   backend exceptions are contained so a CAT hiccup cannot leave PTT
   stuck asserted.
-- While a hold is active the status bar shows a red TX INHIBITED badge.
+- While a hold is active the status bar shows a red **INHIBIT** badge.
 
 There is deliberately no remote control of TX — only inhibition of it.
 `docs/TX_INHIBIT.md` documents the datagram format and trust model.

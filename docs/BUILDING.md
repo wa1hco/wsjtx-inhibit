@@ -97,6 +97,6 @@ python3 tools/send_inhibit_hold.py --ttl-ms 2000 --station TEST \
   --controller-id TEST --port <port-from-tooltip>
 ```
 
-3. Status bar should show **TX INHIBITED — held by TEST** for ~2 s, then clear
+3. Status bar should show red **INHIBIT** for ~2 s, then clear
    (or send `--ttl-ms 0` to release).
 4. With a PTT dongle, confirm RTS drops while held even if Enable Tx is on.
