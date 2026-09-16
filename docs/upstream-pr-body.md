@@ -80,10 +80,11 @@ as any other KEY agent. Qt SerialPort is already a WSJT-X dependency.
   (SSB hang 0; break-in hang sizing) with no serial and no UDP.
 - `tools/send_inhibit_hold.py` sends hold/release datagrams for bench
   testing without a KEY dongle.
-- Field-tested through two release candidates with the W2SZ group,
-  including hold/release timing on real radios through RX→Tune→RX
-  cycles; CI-built on Linux (x86_64/aarch64), Windows, and macOS in
-  the parent fork (https://github.com/wa1hco/wsjtx-inhibit).
+- Field-tested with the W2SZ VHF contest group (WIMS KEY agent driving
+  holds), including hold/release timing on real radios through
+  RX→Tune→RX cycles across release candidates through rc4.
+- CI-built on Linux (x86_64/aarch64), Windows, and macOS in the parent
+  fork (https://github.com/wa1hco/wsjtx-inhibit).
 
 The branch is based on the released v3.0.2 (`ccdfaf3`), per the
 Programmer's Overview. Happy to split into a review-friendly series,
@@ -115,6 +116,26 @@ wrong: without an agent the gate only works if the operator already
 has WIMS (or writes their own sender). `inhibit-agent` and
 `inhibit-agent-gui` are now on this branch so TX Inhibit is usable
 on a dual-radio seat that is not a WIMS station.
+
+### Port-0 bind / announce guard (W2SZ field find)
+
+At W2SZ, WIMS dropped InhibitStatus (type 17) when the inhibit port
+was 0, so the KEY-agent target list stayed empty. Qt 5 can return true
+from `QUdpSocket::bind(0)` while `localPort()` is still 0. This update:
+
+- recovers the OS port with `getsockname` (Windows links `ws2_32`)
+- treats a still-zero port as bind failure (no `portBound(0)`)
+- never sends a live type 17 with port 0 (port 0 is disable/clear only)
+- ignores a latched `portBound(0)` in Configuration
+
+Code and protocol comments say “controllers,” not WIMS. WIMS remains
+the field justification above.
+
+### Arming guards
+
+Enable TX Inhibit only when PTT is RTS/DTR and the PTT serial device
+is set. `inhibit-agent-gui` shows NEED GATE until the operator Applies
+a non-zero UDP inhibit endpoint from type 17 / the tooltip.
 
 Still only in the `wa1hco/wsjtx-inhibit` fork, not this PR: packaging
 / CI / install docs, and the keyboard bench tool `inhibit-test`.

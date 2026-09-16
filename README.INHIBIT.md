@@ -41,16 +41,16 @@ matches neither pattern below runs nothing.
 | Tag | Workflow | Channel | Artifacts |
 |-----|----------|---------|-----------|
 | `build/v3.0.2` | `release.yml` | **GA** | All platforms + source tarball + public release |
-| `build/v3.0.2-rc4` | `release.yml` | **RC 4** | All platforms, prerelease |
-| `packages/v3.0.2-rc4` | `tester-packages.yml` | **RC 4** | Windows + Linux x86_64, faster |
+| `build/v3.0.2-rc5` | `release.yml` | **RC 5** | All platforms, prerelease |
+| `packages/v3.0.2-rc5` | `tester-packages.yml` | **RC 5** | Windows + Linux x86_64, faster |
 | `packages/v3.0.2-dev1` | `tester-packages.yml` | DEVEL | Windows + Linux x86_64 |
 
 ```bash
 # Release candidate, all platforms (preferred for an rc)
-git tag build/v3.0.2-rc4 && git push origin build/v3.0.2-rc4
+git tag build/v3.0.2-rc5 && git push origin build/v3.0.2-rc5
 
 # Faster tester packages (Windows + Linux x86_64 only)
-git tag packages/v3.0.2-rc4 && git push origin packages/v3.0.2-rc4
+git tag packages/v3.0.2-rc5 && git push origin packages/v3.0.2-rc5
 # or: Actions → "Tester packages" → Run workflow
 ```
 

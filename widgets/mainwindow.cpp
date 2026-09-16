@@ -4369,7 +4369,7 @@ bool MainWindow::eventFilter (QObject * object, QEvent * event)
 //   * the tooltip on tx_status_label always describes the current state,
 //     including the bound port and who is holding;
 //   * a one-shot status message warns when the operator has opted in but the
-//     station is NOT reachable — the fail-open/fail-silent hole in C4. It fires
+//     station is NOT reachable (enabled, no UDP inhibit port). It fires
 //     only on a change, so it cannot nag.
 void MainWindow::update_inhibit_status ()
 {
@@ -4382,7 +4382,8 @@ void MainWindow::update_inhibit_status ()
       return;
     }
 
-  // Always read from Configuration; a cached copy can disagree after bind/clear.
+  // Always read the UDP inhibit port from Configuration.
+  // A cached copy can disagree after bind/clear.
   auto const port = m_config.tx_inhibit_port ();
 
   if (m_tx_inhibited)
@@ -4418,7 +4419,7 @@ void MainWindow::update_inhibit_status ()
   m_tx_inhibit_warned_port = port;
 
   // Keep capability/port announcements alive while the feature is enabled so
-  // WIMS / KEY-list builders that join after startup still see type 17.
+  // controllers that join after startup still see type 17.
   if (!m_tx_inhibit_announce_timer.isActive ())
     {
       m_tx_inhibit_announce_timer.start ();
@@ -4435,7 +4436,7 @@ void MainWindow::send_inhibit_status_announce ()
   // after disable. UDP Server may be unicast or multicast — same path as
   // Heartbeat/Status.
   //
-  // Never send a live type 17 with port 0. WIMS rejects port 0, so an
+  // Never send a live type 17 with port 0. Controllers reject port 0, so an
   // announce during Hamlib open (gate binds after rig_open) empties the
   // KEY-agent target list. Port 0 is only the disable/clear value.
   if (!m_config.enable_tx_inhibit ())
@@ -4489,7 +4490,9 @@ void MainWindow::createStatusBar()                           //createStatusBar
            });
   connect (&m_config, &Configuration::tx_inhibit_port_changed, this,
            [this] (quint16) {
-             // Announce on bind/clear so controllers learn the port without a hold.
+             // Enable on → bind emits port only (no hold change). That used to
+             // update the tooltip and never send type 17 — late listeners saw
+             // nothing after a settings toggle. Announce immediately.
              update_inhibit_status ();
              send_inhibit_status_announce ();
            });
