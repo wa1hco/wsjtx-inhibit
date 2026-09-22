@@ -1,0 +1,87 @@
+Subject: TX Inhibit upgrade for Improved 3.2.0 PLUS_260908 (type 18 + port-0 fix)
+
+Hello Uwe and all,
+
+Improved 3.2.0 PLUS_260908 already includes TX Inhibit from the earlier
+submission. That design used JSON holds and preferred UDP port 22372.
+
+Protocol review on the mainline PR asked for NetworkMessage holds instead
+of JSON. This note offers an upgrade patch against the 3.2.0 Improved drop.
+It replaces the in-tree JSON/22372 path with the current design.
+
+Terms in this note:
+
+  UDP inhibit endpoint = host:<udp-port> for type-18 holds
+  PTT serial device    = Settings -> Radio -> Port for RTS/DTR
+
+What changes
+
+  Hold wire
+    Before: JSON on preferred UDP 22372
+    After:  NetworkMessage::TxInhibit type 18
+
+  Listen port
+    Before: prefer 22372; may fall back
+    After:  always ephemeral; type 17 announces it
+
+  Multi-controller
+    Before: one global hold
+    After:  per-controller leases, OR'd
+
+  KEY agent
+    Before: bench helpers
+    After:  inhibit-agent / inhibit-agent-gui (CTS -> type 18)
+
+  Port 0
+    Before: could be announced as a live target
+    After:  live type 17 never uses port 0
+
+Wire authority:
+https://github.com/wa1hco/wsjtx-inhibit/blob/main/docs/TX_INHIBIT.md
+
+Point KEY agents at the ephemeral host:port from InhibitStatus (type 17)
+or the status-bar tooltip. Confirm the port is non-zero after the rig opens.
+
+Port-0 guard in this upgrade
+
+At W2SZ in September, while running the ephemeral-port design, type 17
+sometimes carried port 0. Controllers reject port 0. The KEY-agent target
+list stayed empty. No holds reached the WSJT-X instances.
+
+Qt 5 can return true from QUdpSocket::bind(0) while localPort() is still 0.
+After bind, if localPort() is 0, this patch reads the port with getsockname.
+If the port is still 0, bind is treated as failed. The gate does not emit
+portBound(0). A live type 17 is sent only with a non-zero port. Port 0
+remains the disable/clear announce only. Windows links ws2_32 so
+getsockname and ntohs resolve.
+
+This upgrade also adds a 15 s type-17 pulse for late joiners. Without the
+port-0 guard, that pulse can publish port 0 while Hamlib rig_open is still
+running.
+
+Apply
+
+  tar xzf wsjtx.tgz
+  cd wsjtx
+  patch -p1 --binary < tx-inhibit-upgrade-3.2.0_improved_PLUS_260908.patch
+
+--binary is required. Improved sources are CRLF. The patch is CRLF too.
+
+Do not apply the older 3.1.0 add-on patch on this 3.2.0 tree. That tree
+already has Inhibit.
+
+SHA-256:
+9aa4e740cfff5fddb4af05f97d047f62fcddb4b67af4b142e1bd7e09b13fcff0
+
+Reference build
+
+The same design runs on the mainline-based fork:
+https://github.com/wa1hco/wsjtx-inhibit/releases/tag/build/v3.0.2-rc5
+
+Assets there: Windows installer; Linux AppImage, .deb, and .rpm.
+
+I can adjust structure or wording to match how you want this carried in
+Improved.
+
+73,
+Jeff, WA1HCO

@@ -1,0 +1,4361 @@
+diff -ruN wsjtx-baseline/CMakeLists_boost-1.74.txt wsjtx-work/CMakeLists_boost-1.74.txt
+--- a/CMakeLists_boost-1.74.txt	2026-08-19 10:07:58.000000000 -0400
++++ b/CMakeLists_boost-1.74.txt	2026-09-21 19:06:38.361875834 -0400
+@@ -1574,7 +1574,8 @@
+ target_compile_definitions (wsjt_qt PUBLIC UDP_STATIC_DEFINE)
+ target_link_libraries (wsjt_qt Hamlib::Hamlib Boost::log qcp Qt5::Widgets Qt5::Network Qt5::Sql Qt5::WebSockets Qt5::SerialPort)
+ if (WIN32)
+-  target_link_libraries (wsjt_qt Qt5::AxContainer Qt5::AxBase)
++  # TxInhibitGate uses getsockname/ntohs after bind(0) when Qt localPort() is 0.
++  target_link_libraries (wsjt_qt Qt5::AxContainer Qt5::AxBase ws2_32)
+ endif (WIN32)
+ 
+ # build a library of package Qt functionality used in Fortran utilities
+@@ -1698,6 +1699,10 @@
+   endif ()
+ endif ()
+ target_link_libraries (wsjtx Qt5::SerialPort wsjt_cxx wsjt_qt wsjt_qtmm ${FFTW3_LIBRARIES} ${LIBM_LIBRARIES})
++if (WIN32)
++  # Static wsjt_qt does not always propagate ws2_32 to the final MinGW link.
++  target_link_libraries (wsjtx ws2_32)
++endif (WIN32)
+ 
+ # make a library for WSJT-X UDP servers
+ # add_library (wsjtx_udp SHARED ${UDP_library_CXXSRCS})
+@@ -1740,13 +1745,17 @@
+ 
+ # TX Inhibit KEY-agent stand-in — installed as bin/inhibit-test(.exe) next to wsjtx.
+ # (Formerly inhibit-spacebar; grave/` KEY, not Space.)
+-add_executable (inhibit-test tools/inhibit-test/main.cpp)
++add_executable (inhibit-test tools/inhibit-test/main.cpp Network/NetworkMessage.cpp)
++target_include_directories (inhibit-test PRIVATE ${CMAKE_SOURCE_DIR})
+ target_link_libraries (inhibit-test Qt5::Core Qt5::Network)
+ # Console subsystem on Windows (keyboard KEY test).
+ if (WIN32)
+   set_target_properties (inhibit-test PROPERTIES WIN32_EXECUTABLE OFF)
+ endif ()
+ 
++# Production KEY agent: CTS -> UDP hold. CLI + GUI, Linux and Windows.
++add_subdirectory (tools/inhibit-agent)
++
+ generate_version_info (message_aggregator_VERSION_RESOURCES
+   NAME message_aggregator
+   BUNDLE ${PROJECT_BUNDLE_NAME}
+@@ -1822,6 +1831,7 @@
+   RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT runtime
+   BUNDLE DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT runtime
+   )
++# inhibit-agent / inhibit-agent-gui install from tools/inhibit-agent/CMakeLists.txt
+ 
+ if(WSJT_BUILD_UTILS)
+ install (TARGETS ft8code jt65code jt9code jt4code msk144code 
+diff -ruN wsjtx-baseline/CMakeLists_boost-1.83.txt wsjtx-work/CMakeLists_boost-1.83.txt
+--- a/CMakeLists_boost-1.83.txt	2026-08-19 10:08:07.000000000 -0400
++++ b/CMakeLists_boost-1.83.txt	2026-09-21 19:06:38.362875823 -0400
+@@ -1574,7 +1574,8 @@
+ target_compile_definitions (wsjt_qt PUBLIC UDP_STATIC_DEFINE)
+ target_link_libraries (wsjt_qt Hamlib::Hamlib Boost::log qcp Qt5::Widgets Qt5::Network Qt5::Sql Qt5::WebSockets Qt5::SerialPort)
+ if (WIN32)
+-  target_link_libraries (wsjt_qt Qt5::AxContainer Qt5::AxBase)
++  # TxInhibitGate uses getsockname/ntohs after bind(0) when Qt localPort() is 0.
++  target_link_libraries (wsjt_qt Qt5::AxContainer Qt5::AxBase ws2_32)
+ endif (WIN32)
+ 
+ # build a library of package Qt functionality used in Fortran utilities
+@@ -1698,6 +1699,10 @@
+   endif ()
+ endif ()
+ target_link_libraries (wsjtx Qt5::SerialPort wsjt_cxx wsjt_qt wsjt_qtmm ${FFTW3_LIBRARIES} ${LIBM_LIBRARIES})
++if (WIN32)
++  # Static wsjt_qt does not always propagate ws2_32 to the final MinGW link.
++  target_link_libraries (wsjtx ws2_32)
++endif (WIN32)
+ 
+ # make a library for WSJT-X UDP servers
+ # add_library (wsjtx_udp SHARED ${UDP_library_CXXSRCS})
+@@ -1740,13 +1745,17 @@
+ 
+ # TX Inhibit KEY-agent stand-in — installed as bin/inhibit-test(.exe) next to wsjtx.
+ # (Formerly inhibit-spacebar; grave/` KEY, not Space.)
+-add_executable (inhibit-test tools/inhibit-test/main.cpp)
++add_executable (inhibit-test tools/inhibit-test/main.cpp Network/NetworkMessage.cpp)
++target_include_directories (inhibit-test PRIVATE ${CMAKE_SOURCE_DIR})
+ target_link_libraries (inhibit-test Qt5::Core Qt5::Network)
+ # Console subsystem on Windows (keyboard KEY test).
+ if (WIN32)
+   set_target_properties (inhibit-test PROPERTIES WIN32_EXECUTABLE OFF)
+ endif ()
+ 
++# Production KEY agent: CTS -> UDP hold. CLI + GUI, Linux and Windows.
++add_subdirectory (tools/inhibit-agent)
++
+ generate_version_info (message_aggregator_VERSION_RESOURCES
+   NAME message_aggregator
+   BUNDLE ${PROJECT_BUNDLE_NAME}
+@@ -1822,6 +1831,7 @@
+   RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT runtime
+   BUNDLE DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT runtime
+   )
++# inhibit-agent / inhibit-agent-gui install from tools/inhibit-agent/CMakeLists.txt
+ 
+ if(WSJT_BUILD_UTILS)
+ install (TARGETS ft8code jt65code jt9code jt4code msk144code 
+diff -ruN wsjtx-baseline/CMakeLists_boost-1.90.txt wsjtx-work/CMakeLists_boost-1.90.txt
+--- a/CMakeLists_boost-1.90.txt	2026-08-19 10:08:19.000000000 -0400
++++ b/CMakeLists_boost-1.90.txt	2026-09-21 19:06:38.362875823 -0400
+@@ -1574,7 +1574,8 @@
+ target_compile_definitions (wsjt_qt PUBLIC UDP_STATIC_DEFINE)
+ target_link_libraries (wsjt_qt Hamlib::Hamlib Boost::log qcp Qt5::Widgets Qt5::Network Qt5::Sql Qt5::WebSockets Qt5::SerialPort)
+ if (WIN32)
+-  target_link_libraries (wsjt_qt Qt5::AxContainer Qt5::AxBase)
++  # TxInhibitGate uses getsockname/ntohs after bind(0) when Qt localPort() is 0.
++  target_link_libraries (wsjt_qt Qt5::AxContainer Qt5::AxBase ws2_32)
+ endif (WIN32)
+ 
+ # build a library of package Qt functionality used in Fortran utilities
+@@ -1698,6 +1699,10 @@
+   endif ()
+ endif ()
+ target_link_libraries (wsjtx Qt5::SerialPort wsjt_cxx wsjt_qt wsjt_qtmm ${FFTW3_LIBRARIES} ${LIBM_LIBRARIES})
++if (WIN32)
++  # Static wsjt_qt does not always propagate ws2_32 to the final MinGW link.
++  target_link_libraries (wsjtx ws2_32)
++endif (WIN32)
+ 
+ # make a library for WSJT-X UDP servers
+ # add_library (wsjtx_udp SHARED ${UDP_library_CXXSRCS})
+@@ -1740,13 +1745,17 @@
+ 
+ # TX Inhibit KEY-agent stand-in — installed as bin/inhibit-test(.exe) next to wsjtx.
+ # (Formerly inhibit-spacebar; grave/` KEY, not Space.)
+-add_executable (inhibit-test tools/inhibit-test/main.cpp)
++add_executable (inhibit-test tools/inhibit-test/main.cpp Network/NetworkMessage.cpp)
++target_include_directories (inhibit-test PRIVATE ${CMAKE_SOURCE_DIR})
+ target_link_libraries (inhibit-test Qt5::Core Qt5::Network)
+ # Console subsystem on Windows (keyboard KEY test).
+ if (WIN32)
+   set_target_properties (inhibit-test PROPERTIES WIN32_EXECUTABLE OFF)
+ endif ()
+ 
++# Production KEY agent: CTS -> UDP hold. CLI + GUI, Linux and Windows.
++add_subdirectory (tools/inhibit-agent)
++
+ generate_version_info (message_aggregator_VERSION_RESOURCES
+   NAME message_aggregator
+   BUNDLE ${PROJECT_BUNDLE_NAME}
+@@ -1822,6 +1831,7 @@
+   RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT runtime
+   BUNDLE DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT runtime
+   )
++# inhibit-agent / inhibit-agent-gui install from tools/inhibit-agent/CMakeLists.txt
+ 
+ if(WSJT_BUILD_UTILS)
+ install (TARGETS ft8code jt65code jt9code jt4code msk144code 
+diff -ruN wsjtx-baseline/CMakeLists.txt wsjtx-work/CMakeLists.txt
+--- a/CMakeLists.txt	2026-08-19 10:06:42.000000000 -0400
++++ b/CMakeLists.txt	2026-09-21 19:06:38.361875834 -0400
+@@ -1574,7 +1574,8 @@
+ target_compile_definitions (wsjt_qt PUBLIC UDP_STATIC_DEFINE)
+ target_link_libraries (wsjt_qt Hamlib::Hamlib Boost::log qcp Qt5::Widgets Qt5::Network Qt5::Sql Qt5::WebSockets Qt5::SerialPort)
+ if (WIN32)
+-  target_link_libraries (wsjt_qt Qt5::AxContainer Qt5::AxBase)
++  # TxInhibitGate uses getsockname/ntohs after bind(0) when Qt localPort() is 0.
++  target_link_libraries (wsjt_qt Qt5::AxContainer Qt5::AxBase ws2_32)
+ endif (WIN32)
+ 
+ # build a library of package Qt functionality used in Fortran utilities
+@@ -1698,6 +1699,10 @@
+   endif ()
+ endif ()
+ target_link_libraries (wsjtx Qt5::SerialPort wsjt_cxx wsjt_qt wsjt_qtmm ${FFTW3_LIBRARIES} ${LIBM_LIBRARIES})
++if (WIN32)
++  # Static wsjt_qt does not always propagate ws2_32 to the final MinGW link.
++  target_link_libraries (wsjtx ws2_32)
++endif (WIN32)
+ 
+ # make a library for WSJT-X UDP servers
+ # add_library (wsjtx_udp SHARED ${UDP_library_CXXSRCS})
+@@ -1740,13 +1745,17 @@
+ 
+ # TX Inhibit KEY-agent stand-in — installed as bin/inhibit-test(.exe) next to wsjtx.
+ # (Formerly inhibit-spacebar; grave/` KEY, not Space.)
+-add_executable (inhibit-test tools/inhibit-test/main.cpp)
++add_executable (inhibit-test tools/inhibit-test/main.cpp Network/NetworkMessage.cpp)
++target_include_directories (inhibit-test PRIVATE ${CMAKE_SOURCE_DIR})
+ target_link_libraries (inhibit-test Qt5::Core Qt5::Network)
+ # Console subsystem on Windows (keyboard KEY test).
+ if (WIN32)
+   set_target_properties (inhibit-test PROPERTIES WIN32_EXECUTABLE OFF)
+ endif ()
+ 
++# Production KEY agent: CTS -> UDP hold. CLI + GUI, Linux and Windows.
++add_subdirectory (tools/inhibit-agent)
++
+ generate_version_info (message_aggregator_VERSION_RESOURCES
+   NAME message_aggregator
+   BUNDLE ${PROJECT_BUNDLE_NAME}
+@@ -1822,6 +1831,7 @@
+   RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT runtime
+   BUNDLE DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT runtime
+   )
++# inhibit-agent / inhibit-agent-gui install from tools/inhibit-agent/CMakeLists.txt
+ 
+ if(WSJT_BUILD_UTILS)
+ install (TARGETS ft8code jt65code jt9code jt4code msk144code 
+diff -ruN wsjtx-baseline/Configuration.cpp wsjtx-work/Configuration.cpp
+--- a/Configuration.cpp	2026-09-03 04:40:09.000000000 -0400
++++ b/Configuration.cpp	2026-09-21 19:43:41.004512042 -0400
+@@ -1,4 +1,5 @@
+ #include "Configuration.hpp"
++#include "TxInhibit/TxInhibitSimPort.hpp"
+ 
+ //
+ // Read me!
+@@ -656,6 +657,8 @@
+   Q_SLOT void on_add_macro_push_button_clicked (bool = false);
+   Q_SLOT void on_delete_macro_push_button_clicked (bool = false);
+   Q_SLOT void on_PTT_method_button_group_buttonClicked (int);
++  Q_SLOT void on_tx_inhibit_check_box_toggled (bool);
++  void update_tx_inhibit_check_box_text ();
+   Q_SLOT void on_add_macro_line_edit_editingFinished ();
+   Q_SLOT void delete_macro ();
+   void delete_selected_macros (QModelIndexList);
+@@ -784,6 +787,7 @@
+   // TX Inhibit: pin filter lives inside HamlibTransceiver (do_ptt). See docs/TX_INHIBIT.md.
+   bool enable_tx_inhibit_ {false};
+   quint16 tx_inhibit_port_ {0};
++  bool tx_inhibit_arm_failed_ {false};
+ 
+   TransceiverFactory transceiver_factory_;
+   QList<QMetaObject::Connection> rig_connections_;
+@@ -2123,6 +2127,14 @@
+   fill_port_combo_box (ui_->PTT_port_combo_box);
+   ui_->PTT_port_combo_box->addItem ("CAT");
+   ui_->PTT_port_combo_box->setItemData (ui_->PTT_port_combo_box->count () - 1, "Delegate to proxy CAT service", Qt::ToolTipRole);
++  ui_->PTT_port_combo_box->addItem (QString::fromLatin1 (inhibit_sim_port_name ()));
++  ui_->PTT_port_combo_box->setItemData (
++      ui_->PTT_port_combo_box->count () - 1,
++      "Dummy PTT port: Radio None + RTS/DTR starts TX Inhibit with no UART.",
++      Qt::ToolTipRole);
++  // Typing a custom device path must update Enable TX Inhibit enablement.
++  connect (ui_->PTT_port_combo_box, &QComboBox::editTextChanged,
++           this, [this] (QString const&) { set_rig_invariants (); });
+ 
+   //
+   // setup hooks to keep audio channels aligned with devices
+@@ -2312,6 +2324,7 @@
+   ui_->tci_audio_check_box->setChecked (tci_audio_);
+   ui_->PTT_method_button_group->button (rig_params_.ptt_type)->setChecked (true);
+   ui_->tx_inhibit_check_box->setChecked (enable_tx_inhibit_);
++  update_tx_inhibit_check_box_text ();
+   ui_->PWR_and_SWR_check_box->setChecked (PWR_and_SWR_);
+   ui_->check_SWR_check_box->setChecked (check_SWR_);
+   if (!ui_->PWR_and_SWR_check_box->isChecked()) ui_->check_SWR_check_box->setEnabled (false);
+@@ -3251,8 +3264,25 @@
+   auto enable_ptt_port = TransceiverFactory::PTT_method_CAT != ptt_method && TransceiverFactory::PTT_method_VOX != ptt_method;
+   ui_->PTT_port_combo_box->setEnabled (enable_ptt_port);
+   ui_->PTT_port_label->setEnabled (enable_ptt_port);
+-  // TX Inhibit only applies to RTS/DTR pin keying.
+-  ui_->tx_inhibit_check_box->setEnabled (enable_ptt_port && !is_tci_);
++  // TX Inhibit needs RTS/DTR and a real Port string (typed path or list item).
++  bool ptt_port_ok = enable_ptt_port && !ptt_port.trimmed ().isEmpty ();
++  if (ptt_port_ok)
++    {
++      int const idx = ui_->PTT_port_combo_box->findText (ptt_port);
++      if (idx >= 0
++          && combo_box_item_disabled
++             == ui_->PTT_port_combo_box->itemData (idx, Qt::UserRole - 1))
++        {
++          ptt_port_ok = false;
++        }
++    }
++  ui_->tx_inhibit_check_box->setEnabled (ptt_port_ok && !is_tci_);
++  if (!ui_->tx_inhibit_check_box->isEnabled ()
++      && ui_->tx_inhibit_check_box->isChecked ())
++    {
++      ui_->tx_inhibit_check_box->setChecked (false);
++    }
++  update_tx_inhibit_check_box_text ();
+ 
+   if (CAT_indirect_serial_PTT)
+     {
+@@ -4362,6 +4392,40 @@
+   set_rig_invariants ();
+ }
+ 
++void Configuration::impl::on_tx_inhibit_check_box_toggled (bool)
++{
++  if (!ui_->tx_inhibit_check_box->isChecked ())
++    {
++      tx_inhibit_arm_failed_ = false;
++    }
++  update_tx_inhibit_check_box_text ();
++}
++
++void Configuration::impl::update_tx_inhibit_check_box_text ()
++{
++  if (!ui_ || !ui_->tx_inhibit_check_box)
++    {
++      return;
++    }
++  if (!ui_->tx_inhibit_check_box->isChecked ())
++    {
++      ui_->tx_inhibit_check_box->setText (tr ("Enable TX &Inhibit"));
++      return;
++    }
++  if (0 != tx_inhibit_port_)
++    {
++      ui_->tx_inhibit_check_box->setText (tr ("TX Inhibit enabled"));
++      return;
++    }
++  if (tx_inhibit_arm_failed_)
++    {
++      ui_->tx_inhibit_check_box->setText (tr ("TX Inhibit failed (no port)"));
++      return;
++    }
++  // Checked, bind not finished or rig closed: keep the arming label.
++  ui_->tx_inhibit_check_box->setText (tr ("Enable TX &Inhibit"));
++}
++
+ void Configuration::impl::on_CAT_port_combo_box_activated (int /* index */)
+ {
+   set_rig_invariants ();
+@@ -5463,9 +5527,22 @@
+                                        });
+           rig_connections_ << connect (rig.get (), &Transceiver::tx_inhibit_port_bound,
+                                        this, [this] (quint16 port) {
++                                         if (0 == port)
++                                           {
++                                             return;
++                                           }
++                                         tx_inhibit_arm_failed_ = false;
+                                          tx_inhibit_port_ = port;
++                                         update_tx_inhibit_check_box_text ();
+                                          Q_EMIT self_->tx_inhibit_port_changed (port);
+                                        });
++          rig_connections_ << connect (rig.get (), &Transceiver::tx_inhibit_error,
++                                       this, [this] (QString const& message) {
++                                         tx_inhibit_arm_failed_ = true;
++                                         tx_inhibit_port_ = 0;
++                                         update_tx_inhibit_check_box_text ();
++                                         Q_EMIT self_->tx_inhibit_error (message);
++                                       });
+           rig_connections_ << connect (rig.get (), &Transceiver::tciframeswritten, this, &Configuration::impl::handle_transceiver_tciframeswritten);
+           rig_connections_ << connect (rig.get (), &Transceiver::tci_mod_active, this, &Configuration::impl::handle_transceiver_tci_mod_active);
+           rig_connections_ << connect (rig.get (), &Transceiver::update, this, &Configuration::impl::handle_transceiver_update);
+@@ -5859,6 +5936,8 @@
+   // state. Port alone was zeroed before without emitting, so MainWindow's
+   // m_tx_inhibited (display-only) could stick on "Inhibit" until a later hold.
+   tx_inhibit_port_ = 0;
++  tx_inhibit_arm_failed_ = false;
++  update_tx_inhibit_check_box_text ();
+   Q_EMIT self_->tx_inhibit_port_changed (0);
+   Q_EMIT self_->tx_inhibit_changed (false, QString {}, 0, 0, 0, 0);
+ }
+diff -ruN wsjtx-baseline/Configuration.hpp wsjtx-work/Configuration.hpp
+--- a/Configuration.hpp	2026-09-03 04:40:36.000000000 -0400
++++ b/Configuration.hpp	2026-09-21 19:43:13.503857110 -0400
+@@ -503,6 +503,8 @@
+                                     , quint32 hold_rx, quint32 release_rx
+                                     , quint32 expiries, quint32 invalid) const;
+   Q_SIGNAL void tx_inhibit_port_changed (quint16 port) const;
++  // UDP inhibit listen failed to arm (no port). Settings checkbox label updates.
++  Q_SIGNAL void tx_inhibit_error (QString const& message) const;
+ 
+   // signal announces audio devices are being enumerated
+   //
+diff -ruN wsjtx-baseline/Configuration.ui wsjtx-work/Configuration.ui
+--- a/Configuration.ui	2026-09-03 05:57:08.000000000 -0400
++++ b/Configuration.ui	2026-09-21 19:05:55.263366231 -0400
+@@ -1555,7 +1555,7 @@
+                 <item row="1" column="0" colspan="2">
+                  <widget class="QCheckBox" name="tx_inhibit_check_box">
+                   <property name="toolTip">
+-                   <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;&lt;b&gt;TX Inhibit&lt;/b&gt; (RTS/DTR PTT only).&lt;/p&gt;&lt;p&gt;This &lt;b&gt;WSJT-X station&lt;/b&gt; is the app, PC, network, radio, and antenna (may be a remote go-box). When enabled, listen for UDP from a KEY agent (default port 22372). The KEY agent &lt;b&gt;tells WSJT-X stations not to transmit&lt;/b&gt; while a priority radio is keyed. Physical outcome: &lt;code&gt;assert PTT ⇔ want_tx and not hold&lt;/code&gt;. Sequencing continues; only whether this station may assert PTT is filtered.&lt;/p&gt;&lt;p&gt;Default is off (stock PTT). Co-band multi-op stations that share a band with a priority radio should enable this and run a KEY agent.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
++                   <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;&lt;b&gt;TX Inhibit&lt;/b&gt; (RTS/DTR PTT only; Port must be set).&lt;/p&gt;&lt;p&gt;This &lt;b&gt;WSJT-X station&lt;/b&gt; is the app, PC, network, radio, and antenna (may be a remote go-box). When enabled, listen for UDP holds from a KEY agent on an ephemeral port announced in InhibitStatus (type 17) and the status-bar tooltip. The KEY agent &lt;b&gt;tells WSJT-X stations to inhibit transmit&lt;/b&gt; while a priority radio is keyed. Physical outcome: &lt;code&gt;assert PTT ⇔ want_tx and not hold&lt;/code&gt;. Sequencing continues; only whether this station may assert PTT is filtered.&lt;/p&gt;&lt;p&gt;Default is off (stock PTT). Co-band multi-op stations that share a band with a priority radio should enable this and run a KEY agent.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+                   </property>
+                   <property name="text">
+                    <string>Enable TX &amp;Inhibit</string>
+diff -ruN wsjtx-baseline/docs/INHIBIT_AGENT.md wsjtx-work/docs/INHIBIT_AGENT.md
+--- a/docs/INHIBIT_AGENT.md	1969-12-31 19:00:00.000000000 -0500
++++ b/docs/INHIBIT_AGENT.md	2026-09-21 19:06:56.938663155 -0400
+@@ -0,0 +1,141 @@
++# inhibit-agent — design
++
++**Status:** implemented in this tree (`tools/inhibit-agent/`).  
++**Audience:** operators who use TX Inhibit on a dual-radio seat **without WIMS**.  
++**Scope:** this program only. Gate internals live in [TX_INHIBIT.md](TX_INHIBIT.md).
++
++**KEY agent** is the role. This program is the standalone KEY agent: the operator
++supplies the serial port and dest `host:port`. The WIMS tree’s KEY agent is
++**`wims-key-agent`** (destinations from WIMS discovery).
++
++---
++
++## 0. Inhibit generators (same wire protocol)
++
++| Program | Role |
++|---------|------|
++| **inhibit-test** | Lab / bench: keyboard KEY → hold. Proves the gate and protocol. |
++| **inhibit-agent** | **This program.** Standalone KEY agent: USB-serial **CTS** → hold. Operator setup. |
++| **wims-key-agent** | WIMS KEY agent (WIMS tree). Same protocol; destinations from discovery. |
++
++All speak the same `NetworkMessage::TxInhibit` (type **18**) datagrams.
++
++**Name:** `inhibit-agent` (CLI) and `inhibit-agent-gui` (GUI). Linux and Windows.
++
++---
++
++## 1. Purpose
++
++Give **SSB/CW KEY priority over WSJT-X transmit** on a dual-radio station:
++
++1. Sense the SSB/CW **KEY** line on USB-serial **CTS**.
++2. While KEY is asserted, send **TX Inhibit hold** datagrams to the gate.
++3. On KEY release: **hang only for break-in CW**, then **release** (`ttl_ms: 0`).
++   Continuous KEY (SSB / PTT / non-break-in) releases **immediately**.
++   **No software PTT debounce** — the sense path is for **manual switches that
++   already debounce**.
++
++---
++
++## 2. Two forms
++
++| Form | Binary | Who | Required inputs |
++|------|--------|-----|-----------------|
++| **CLI** | `inhibit-agent` | Scripts, SSH, startup files | USB-serial **CTS** port and dest `host:port` |
++| **GUI** | `inhibit-agent-gui` | Operators | Dest **host:port** in the window (from InhibitStatus type 17 / tooltip). Shows **NEED GATE** until Apply; KEY is not armed before that. CTS port auto-picked or `--port`. |
++
++Keyboard KEY (grave / tilde) is **`inhibit-test`**, not this program.
++
++---
++
++## 2a. Bench the gate without a KEY dongle
++
++Use **`inhibit-test`** (grave / tilde). That is the keyboard KEY stand-in.
++
++`inhibit-agent` always needs a **CTS** source (USB-serial KEY line). A PTY does
++not provide CTS. To run WSJT-X with no radio so the gate still starts:
++
++- Rig **None**, PTT **RTS**, PTT port **`inhibit-sim`**, Enable TX Inhibit.
++
++---
++
++## 3. CLI (scripting)
++
++```text
++inhibit-agent --port /dev/ttyUSB0 --addr 127.0.0.1:51432
++inhibit-agent --port COM7 --addr 192.168.1.40:51432
++inhibit-agent COM7 192.168.1.40:51432
++inhibit-agent --port COM7 --addr 127.0.0.1:51432 --invert
++# Dest port = InhibitStatus (type 17) / WSJT-X status-bar tooltip (ephemeral).
++inhibit-agent --list-ports
++```
++
++| Flag | Default | Notes |
++|------|---------|--------|
++| `--port` / first positional | **required** | COM / tty device (CTS = KEY) |
++| `--addr` / second positional | **required** | `host:port` of the WSJT-X gate |
++| `--invert` | false | CTS polarity |
++| `--ttl-ms` | `600` | Wire lease TTL (not hang) |
++| `--controller-id` | `inhibit-agent` | Lease key (must be non-empty; unique per KEY source) |
++| `--station` | same as controller-id | Badge text |
++
++Stdout is timestamped `STATE` / `HOLD` / `RELEASE` / `SENSE FAULT` lines. Ctrl-C
++sends release then exits (fail-safe: if the process dies, gate deadman also
++clears).
++
++---
++
++## 4. GUI (operators)
++
++Double-click `inhibit-agent-gui` (Windows) or run it from the install `bin/`
++(Linux). It:
++
++1. Prefers a serial device whose USB strings look like **Keyline** / **WA1HCO**.
++2. Else uses the only non-builtin USB-serial port.
++3. **Gate** field is dest `host:port` from InhibitStatus (type 17) / tooltip. Apply to change.
++4. Shows **OPEN** / **INHIBITING** / **HANG** / **SENSE FAULT** in a large badge.
++
++Usual same-PC seat: leave Gate at localhost; only the CTS port is auto-picked.
++
++---
++
++## 5. Hang
++
++Same KEYing monitor as **inhibit-test** ([TX_INHIBIT.md](TX_INHIBIT.md) §3):
++
++- Break-in CW: hang = **1.5 × word gap** (10.5 × dit), clamp 315–1260 ms.
++- Continuous KEY / SSB: hang = **0**.
++
++Hang exists only so WSJT-X PTT does not follow CW dits.
++
++---
++
++## 6. Wire identity
++
++| Field | Default |
++|-------|---------|
++| Controller ID | `inhibit-agent` (override with `--controller-id`) |
++| Station | same as Controller ID (override with `--station`) |
++| Id (target) | empty = any instance at this port; non-empty must match instance Id |
++
++Controller ID is the lease key: another agent’s release cannot clear this agent’s
++hold. Station is badge text only. See [TX_INHIBIT.md](TX_INHIBIT.md) §4.
++
++---
++
++## 7. Fail-safe
++
++If the agent stops or the dongle disappears, keepalives stop. The gate deadman
++(~600 ms) opens. Prefer a brief unprotected window over a stuck inhibit.
++
++Wrong or missing COM is **SENSE FAULT**, never silent protection.
++
++**RTS/DTR stay idle.** This program only reads **CTS**. It never keys or
++inhibits via RTS. USB-serial drivers (and Qt) assert RTS+DTR on open, and
++restoring termios on close can leave RTS high with **no WSJT-X or WIMS
++running** — that keys a radio on Keyline J3. The agent forces RTS+DTR off
++immediately after open, keeps them off, disables hangup-on-close, and does
++not restore the driver’s default lines when it exits.
++
++Linux: ModemManager will open a new USB-serial and assert RTS. Ignore the
++Keyline with the udev rule in `tools/inhibit-agent/99-keyline-not-modem.rules`.
+diff -ruN wsjtx-baseline/docs/TX_INHIBIT.md wsjtx-work/docs/TX_INHIBIT.md
+--- a/docs/TX_INHIBIT.md	1969-12-31 19:00:00.000000000 -0500
++++ b/docs/TX_INHIBIT.md	2026-09-21 19:06:56.937663167 -0400
+@@ -0,0 +1,574 @@
++# TX Inhibit and KEY agent
++
++Design authority for this repository: how **wsjtx-inhibit** implements
++**TX Inhibit**, and how a **KEY agent** drives it.
++
++**Operators (install / KEY test):** [INSTALL.md](../INSTALL.md)  
++**Code map:** §7
++
++---
++
++## Glossary
++
++| Term | Meaning |
++|------|---------|
++| **WSJT-X station** | One digi position: this app + PC + network + radio + antenna (CAT/PTT). Multi-op has several. May be an unattended go-box, remote from the priority SSB/CW station and the KEY agent. |
++| **KEY agent** | Role: any process that sees the priority KEY and sends hold / keepalive / **release hold**. Not a binary name. |
++| **`inhibit-agent`** | Standalone KEY agent in this tree. Operator supplies the serial port and dest `host:port`. [INHIBIT_AGENT.md](INHIBIT_AGENT.md). |
++| **`wims-key-agent`** | WIMS KEY agent (WIMS tree, not this repo). Destinations come from WIMS discovery. |
++| **`inhibit-test`** | Bench KEY agent (keyboard). |
++| **TX Inhibit** | Product / feature name (Settings, badge, this build). |
++| **want_tx** | Software wants to transmit (FT8 sequence, “Enable Tx”, audio path). |
++| **hold** | One or more **leases** are live: KEY agent(s) have told this WSJT-X station to inhibit transmit. |
++| **lease** | Per-**Controller ID** expiring hold row. Hold = logical **OR** of live leases. |
++| **Controller ID** | Stable machine-readable lease owner (wire field). A sender may only refresh/release its own row. |
++| **assert PTT** / **release PTT** | Physical PTT line active / inactive (RTS/DTR as configured). Same pattern for KEY: **assert KEY** / **release KEY**. |
++| **release hold** | Explicit end of **this controller’s** lease: type-18 packet with TTL ms `0`. Normal end after agent hang. |
++| **hang** / anti-chatter (KEY agent only) | After last KEY open, how long break-in CW keeps renewing hold before **release hold**. **1.5 × word gap** at measured WPM (≥ 10 WPM). Non-break-in CW / SSB: hang **0** (release on KEY open). Not in the WSJT-X station; no wire field. |
++| **hold timeout** / lease TTL | **Safety** timer per lease: how long the station keeps that controller’s row without a refresh. Wire TTL ms (~500–600 ms); keepalives ~200 ms. Not hang; not CW speed. |
++| **deadman** | Agent stops without finishing hang and **release hold** (crash, kill, path loss). That controller’s lease then expires; hold ends when no leases remain. |
++| **TxInhibit module** | Code under `TxInhibit/` plus the pin filter in `HamlibTransceiver`. |
++
++**Core equation**
++
++```text
++assert PTT  ⇔  want_tx  and  not hold
++hold        ⇔  any live per-controller lease
++```
++
++The KEY agent **tells WSJT-X stations to inhibit transmit**; while a hold is active, the
++WSJT-X station will not **assert PTT** even if `want_tx` is true.
++
++**Two different timers — different purpose, different time scale**
++
++| Timer | Where | Purpose | Typical scale |
++|-------|--------|---------|----------------|
++| **Hang** (anti-chatter) | KEY agent (KEYing monitor) | Break-in CW: keep hold across gaps; EOT after KEY open **&gt; 1.5× word gap**. Non-break-in / SSB: hang 0, EOT on KEY open. | **1.5 × 7 dits** at measured WPM (see §3.4). |
++| **Lease TTL** | WSJT-X station only | Survive **loss of hold messages** for that controller. | **TTL ≈ 500–600 ms**; renew **~200 ms**. Independent of WPM. |
++
++These are not interchangeable. Hang is CW/operator policy. Lease TTL is
++UDP reliability / fail-open safety.
++
++**History vs current algorithm.** Early designs used one global hold (any
++release cleared everyone). The **current** algorithm keeps **per-controller
++leases** OR’d, and **explicitly ends** a controller’s lease with TTL `0`
++when agent hang finishes. Station lease TTL is only the safety path
++(including deadman).
++
++**Not the same as radio “TX Inhibit” menus.** Many rigs latch inhibit until
++PTT drops. Sequencing continues (unlike **Halt Tx**).
++
++Wire format: `NetworkMessage::TxInhibit` type **18** (§4). No hang field.
++
++---
++
++## 1. Roles
++
++| Role | Where | Job |
++|------|--------|-----|
++| **WSJT-X station** (wsjtx-inhibit) | App + PC + network + radio + antenna (may be remote go-box) | When TX Inhibit is enabled and PTT is RTS/DTR: apply the equation (when may this station **assert PTT**). |
++| **KEY agent** | Process that sees the priority radio’s KEY | While KEY is asserted (and during agent **hang** after **release KEY**), sends hold keepalives; when hang finishes, **releases hold** (`ttl_ms: 0`). |
++
++Any program that speaks §4 is a valid KEY agent. Two production programs and a bench stand-in:
++
++| Program | Tree | Setup |
++|---------|------|--------|
++| **`inhibit-agent`** / **`inhibit-agent-gui`** | this repo | Operator supplies USB-serial and dest `host:port`. [INHIBIT_AGENT.md](INHIBIT_AGENT.md). |
++| **`wims-key-agent`** | WIMS | Destinations from WIMS discovery. Spoken: “the WIMS KEY agent.” |
++| **`inhibit-test`**, `send_inhibit_hold.py` | this repo | Keyboard / scripted bench. |
++
++```text
++  Priority radio
++       │ KEY sense
++       ▼
++  ┌───────────┐     “inhibit transmit” / keepalive / release hold (UDP)
++  │ KEY agent │ ────────────────────────────────────────────────────┐
++  └───────────┘                                                     │
++                                                                    ▼
++  want_tx ──► │  TxInhibit filter  │ ── RTS/DTR ──► radio PTT
++              │  assert PTT ⇔        │
++              │    want_tx and not hold │
++              └────────────────────┘
++```
++
++The hold request is **UDP only**. Local CTS KEY on the WSJT-X station PTT dongle is
++**out of this build** (§5).
++
++---
++
++## 2. WSJT-X station behaviour (this program)
++
++A **WSJT-X station** is one digi position: this program, PC, network, radio, and antenna
++(CAT/PTT path). It may be unattended (e.g. a go-box) and remote from the priority
++SSB/CW station and the KEY agent host.
++
++- **Opt-in.** Settings → Radio → **Enable TX Inhibit**. Default **off**
++  (stock WSJT-X PTT). Requires **PTT method** = RTS or DTR.
++- **Sequencing and audio stay the same.** TX Inhibit only decides whether the
++  WSJT-X station may **assert PTT** when the KEY agent has said inhibit transmit.
++- **Equation:** `assert PTT ⇔ want_tx and not hold`.
++- **hold** is active while an unexpired **hold timeout** is set (KEY agent or
++  test tool).
++- Inhibit listen port: **always ephemeral** (OS-assigned IPv4). Announced in
++  status-bar tooltip and in **InhibitStatus** (type 17) on the UDP Server
++  stream. Controllers (WIMS KEY agent, or a discovery-capable agent) learn
++  `host:port` from type 17 — there is no fixed well-known port. Total bind
++  failure is **non-fatal**: CAT/PTT continue; hold requests are not received.
++- Status bar (red): **`INHIBIT`**. Tooltip may show holder / UDP listen port.
++
++### Setup summary
++
++1. **PTT method** = **RTS** or **DTR**.
++2. **PTT port** = real serial device (`COMx` / `/dev/ttyUSBx`), same COM as
++   CAT if shared, or a separate PTT adapter. List value **CAT** is OmniRig-style
++   proxy only — Hamlib still needs a real device name for RTS/DTR.  
++   If the device is missing from the list, type the full path. Set the port
++   **before** Enable.
++3. **Enable TX Inhibit** = checked. Available only when RTS/DTR is selected
++   **and** PTT port is set. Clear the port and Enable clears too.
++4. Wire RTS/DTR → radio PTT/SEND (or USB SEND / PC KEYING).
++5. **WARNING — turn radio VOX off.** TX Inhibit only gates the RTS/DTR PTT line.
++   If VOX is on, audio can still key the radio while the badge says **INHIBIT**.
++6. Point the KEY agent at this WSJT-X station **host:port from InhibitStatus**
++   (tooltip / type 17).
++
++### Shared USB CAT + RTS/DTR
++
++Many contest radios expose **one USB** with CAT on a virtual COM and
++**RTS/DTR** mappable to PTT. Shared COM is normal when Handshake is **None**
++and the radio maps the line to SEND/PTT (not flow control).
++
++**Implementation:** Hamlib owns the serial port (one fd for shared CAT+PTT).
++The TxInhibit module does **not** open a second serial handle. It only
++filters whether `do_ptt` may **assert PTT**.
++
++Also common: CAT-only PTT (not filtered by TX Inhibit), or a second keyline
++path when several apps share the station.
++
++#### Brands (USB RTS/DTR → radio PTT?)
++
++| Brand | USB RTS/DTR can key TX? | Notes |
++|-------|-------------------------|--------|
++| **Icom** (7300, 7610, 705, …) | **Yes** | **USB SEND** = RTS or DTR (PTT). |
++| **Elecraft** (K3S, K4, …) | **Yes** | USB RTS/DTR → PTT / KEY / FSK. |
++| **Yaesu** (FTDX10, FT-710, …) | **Yes (usual)** | **PC KEYING** = RTS/DTR; CAT RTS handshake **OFF**. |
++| **Kenwood** (TS-590SG, …) | **Usually no on built-in USB** | Hardware PTT often ACC; external USB-serial common. |
++| **FlexRadio** | **Not classic USB SEND** | Virtual COM / SmartSDR models differ. |
++
++#### Common setup problems
++
++| Symptom | Cause | Try |
++|---------|--------|-----|
++| Flaky CAT / stuck TX | RTS used as handshake | Handshake **None**; radio SEND not flow control |
++| Keys on port open | Polarity / forced DTR-RTS | Check logger forced lines; try other modem line |
++| Keys with no WSJT-X / WIMS | USB-serial default RTS (open/close or ModemManager) | `inhibit-agent` now forces RTS+DTR idle; Linux udev: `tools/inhibit-agent/99-keyline-not-modem.rules` |
++| “Worked yesterday” | Another app owns COM | One owner; restart after other apps close |
++| Test PTT OK, no RF | Often audio/mode | DATA mode, levels, power meter |
++| CW key instead of PTT | Icom USB Keying vs USB SEND | PTT → **USB SEND** |
++| Port-open TX blip | Driver toggles DTR/RTS | Known with some USB-serial chips |
++| Multi-app contest mess | Two apps key same lines | Logger digi / port-handoff rules |
++| “TX Inhibit never stops PTT” | CAT-only PTT, or feature off | **Enable TX Inhibit** + RTS/DTR |
++
++#### WSJT-X station options
++
++| Option | Notes |
++|--------|--------|
++| Same USB COM for CAT + RTS/DTR | Supported when menus match checklist |
++| Separate USB-serial for PTT | Fine |
++| CAT PTT only | Not filtered — use RTS/DTR for TX Inhibit |
++| Kenwood / Flex | Plan external keyline or Flex’s model |
++
++**Shared-cable checklist**
++
++1. Handshake **None**.  
++2. Radio: line = USB SEND / PC KEYING / PTT, not flow control.  
++3. **PTT method** = RTS or DTR.  
++4. **PTT port** = same real COM as CAT (not list value “CAT”).  
++5. **Enable TX Inhibit** checked (only after port is set).  
++6. One program owns the modem lines.  
++7. Confirm with **Test PTT** and RF/ALC, not only “CAT green.”
++
++---
++
++## 3. KEY agent
++
++The KEY agent reads the priority **KEY** line and runs **two parallel state
++machines** that meet only at **end of transmission**.
++
++| State machine | On KEY assert (start) | Ongoing | End of transmission |
++|---------------|----------------------|---------|---------------------|
++| **Hold sender** | Send **hold** immediately with `ttl_ms` = **hold_timeout_ms** (~500–600 ms safety window) | **Keepalives** ~every 200 ms while hold is active | On signal from KEYing monitor: send **release hold** (`ttl_ms: 0`) |
++| **KEYing monitor** | Start KEY timing assessment | Classify break-in CW vs continuous KEY (non-break-in CW / SSB); measure CW speed if break-in | Decide **when** the KEY sequence is over; signal Hold sender to release |
++
++Hold sender does **not** guess CW. KEYing monitor does **not** send UDP.
++Only Hold sender emits packets; only KEYing monitor decides release timing.
++
++### 3.1 Two timers (again): hang vs hold timeout
++
++| | **Hang (anti-chatter)** | **Hold timeout (safety)** |
++|--|-------------------------|---------------------------|
++| Owner | KEY agent (KEYing monitor) | WSJT-X station (from each hold packet) |
++| Purpose | CW **break-in**: keep hold across element/letter gaps so co-band PTT does not chatter | Survive **lost hold UDP**; fail-open if agent dies |
++| Sized by | **1.5 × word gap** at measured CW speed (≥ 10 WPM) | Keepalive period + margin (**~500–600 ms**); renew **~200 ms** |
++| On wire | No | Yes: `ttl_ms` = `hold_timeout_ms` |
++| End of hold | Monitor says EOT → Hold sender sends `ttl_ms: 0` | No packet before timeout |
++
++Do **not** size hang from hold timeout, or hold timeout from WPM.
++
++### 3.2 KEY classes and when transmission ends
++
++| KEY class | What KEY looks like | Hang after KEY open | End of transmission (EOT) |
++|-----------|---------------------|---------------------|---------------------------|
++| **Break-in CW** | KEY opens between dits/dahs (element / letter gaps visible) | **1.5 × word gap** at measured WPM (WPM from 10 upward) | KEY stays **open** longer than hang (i.e. longer than 1.5× word gap) |
++| **Non-break-in CW** | KEY continuous for whole send (no gaps on KEY sense) | **0** | **Immediately** on **release KEY** |
++| **SSB** (and similar) | KEY continuous for whole send | **0** | **Immediately** on **release KEY** |
++
++KEYing monitor classifies the stream, then uses that class for EOT. On EOT it
++signals Hold sender → **release hold** (`ttl_ms: 0`). That packet may fire
++**before** the first keepalive would have been scheduled (short continuous KEY).
++
++### 3.3 Morse timing baseline (Paris)
++
++| Quantity | Units (dits) | Time at W WPM |
++|----------|--------------|---------------|
++| Dit | 1 | \(T_\mathrm{dit} = 1200 / W\) ms |
++| Dah | 3 | \(3\,T_\mathrm{dit}\) |
++| Element gap (dit–dah inside a letter) | 1 | \(T_\mathrm{dit}\) |
++| Letter gap | 3 | \(3\,T_\mathrm{dit}\) |
++| **Word gap** | **7** | \(7\,T_\mathrm{dit}\) |
++| **Hang (break-in)** | **1.5 × word gap = 10.5** | \(1.5 \times 7\,T_\mathrm{dit} = 10.5\,T_\mathrm{dit}\) |
++
++### 3.4 Timelines by WPM — break-in vs non-break-in
++
++#### Morse unit times and hang (break-in)
++
++| WPM | Dit (ms) | Element gap (ms) | Letter gap (ms) | Word gap (ms) | Hang = 1.5× word gap (ms) |
++|-----|----------|------------------|-----------------|---------------|---------------------------|
++| 10 | 120 | 120 | 360 | 840 | **1260** |
++| 20 | 60 | 60 | 180 | 420 | **630** |
++| 30 | 40 | 40 | 120 | 280 | **420** |
++| 40 | 30 | 30 | 90 | 210 | **315** |
++
++Compare to **hold timeout ~500–600 ms** and **keepalive ~200 ms** (fixed safety
++path, same at all WPM): hang at 10–20 WPM is **longer** than one hold timeout;
++at 30–40 WPM hang is **shorter**. That is fine — keepalives re-arm hold timeout
++during hang; hang is not the safety timer.
++
++#### Break-in CW — example KEY open/close pattern
++
++```text
++  KEY:  █ █   █ █ █     █ …     (dits/dahs; opens between elements)
++  hold: |---- active, keepalives every ~200 ms ----|
++  on open longer than hang (1.5× word gap) → release hold (ttl_ms: 0)
++```
++
++#### Non-break-in CW / SSB — continuous KEY
++
++```text
++  KEY:  ████████████████████████    (no opens until the operator is done)
++  hold: |-- active --|
++  on first KEY open → hang = 0 → release hold (ttl_ms: 0) immediately
++```
++
++#### Hold active duration (from first KEY assert to release hold)
++
++**Break-in CW** (hang after last element):
++
++| Content (approx. Morse units) | 10 WPM | 20 WPM | 30 WPM | 40 WPM | Then hang (1.5× word) |
++|-------------------------------|--------|--------|--------|--------|------------------------|
++| Min assess **A** / **N** (5 u) | 0.60 s | 0.30 s | 0.20 s | 0.15 s | + hang table above |
++| **QRZ** (37 u) | 4.44 s | 2.22 s | 1.48 s | 1.11 s | + hang |
++| **THANK YOU** (85 u) | 10.2 s | 5.10 s | 3.40 s | 2.55 s | + hang |
++
++Hold stays up for **message time + hang**, then **`ttl_ms: 0`**.
++
++**Non-break-in CW / SSB** (same RF duration if continuous KEY for whole text):
++
++| Content | KEY-down duration (same unit totals if continuous) | Hang | Release |
++|---------|-----------------------------------------------------|------|---------|
++| As short as **QRZ** (~1.1–4.4 s by WPM if it were Morse-length) | One continuous KEY of that length (or whatever the operator holds) | **0** | On KEY open: **`ttl_ms: 0` immediately** |
++| **thank you** (~2.6–10 s Morse-equivalent if continuous) | Continuous KEY | **0** | Immediate **`ttl_ms: 0`** |
++
++### 3.5 Assessing KEY type and CW speed
++
++KEYing monitor runs **in parallel** with Hold sender (hold is already on).
++
++**Break-in CW assessment** needs visible structure:
++
++| Need to observe | Why |
++|-----------------|-----|
++| At least one **dit** | Short mark |
++| At least one **dah** | Long mark (~3× dit) |
++| At least one **element gap** (KEY open ~1 dit while still in character) | Proves break-in (gaps exist) |
++
++Minimum Morse pattern with dit + gap + dah: **A** (`·-`) or **N** (`-·`) = **5** dit units.
++
++| WPM | Max time to first assess-ready (5 units) |
++|-----|------------------------------------------|
++| 10 | **600 ms** |
++| 20 | **300 ms** |
++| 30 | **200 ms** |
++| 40 | **150 ms** |
++
++That is well under a full **QRZ** or **thank you**, and under the first
++keepalive interval in the slowest case only at 10 WPM (600 ms vs 200 ms
++keepalive — assessment can finish after a few keepalives; hold was already
++sent at t = 0).
++
++**Non-break-in CW / SSB:** KEY has **no gaps** until the end. Monitor never
++sees element gaps → classify continuous → hang = 0 → EOT on first KEY open.
++
++#### Distinguishability (QRZ … thank you)
++
++| Observation during a short call | Break-in CW | Non-break-in CW / SSB |
++|--------------------------------|-------------|------------------------|
++| KEY opens of ~1–3 dits **during** the send | Yes (many) | **No** |
++| KEY open ≥ hang (1.5× word gap) **before** EOT | No (that *is* EOT) | First open **is** EOT |
++| Continuous KEY for entire “QRZ” / “thank you” | No | Yes |
++
++Even **QRZ** at 40 WPM (~1.1 s of Morse structure) contains many element and
++letter gaps — clearly break-in. A continuous KEY of similar length with **zero**
++internal opens is clearly non-break-in / SSB. No reliance on hold timeout for
++this classification.
++
++### 3.6 Hold sender ↔ KEYing monitor (including race rules)
++
++```text
++  KEY assert
++      │
++      ├─► Hold sender:  send hold (ttl_ms = hold_timeout_ms) immediately
++      │                 schedule keepalives ~200 ms while hold_active
++      │
++      └─► KEYing monitor: sample KEY edges; classify; measure WPM if break-in
++                          decide EOT (hang rules above)
++                                │
++                                ▼
++                          signal Hold sender: END_HOLD
++                                │
++                                ▼
++                          Hold sender: stop keepalives, then send ttl_ms: 0
++```
++
++**Release may precede the first keepalive.** Example: non-break-in KEY down
++50 ms then up → hold at t = 0, release hold at t ≈ 50 ms; no keepalive sent.
++
++**No race between keepalive and `ttl_ms: 0`:**
++
++1. **Single sender path** — one goroutine/thread/queue owns all UDP hold
++   packets (keepalive and release).
++2. On **END_HOLD**: set `hold_active = false`, **cancel** pending keepalive
++   timer/work, **then** enqueue **release hold** (`ttl_ms: 0`).
++3. Keepalive loop must check `hold_active` **before** each send; after
++   END_HOLD, no further `ttl_ms > 0` packets.
++4. Optional belt-and-suspenders: ignore keepalives after a local release
++   generation counter increments.
++
++Never “fire keepalive and release concurrently” on two threads without
++ordering. A late keepalive after `ttl_ms: 0` would re-arm the WSJT-X station
++hold timeout and look like a stuck hold.
++
++### 3.7 Agent inputs
++
++| Input | Notes |
++|-------|--------|
++| USB-serial **CTS** (or other pin) | KEY → interface → CTS; event-driven if possible |
++| GPIO / other | Agent-specific |
++| Manual / test | Grave/backtick **`** KEY — `inhibit-test` / `tools/send_inhibit_hold.py --interactive` |
++
++Debounce and **hang** (anti-chatter) live in the agent. The WSJT-X station applies only
++**hold timeout** (safety) so a **deadman** cannot leave a hold stuck forever.
++
++### 3.8 Targets
++
++```text
++host:port   e.g.  192.168.1.40:51432   (port from InhibitStatus type 17)
++```
++
++Unicast UDP is enough for small multi-op. Each WSJT-X station binds its own
++ephemeral inhibit port and parses independently. WIMS builds the short
++destination list (typically ≤3 digi seats on the same band) from type 17.
++The gate does not know about bands or fleets.
++
++Multiple agents → same WSJT-X station: **one lease per Controller ID**, combined with
++logical **OR**. A release clears **only that controller’s** lease.
++
++---
++
++## 4. UDP protocol (WSJT-X station ↔ agent)
++
++**Transport:** UDP, `NetworkMessage` / `QDataStream` (schema 3), max **512** bytes.  
++**Port:** **ephemeral** (WSJT-X station binds; agent sends to the port from type 17).  
++**Type:** `NetworkMessage::TxInhibit` = **18** (inbound). Outbound announce/telemetry is
++`InhibitStatus` = **17** on the normal UDP Server path (unicast or multicast).
++
++**InhibitStatus cadence:** type **17** is sent when the hold level or badge text
++changes, when the inhibit listen port binds or clears (Enable TX Inhibit apply /
++rig close), and **periodically every `NetworkMessage::pulse` seconds (15 s)**
++while TX Inhibit stays enabled. Counter-only updates (keepalives, invalids)
++appear on the next pulse or the next level/badge change. Type 17 is how
++controllers learn `inhibit_port`. Holds still go **unicast** to that
++`host:port` — type 17 is discovery and triage, not the hold path.
++
++Common header (all NetworkMessage types): magic `0xadbccbda`, schema, type, Id (utf8).
++
++| Field | Type | Required | Meaning |
++|-------|------|----------|---------|
++| Id (target) | utf8 | yes (may be empty) | Target WSJT-X instance key. **Empty** = any instance at this UDP address/port. **Non-empty** must match this instance’s Id or the datagram is ignored. |
++| Controller ID | utf8 | yes, **non-empty** | Lease key. Sender may only refresh/release this row. |
++| TTL ms | quint32 | yes | Lease lifetime from receipt, or **0** = release **this** controller. Non-zero: 100…30000. Not agent hang. |
++| Station | utf8 | recommended | Badge (`held by …`); human-readable. |
++
++### Hold (and keepalive — same shape)
++
++Nonzero TTL upserts that Controller ID’s lease to `now + TTL`. Keepalives are the
++same message; they refresh the lease while KEY is asserted or agent hang is running.
++
++### Release hold (normal end)
++
++TTL **0** deletes **only that** Controller ID’s lease. Sent when agent hang finishes
++after **release KEY** (or on operator quit). **This is how a healthy agent ends its
++lease.** Do not rely on station timeout as the normal path.
++
++### Hold / deadman
++
++If no refresh arrives before a lease’s TTL, that row expires. Hold ends when **no**
++leases remain. That is the deadman path for agent crash / path loss.
++
++### Invalid packets
++
++Bad magic/schema, wrong type, empty Controller ID, bad TTL, short/oversize, stream
++error: **ignored** (counted as invalid). Legacy JSON is not accepted.
++
++### 4.1 Trust model — read this before exposing the port
++
++**There is no authentication.** The station binds `0.0.0.0:<ephemeral>` and accepts a
++hold from any host that can reach that port. That is deliberate for a small trusted
++multi-op LAN, where the alternative (keys, pairing, config) buys nothing against the
++actual threat.
++
++**What an attacker can do:** stop you transmitting. Sustained suppression needs
++sustained packets — a single lease lasts at most its TTL (30 s ceiling, ~600 ms in
++practice), so the effect decays as soon as the packets stop.
++
++**What an attacker cannot do: make you transmit.** The protocol has no packet that
++causes emission. Every message either starts, refreshes, or ends a *suppression*. The
++worst outcome is a station that will not key — inconvenient, and safe in the direction
++that matters for an unattended transmitter.
++
++**Operator guidance:**
++
++| Situation | Do |
++|---|---|
++| Agent on the same PC | Nothing. Loopback is not reachable from outside. |
++| Agent on your LAN | Allow inbound UDP to the announced inhibit ports on the **private** profile only (ports change per launch). |
++| Station reachable from the internet | **Do not forward** the inhibit listen ports. |
++| Shared or untrusted network | Treat "someone can stop my TX" as a real possibility. |
++
++**Id filtering:** non-empty type-18 Id must match this instance. Targeting is still by
++unicast destination list managed outside the gate (WIMS from type 17, or local config).
++
++---
++
++## 5. Local CTS KEY — not in this build
++
++**Decision:** no CTS in the WSJT-X station binary. **UDP hold only** + RTS/DTR PTT.
++
++**Why:** floating/driven CTS caused intermittent false hold. Worse than
++requiring a KEY agent (or the `inhibit-test` helper) on UDP.
++
++Until CTS is opt-in and safe: KEY agent → UDP, or localhost helper.
++
++---
++
++## 6. Testing locally
++
++Enable TX Inhibit, RTS/DTR on a real serial port, read the bound port from the
++status-bar tooltip (or InhibitStatus type 17), then send the same UDP a KEY
++agent would to that **host:port**. Expect red **INHIBIT**; WSJT-X station
++does not **assert PTT** while hold is active.
++
++### KEY agent programs (`inhibit-agent`, `wims-key-agent`, `inhibit-test`)
++
++| Binary | Tree | Notes |
++|--------|------|--------|
++| **`inhibit-agent`** | this repo | Standalone CLI. CTS KEY `--port` + dest `--addr host:port` (**port from type 17 / tooltip**). |
++| **`inhibit-agent-gui`** | this repo | CTS KEY; dest `host:port` in the window (must match announced port). |
++| **`wims-key-agent`** | WIMS | Same role; destinations from WIMS discovery (type 17). Not shipped here. |
++| **`inhibit-test`** | this repo | Keyboard KEY stand-in; requires `--port`. |
++
++```text
++inhibit-agent --port /dev/ttyUSB0 --addr 127.0.0.1:51432
++inhibit-agent COM7 192.168.1.40:51432
++inhibit-agent-gui
++```
++
++Design: [INHIBIT_AGENT.md](INHIBIT_AGENT.md).
++
++`inhibit-test` implements §3 (Hold sender + KEYing monitor) from the keyboard:
++
++| Action | Effect |
++|--------|--------|
++| **` (grave) down** | **assert KEY** → hold (`ttl_ms`=hold_timeout) + keepalives |
++| **` up** | KEY open → hang per §3.2, then **release hold** (`ttl_ms: 0`) after hang |
++| **`~` (shift+grave)** | **Latch on** — hold stays asserted after key release, so the keyboard is free to drive WSJT-X. Reads as continuous KEY (hang 0). Press `` ` `` or `~` again to clear; `` ` `` always clears the latch. |
++| **q** / **Esc** | cancel keepalives, **release hold**, quit |
++
++**KEY key is grave/backtick `` ` ``** (left of `1` on US keyboards) — **not Space**.
++Unshifted `` ` `` is momentary; **`~` (shifted) latches** the hold on until either key
++is pressed again.
++
++Hang policy (default): break-in **1.5× word gap** from measured dit; continuous
++KEY (long mark ≥500 ms) **hang = 0**. Override: `--fixed-hang-ms`.
++
++```text
++inhibit-test --host 127.0.0.1 --port 51432 --station TEST-KEY --ttl-ms 600
++inhibit-test --fixed-hang-ms 0
++```
++
++`--port` must be the value announced in InhibitStatus / the status-bar tooltip.
++
++**Input focus:** default = this terminal only (`--global-keys` = system-wide).
++**Linux:** group `input` required for `/dev/input`; without it **`inhibit-test`
++refuses to start**.
++
++**Digi RF checks:** hold `` ` `` ≥500 ms (continuous, hang 0) or fixed hang 0.
++
++### Python: `tools/send_inhibit_hold.py`
++
++```bash
++python3 tools/send_inhibit_hold.py --interactive
++python3 tools/send_inhibit_hold.py --ttl-ms 3000 --station TEST
++python3 tools/send_inhibit_hold.py --ttl-ms 0
++```
++
++Operator checklist: [INSTALL.md §6](../INSTALL.md#6-test-tx-inhibit-with-the-key-helper-inhibit-test).
++
++---
++
++## 7. Code map
++
++| Piece | Location |
++|-------|----------|
++| Parse, hold timeout, badge, counters (pure) | `TxInhibit/TxInhibitLogic.hpp` |
++| UDP listen, hold timeout, want_tx mix | `TxInhibit/TxInhibitGate.{hpp,cpp}` (no serial) |
++| Pin filter: `do_ptt` → want_tx → assert PTT / release PTT | `Transceiver/HamlibTransceiver.cpp` |
++| Settings **Enable TX Inhibit** + signals | `Configuration.{hpp,cpp,ui}` |
++| Status badge + `InhibitStatus` | `widgets/mainwindow.cpp` |
++| MessageClient type 17 | `Network/NetworkMessage.hpp`, `MessageClient` |
++| KEY-agent stand-in | **`inhibit-test`** (`tools/inhibit-test/`); `send_inhibit_hold.py` |
++
++**Maintainer notes (algorithm)**
++
++- Hamlib alone owns serial/CAT and may **assert PTT** / **release PTT** (RTS/DTR).
++  TxInhibit never opens a second serial handle.
++- With TX Inhibit active, software PTT state follows **want_tx**, not the pin
++  reading (poll must not treat “**release PTT** while hold” as “not want_tx”).
++- Normal hold end is **release hold** (`ttl_ms: 0`) after agent hang.
++  Fail-open: a **deadman** still ends via the WSJT-X station **hold timeout**.
++- Agent **hang** is not implemented in the WSJT-X station; WSJT-X station only has **hold timeout**.
++- UDP bind failure is logged and non-fatal; stock PTT continues.
++- Bind that yields port 0 is treated as failure. Type 17 never publishes
++  port 0 as a live KEY-agent target (WIMS rejects port 0). Port 0 in type 17
++  is only the disable/clear announce.
++- Identifier names in code may still say gate/hold/block/intent; align in a
++  later code pass. This document is the language target.
+diff -ruN wsjtx-baseline/Network/NetworkMessage.hpp wsjtx-work/Network/NetworkMessage.hpp
+--- a/Network/NetworkMessage.hpp	2026-08-13 04:06:02.000000000 -0400
++++ b/Network/NetworkMessage.hpp	2026-09-21 19:05:08.165896900 -0400
+@@ -542,15 +542,37 @@
+  *                         Expiries               quint32
+  *                         Invalid                quint32
+  *
+- *      Optional telemetry when TX Inhibit is enabled (Settings → Radio)
+- *      and the WSJT-X station block level or badge text changes. KEY-agent UDP
+- *      protocol is separate; see docs/TX_INHIBIT.md.
++ *      Optional telemetry when TX Inhibit is enabled (Settings → Radio).
++ *      Emitted on hold-level or badge-text changes, when the inhibit
++ *      listen port binds or clears, and periodically every
++ *      NetworkMessage::pulse seconds while the feature remains enabled
++ *      (same cadence as Heartbeat) so late joiners learn the inhibit
++ *      port. Counter-only bumps wait for the next pulse or level/badge
++ *      change. Travels on the configured UDP Server path (unicast or
++ *      multicast).
+  *
+- *      Inhibit port: UDP listen port for KEY-agent blocks (usually 22372;
+- *      may be ephemeral). Inhibited: block active. Source station: badge
+- *      text (may be empty). Four quint32 counters: hold packets received,
+- *      explicit release hold, hold timeout expiries (incl. after a deadman),
+- *      invalid datagrams (field names hold_rx etc. are historical wire labels).
++ *      Inhibit port: OS-assigned ephemeral UDP listen port for KEY-agent
++ *      holds. Zero means not listening (disable/clear only). A live
++ *      announce never uses 0; controllers must ignore port 0 as a
++ *      target. Inhibited: any per-controller lease active. Source
++ *      station: badge text (may list multiple holders). Four quint32
++ *      counters: hold packets received, explicit release hold, hold
++ *      timeout expiries (incl. after a deadman), invalid datagrams.
++ *
++ * TxInhibit      In       18
++ *                         Id (target unique key) utf8
++ *                         Controller ID          utf8
++ *                         TTL ms                 quint32
++ *                         Station                utf8
++ *
++ *      KEY-agent / controller hold command. Nonzero TTL creates or
++ *      refreshes that controller's lease; zero TTL releases only that
++ *      controller's lease. Hold is the logical OR of live leases.
++ *      Controller ID must be non-empty. Station is human badge text.
++ *      Empty Id matches any instance at this UDP address/port; a
++ *      non-empty Id must equal this instance's NetworkMessage Id or
++ *      the datagram is ignored. Controllers learn the listen port from
++ *      InhibitStatus (type 17). See docs/TX_INHIBIT.md.
+  *
+  *      Unknown types are ignored; schema number unchanged.
+  */
+@@ -586,6 +608,7 @@
+       Configure,
+       AnnotationInfo,
+       InhibitStatus,            // Out 17 — see protocol comment above
++      TxInhibit,                // In  18 — see protocol comment above
+       maximum_message_type_     // ONLY add new message types
+                                 // immediately before here
+     };
+diff -ruN wsjtx-baseline/tests/CMakeLists.txt wsjtx-work/tests/CMakeLists.txt
+--- a/tests/CMakeLists.txt	2026-08-13 03:42:09.000000000 -0400
++++ b/tests/CMakeLists.txt	2026-09-21 19:06:56.938663155 -0400
+@@ -26,6 +26,13 @@
+ target_link_libraries (test_tx_inhibit_logic wsjt_qt Qt5::Test Qt5::Network)
+ add_test (test_tx_inhibit_logic test_tx_inhibit_logic)
+ 
++add_executable (test_keying_monitor
++  ${CMAKE_SOURCE_DIR}/tools/inhibit-agent/test_keying_monitor.cpp)
++target_include_directories (test_keying_monitor PRIVATE
++  ${CMAKE_SOURCE_DIR}/tools/inhibit-agent)
++target_link_libraries (test_keying_monitor Qt5::Core)
++add_test (test_keying_monitor test_keying_monitor)
++
+ # Logger.cpp is compiled into the wsjtx app, not wsjt_qt, but archive
+ # members this test drags in (Configuration -> FileDownload on MinGW)
+ # reference the sys/data global loggers it defines.
+diff -ruN wsjtx-baseline/tests/test_tx_inhibit_gate.cpp wsjtx-work/tests/test_tx_inhibit_gate.cpp
+--- a/tests/test_tx_inhibit_gate.cpp	2026-08-13 03:42:09.000000000 -0400
++++ b/tests/test_tx_inhibit_gate.cpp	2026-09-21 19:42:22.864492443 -0400
+@@ -14,6 +14,7 @@
+ 
+ #include <QtTest>
+ 
++#include <QByteArray>
+ #include <QHostAddress>
+ #include <QSignalSpy>
+ #include <QUdpSocket>
+@@ -23,11 +24,12 @@
+ 
+ namespace
+ {
+-  QByteArray hold_packet (int ttl_ms, char const * station = "TEST")
++  QByteArray hold_packet (int ttl_ms, char const * station = "TEST"
++                          , char const * controller = "test-agent")
+   {
+-    return QByteArray {"{\"tx_inhibit\":1,\"ttl_ms\":"}
+-      + QByteArray::number (ttl_ms)
+-      + ",\"station\":\"" + station + "\"}";
++    return TxInhibit::build_datagram (QString::fromUtf8 (controller)
++                                      , static_cast<quint32> (ttl_ms)
++                                      , QString::fromUtf8 (station));
+   }
+ }
+ 
+@@ -38,6 +40,45 @@
+ 
+ private slots:
+ 
++  // bind(0) must never advertise port 0. Controllers drop type-17 port 0, so
++  // portBound(0) leaves the KEY-agent target list empty.
++  void bindNeverAnnouncesPortZero ()
++  {
++    TxInhibitGate gate;
++    QSignalSpy bound {&gate, &TxInhibitGate::portBound};
++    QSignalSpy err {&gate, &TxInhibitGate::lineError};
++
++    gate.start_listening ();
++    if (bound.count () == 1)
++      {
++        auto const port = bound.at (0).at (0).value<quint16> ();
++        QVERIFY2 (port != 0, "portBound must not advertise port 0");
++        QCOMPARE (err.count (), 0);
++      }
++    else
++      {
++        QCOMPARE (bound.count (), 0);
++        QCOMPARE (err.count (), 1);
++      }
++    gate.shutdown (false);
++  }
++
++  // Operator test hook: force arming failure without a real OS bind fault.
++  void forceBindFailEmitsLineErrorOnly ()
++  {
++    qputenv ("WSJTX_TX_INHIBIT_FORCE_BIND_FAIL", QByteArray {"1"});
++    TxInhibitGate gate;
++    QSignalSpy bound {&gate, &TxInhibitGate::portBound};
++    QSignalSpy err {&gate, &TxInhibitGate::lineError};
++
++    gate.start_listening ();
++    QCOMPARE (bound.count (), 0);
++    QCOMPARE (err.count (), 1);
++    QVERIFY (err.at (0).at (0).toString ().contains (QStringLiteral ("forced bind failure")));
++    gate.shutdown (false);
++    qunsetenv ("WSJTX_TX_INHIBIT_FORCE_BIND_FAIL");
++  }
++
+   // The core equation, end to end: assert PTT <=> want_tx and not hold.
+   // Crucially, want_tx never changes here -- only the hold does. That is the
+   // whole point of the feature, and the thing a careless refactor breaks.
+diff -ruN wsjtx-baseline/tests/test_tx_inhibit_logic.cpp wsjtx-work/tests/test_tx_inhibit_logic.cpp
+--- a/tests/test_tx_inhibit_logic.cpp	2026-08-13 03:42:09.000000000 -0400
++++ b/tests/test_tx_inhibit_logic.cpp	2026-09-21 19:06:56.938663155 -0400
+@@ -2,6 +2,16 @@
+ 
+ #include "TxInhibit/TxInhibitLogic.hpp"
+ 
++namespace
++{
++  QByteArray hold (char const * controller, int ttl_ms, char const * station = "")
++  {
++    return TxInhibit::build_datagram (QString::fromUtf8 (controller)
++                                      , static_cast<quint32> (ttl_ms)
++                                      , QString::fromUtf8 (station));
++  }
++}
++
+ class TestTxInhibitLogic : public QObject
+ {
+   Q_OBJECT
+@@ -14,51 +24,121 @@
+     QVERIFY (g.radiate (true, t));
+     QVERIFY (!g.radiate (false, t));
+ 
+-    // Hold for 500 ms
+-    QByteArray hold = R"({"tx_inhibit":1,"ttl_ms":500,"station":"TEST","seq":1})";
+-    QVERIFY (g.on_datagram (hold, t));
++    QVERIFY (g.on_datagram (hold ("A", 500, "TEST"), t));
+     QVERIFY (g.line_inhibited (t));
+     QVERIFY (!g.radiate (true, t));
+     QVERIFY (!g.radiate (false, t));
+ 
+-    // After hold timeout: free again
+     QVERIFY (!g.line_inhibited (t + 501));
+     QVERIFY (g.radiate (true, t + 501));
+     QCOMPARE (g.expiries (), 1u);
+   }
+ 
+-  void releaseClearsHold ()
++  void releaseClearsOwnHold ()
+   {
+     TxInhibit::GateLogic g;
+     qint64 t = 2000000;
+-    QByteArray hold = R"({"tx_inhibit":1,"ttl_ms":1000,"station":"KEY","seq":2})";
+-    QVERIFY (g.on_datagram (hold, t));
++    QVERIFY (g.on_datagram (hold ("KEY", 1000, "KEY"), t));
+     QVERIFY (!g.radiate (true, t));
+ 
+-    QByteArray rel = R"({"tx_inhibit":1,"ttl_ms":0,"station":"KEY","seq":3})";
+-    QVERIFY (g.on_datagram (rel, t + 10));
++    QVERIFY (g.on_datagram (hold ("KEY", 0, "KEY"), t + 10));
+     QVERIFY (g.radiate (true, t + 10));
+     QCOMPARE (g.hold_rx (), 1u);
+     QCOMPARE (g.release_rx (), 1u);
+   }
+ 
+-  void invalidProtocolVersionIgnored ()
++  void otherControllerCannotRelease ()
++  {
++    TxInhibit::GateLogic g;
++    qint64 t = 2500000;
++    QVERIFY (g.on_datagram (hold ("A", 1000, "SSB"), t));
++    QVERIFY (!g.on_datagram (hold ("B", 0, "CW"), t + 1)); // still held by A
++    QVERIFY (g.line_inhibited (t + 1));
++    QCOMPARE (g.lease_count (t + 1), 1);
++    QCOMPARE (g.release_rx (), 1u);
++  }
++
++  void targetIdEmptyMatchesAny ()
++  {
++    TxInhibit::GateLogic g;
++    g.set_instance_id (QStringLiteral ("WSJT-X - 144"));
++    qint64 t = 2800000;
++    // empty Id in hold() helper
++    QVERIFY (g.on_datagram (hold ("A", 500, "SSB"), t));
++    QVERIFY (g.line_inhibited (t));
++  }
++
++  void targetIdMismatchIgnored ()
++  {
++    TxInhibit::GateLogic g;
++    g.set_instance_id (QStringLiteral ("WSJT-X - 144"));
++    qint64 t = 2900000;
++    auto pkt = TxInhibit::build_datagram (QStringLiteral ("A"), 500
++                                          , QStringLiteral ("SSB")
++                                          , QStringLiteral ("WSJT-X - 50"));
++    QVERIFY (!g.on_datagram (pkt, t));
++    QVERIFY (!g.line_inhibited (t));
++    QCOMPARE (g.invalid (), 1u);
++  }
++
++  void targetIdMatchAccepted ()
++  {
++    TxInhibit::GateLogic g;
++    g.set_instance_id (QStringLiteral ("WSJT-X - 144"));
++    qint64 t = 3000000;
++    auto pkt = TxInhibit::build_datagram (QStringLiteral ("A"), 500
++                                          , QStringLiteral ("SSB")
++                                          , QStringLiteral ("WSJT-X - 144"));
++    QVERIFY (g.on_datagram (pkt, t));
++    QVERIFY (g.line_inhibited (t));
++  }
++
++  void multiControllerOr ()
++  {
++    TxInhibit::GateLogic g;
++    qint64 t = 2600000;
++    QVERIFY (g.on_datagram (hold ("A", 1000, "SSB"), t));
++    QVERIFY (!g.on_datagram (hold ("B", 1000, "CW"), t + 1)); // still held
++    QCOMPARE (g.lease_count (t + 1), 2);
++    QVERIFY (!g.on_datagram (hold ("A", 0), t + 2)); // B still holding
++    QVERIFY (g.line_inhibited (t + 2));
++    QCOMPARE (g.lease_count (t + 2), 1);
++    QVERIFY (g.on_datagram (hold ("B", 0), t + 3));
++    QVERIFY (!g.line_inhibited (t + 3));
++  }
++
++  void perRowDeadman ()
++  {
++    TxInhibit::GateLogic g;
++    qint64 t = 2700000;
++    QVERIFY (g.on_datagram (hold ("A", 500, "A"), t));
++    QVERIFY (!g.on_datagram (hold ("B", 2000, "B"), t));
++    QVERIFY (g.line_inhibited (t + 501)); // A expired, B live
++    QCOMPARE (g.lease_count (t + 501), 1);
++    QCOMPARE (g.expiries (), 1u);
++    QVERIFY (!g.line_inhibited (t + 2001));
++    QCOMPARE (g.expiries (), 2u);
++  }
++
++  void emptyControllerRejected ()
+   {
+     TxInhibit::GateLogic g;
+     qint64 t = 3000000;
+-    QByteArray bad = R"({"tx_inhibit":2,"ttl_ms":500,"station":"X"})";
++    QByteArray bad = TxInhibit::build_datagram (QString {}, 500, QStringLiteral ("X"));
+     QVERIFY (!g.on_datagram (bad, t));
+     QVERIFY (g.radiate (true, t));
+     QCOMPARE (g.invalid (), 1u);
+   }
+ 
+-  void missingTtlIgnored ()
++  void wrongMessageTypeIgnored ()
+   {
+     TxInhibit::GateLogic g;
+-    qint64 t = 4000000;
+-    QByteArray bad = R"({"tx_inhibit":1,"station":"X"})";
+-    QVERIFY (!g.on_datagram (bad, t));
+-    QVERIFY (g.radiate (true, t));
++    qint64 t = 3100000;
++    QByteArray message;
++    NetworkMessage::Builder out {&message, NetworkMessage::HaltTx, QString {}
++                                 , NetworkMessage::Builder::schema_number};
++    out << false;
++    QVERIFY (!g.on_datagram (message, t));
+     QCOMPARE (g.invalid (), 1u);
+   }
+ 
+@@ -66,10 +146,8 @@
+   {
+     TxInhibit::GateLogic g;
+     qint64 t = 5000000;
+-    // Below min (100)
+-    QVERIFY (!g.on_datagram (R"({"tx_inhibit":1,"ttl_ms":50})", t));
+-    // Above max (30000)
+-    QVERIFY (!g.on_datagram (R"({"tx_inhibit":1,"ttl_ms":30001})", t));
++    QVERIFY (!g.on_datagram (hold ("A", 50), t));
++    QVERIFY (!g.on_datagram (hold ("A", 30001), t));
+     QVERIFY (g.radiate (true, t));
+     QCOMPARE (g.invalid (), 2u);
+   }
+@@ -87,10 +165,8 @@
+   {
+     TxInhibit::GateLogic g;
+     qint64 t = 7000000;
+-    QByteArray hold = R"({"tx_inhibit":1,"ttl_ms":500,"station":"A","seq":1})";
+-    QVERIFY (g.on_datagram (hold, t));          // free → held
+-    QByteArray keep = R"({"tx_inhibit":1,"ttl_ms":500,"station":"A","seq":2})";
+-    QVERIFY (!g.on_datagram (keep, t + 100));   // still held
++    QVERIFY (g.on_datagram (hold ("A", 500, "A"), t));
++    QVERIFY (!g.on_datagram (hold ("A", 500, "A"), t + 100));
+     QVERIFY (g.line_inhibited (t + 100));
+     QCOMPARE (g.hold_rx (), 2u);
+   }
+@@ -99,33 +175,35 @@
+   {
+     TxInhibit::GateLogic g;
+     qint64 t = 8000000;
+-    QByteArray rel = R"({"tx_inhibit":1,"ttl_ms":0})";
+-    QVERIFY (!g.on_datagram (rel, t)); // already free
++    QVERIFY (!g.on_datagram (hold ("A", 0), t));
+     QVERIFY (g.radiate (true, t));
+     QCOMPARE (g.release_rx (), 1u);
+   }
+ 
+-  void badgeTextWithAndWithoutStation ()
++  void badgeTextWithMultipleHolders ()
+   {
+     TxInhibit::GateLogic g;
+     qint64 t = 9000000;
+     QCOMPARE (g.badge_text (t), QString {});
+ 
+-    QVERIFY (g.on_datagram (R"({"tx_inhibit":1,"ttl_ms":500})", t));
++    QVERIFY (g.on_datagram (hold ("A", 500), t));
+     QCOMPARE (g.badge_text (t), QStringLiteral ("TX INHIBITED"));
+ 
+-    // Keepalive / refresh may not flip hold level (returns false) but updates station.
+-    (void) g.on_datagram (R"({"tx_inhibit":1,"ttl_ms":500,"station":"W1AW"})", t + 1);
++    (void) g.on_datagram (hold ("A", 500, "W1AW"), t + 1);
+     QCOMPARE (g.badge_text (t + 1), QStringLiteral ("TX INHIBITED — held by W1AW"));
++
++    (void) g.on_datagram (hold ("B", 500, "W2SZ"), t + 2);
++    QCOMPARE (g.badge_text (t + 2), QStringLiteral ("TX INHIBITED — held by W1AW, W2SZ"));
+   }
+ 
+-  void stringTtlAccepted ()
++  void jsonNoLongerAccepted ()
+   {
+     TxInhibit::GateLogic g;
+     qint64 t = 10000000;
+-    // Interop: ttl_ms as string digits
+-    QVERIFY (g.on_datagram (R"({"tx_inhibit":1,"ttl_ms":"400","station":"S"})", t));
+-    QVERIFY (g.line_inhibited (t));
++    QByteArray json = R"({"tx_inhibit":1,"ttl_ms":400,"station":"S"})";
++    QVERIFY (!g.on_datagram (json, t));
++    QVERIFY (g.radiate (true, t));
++    QCOMPARE (g.invalid (), 1u);
+   }
+ };
+ 
+diff -ruN wsjtx-baseline/tools/inhibit-agent/99-keyline-not-modem.rules wsjtx-work/tools/inhibit-agent/99-keyline-not-modem.rules
+--- a/tools/inhibit-agent/99-keyline-not-modem.rules	1969-12-31 19:00:00.000000000 -0500
++++ b/tools/inhibit-agent/99-keyline-not-modem.rules	2026-09-21 19:06:56.937663167 -0400
+@@ -0,0 +1,9 @@
++# Keep ModemManager from opening the Keyline (or a WA1HCO FT230X) and
++# asserting RTS, which keys the radio with no WSJT-X running.
++#
++#   sudo cp tools/inhibit-agent/99-keyline-not-modem.rules /etc/udev/rules.d/
++#   sudo udevadm control --reload-rules && sudo udevadm trigger
++
++ACTION=="add", SUBSYSTEM=="tty", ATTRS{idVendor}=="0403", ATTRS{idProduct}=="6015", ENV{ID_MM_DEVICE_IGNORE}="1"
++ACTION=="add", SUBSYSTEM=="tty", ATTRS{manufacturer}=="WA1HCO", ENV{ID_MM_DEVICE_IGNORE}="1"
++ACTION=="add", SUBSYSTEM=="tty", ATTRS{product}=="*Keyline*", ENV{ID_MM_DEVICE_IGNORE}="1"
+diff -ruN wsjtx-baseline/tools/inhibit-agent/agent.cpp wsjtx-work/tools/inhibit-agent/agent.cpp
+--- a/tools/inhibit-agent/agent.cpp	1969-12-31 19:00:00.000000000 -0500
++++ b/tools/inhibit-agent/agent.cpp	2026-09-21 19:06:56.936663178 -0400
+@@ -0,0 +1,526 @@
++// SPDX-License-Identifier: GPL-3.0-or-later
++
++#include "agent.hpp"
++
++#include "TxInhibit/TxInhibitLogic.hpp"
++
++#include <QDateTime>
++#include <QFile>
++#include <QHostInfo>
++#include <QSerialPortInfo>
++
++#include <algorithm>
++
++#if defined (Q_OS_WIN)
++# include <windows.h>
++#else
++# include <sys/ioctl.h>
++# include <termios.h>
++#endif
++
++namespace {
++
++bool looks_like_keyline (QSerialPortInfo const& info)
++{
++  QString blob = (info.manufacturer () + QLatin1Char (' ')
++                  + info.description () + QLatin1Char (' ')
++                  + info.serialNumber ()).toUpper ();
++  return blob.contains (QLatin1String ("WA1HCO"))
++    || blob.contains (QLatin1String ("KEYLINE"));
++}
++
++bool looks_like_builtin_com (QSerialPortInfo const& info)
++{
++  QString n = info.portName ();
++#if defined (Q_OS_WIN)
++  return n.compare (QLatin1String ("COM1"), Qt::CaseInsensitive) == 0;
++#else
++  return n.startsWith (QLatin1String ("ttyS"));
++#endif
++}
++
++} // namespace
++
++InhibitAgent::InhibitAgent (Config const& cfg, QObject * parent)
++  : QObject (parent)
++  , cfg_ (cfg)
++{
++  poll_.setInterval (5);
++  keepalive_.setInterval (std::max (50, cfg_.keepalive_ms));
++  connect (&poll_, &QTimer::timeout, this, &InhibitAgent::on_poll);
++  connect (&keepalive_, &QTimer::timeout, this, &InhibitAgent::on_keepalive);
++}
++
++QString InhibitAgent::state_name (AgentState s)
++{
++  switch (s)
++    {
++    case AgentState::Open: return QStringLiteral ("OPEN");
++    case AgentState::Inhibiting: return QStringLiteral ("INHIBITING");
++    case AgentState::Hang: return QStringLiteral ("HANG");
++    case AgentState::SenseFault: return QStringLiteral ("SENSE FAULT");
++    }
++  return QStringLiteral ("UNKNOWN");
++}
++
++QString InhibitAgent::dest_text () const
++{
++  return cfg_.dest_host + QLatin1Char (':')
++    + QString::number (cfg_.dest_port);
++}
++
++bool InhibitAgent::parse_dest_addr (QString const& addr, QString * host,
++                                    quint16 * port, QString * err)
++{
++  int const c = addr.lastIndexOf (QLatin1Char (':'));
++  if (c <= 0 || c == addr.size () - 1)
++    {
++      if (err)
++        {
++          *err = QStringLiteral ("addr must be host:port (got %1)").arg (addr);
++        }
++      return false;
++    }
++  bool ok = false;
++  uint p = addr.mid (c + 1).toUInt (&ok);
++  if (!ok || p < 1 || p > 65535)
++    {
++      if (err)
++        {
++          *err = QStringLiteral ("addr port must be 1..65535");
++        }
++      return false;
++    }
++  if (host)
++    {
++      *host = addr.left (c);
++    }
++  if (port)
++    {
++      *port = static_cast<quint16> (p);
++    }
++  return true;
++}
++
++QString InhibitAgent::auto_detect_serial_port (QString * note)
++{
++  QList<QSerialPortInfo> ports = QSerialPortInfo::availablePorts ();
++  QStringList keyline;
++  QStringList usb;
++  for (QSerialPortInfo const& p : ports)
++    {
++      if (looks_like_keyline (p))
++        {
++          keyline << p.portName ();
++        }
++      else if (!looks_like_builtin_com (p))
++        {
++          usb << p.portName ();
++        }
++    }
++  if (keyline.size () == 1)
++    {
++      if (note)
++        {
++          *note = QStringLiteral ("auto-selected Keyline %1").arg (keyline[0]);
++        }
++      return keyline[0];
++    }
++  if (keyline.size () > 1)
++    {
++      if (note)
++        {
++          *note = QStringLiteral (
++              "multiple Keyline ports (%1); pass --port")
++              .arg (keyline.join (QLatin1String (", ")));
++        }
++      return {};
++    }
++  if (usb.size () == 1)
++    {
++      if (note)
++        {
++          *note = QStringLiteral ("auto-selected serial %1").arg (usb[0]);
++        }
++      return usb[0];
++    }
++  if (note)
++    {
++      if (ports.isEmpty ())
++        {
++          *note = QStringLiteral ("no serial ports found");
++        }
++      else
++        {
++          *note = QStringLiteral (
++              "could not auto-pick a KEY serial port (%1); pass --port")
++              .arg (list_serial_ports ().simplified ());
++        }
++    }
++  return {};
++}
++
++QString InhibitAgent::list_serial_ports ()
++{
++  QStringList lines;
++  int skipped_builtin = 0;
++  for (QSerialPortInfo const& p : QSerialPortInfo::availablePorts ())
++    {
++      if (looks_like_builtin_com (p)
++          && p.manufacturer ().isEmpty () && p.description ().isEmpty ())
++        {
++          ++skipped_builtin;
++          continue;
++        }
++      QString tag;
++      if (looks_like_keyline (p))
++        {
++          tag = QStringLiteral (" [Keyline]");
++        }
++      lines << QStringLiteral ("%1  %2 %3%4")
++                   .arg (p.portName (), -12)
++                   .arg (p.manufacturer ())
++                   .arg (p.description ())
++                   .arg (tag);
++    }
++  if (lines.isEmpty ())
++    {
++      return skipped_builtin
++        ? QStringLiteral ("(no USB-serial ports; %1 builtin COM/ttyS skipped)")
++              .arg (skipped_builtin)
++        : QStringLiteral ("(no serial ports)");
++    }
++  if (skipped_builtin)
++    {
++      lines << QStringLiteral ("(%1 builtin COM/ttyS omitted)").arg (skipped_builtin);
++    }
++  return lines.join (QLatin1Char ('\n'));
++}
++
++bool InhibitAgent::start ()
++{
++  fault_.clear ();
++  if (cfg_.dest_port == 0 || cfg_.dest_host.isEmpty ())
++    {
++      enter_fault (QStringLiteral (
++          "gate host:port required (from InhibitStatus / status-bar tooltip)"));
++      return false;
++    }
++  dest_addr_ = QHostAddress (cfg_.dest_host);
++  if (dest_addr_.isNull ())
++    {
++      QHostInfo info = QHostInfo::fromName (cfg_.dest_host);
++      if (info.addresses ().isEmpty ())
++        {
++          enter_fault (QStringLiteral ("cannot resolve %1").arg (cfg_.dest_host));
++          return false;
++        }
++      dest_addr_ = info.addresses ().first ();
++    }
++
++  if (cfg_.serial_port.isEmpty ())
++    {
++      enter_fault (QStringLiteral ("no serial port"));
++      return false;
++    }
++
++  serial_.setPortName (cfg_.serial_port);
++  serial_.setFlowControl (QSerialPort::NoFlowControl);
++#if QT_VERSION < QT_VERSION_CHECK (5, 10, 0)
++  // Qt < 5.10 restores termios on close (RTS/DTR back to driver default).
++  serial_.setSettingsRestoredOnClose (false);
++#endif
++  // Open so modem-status (CTS) is readable. Do not assert RTS/DTR —
++  // Keyline J3 is an inhibit/PTT output driven by RTS. QSerialPort and
++  // the USB-serial driver assert both on open; force them idle at once.
++  if (!serial_.open (QIODevice::ReadWrite))
++    {
++      enter_fault (QStringLiteral ("open %1 failed: %2")
++                   .arg (cfg_.serial_port, serial_.errorString ()));
++      return false;
++    }
++  force_outputs_idle ();
++  try_set_usb_latency ();
++
++  keying_.reset_transmission ();
++  key_down_ = false;
++  hold_active_ = false;
++  warned_rts_ = false;
++  hang_until_ms_ = -1;
++  keepalive_.stop ();
++  poll_.start ();
++  set_state (AgentState::Open, QStringLiteral ("CTS on %1 -> %2")
++             .arg (cfg_.serial_port, dest_text ()));
++  return true;
++}
++
++void InhibitAgent::stop ()
++{
++  poll_.stop ();
++  if (hold_active_)
++    {
++      end_hold ("stop");
++    }
++  if (serial_.isOpen ())
++    {
++      force_outputs_idle ();
++      serial_.close ();
++    }
++}
++
++void InhibitAgent::force_outputs_idle ()
++{
++  if (!serial_.isOpen ())
++    {
++      return;
++    }
++  serial_.setFlowControl (QSerialPort::NoFlowControl);
++  serial_.setDataTerminalReady (false);
++  serial_.setRequestToSend (false);
++#if defined (Q_OS_WIN)
++  HANDLE h = reinterpret_cast<HANDLE> (serial_.handle ());
++  if (h && h != INVALID_HANDLE_VALUE)
++    {
++      EscapeCommFunction (h, CLRRTS);
++      EscapeCommFunction (h, CLRDTR);
++    }
++#else
++  int fd = static_cast<int> (serial_.handle ());
++  if (fd >= 0)
++    {
++      int bits = TIOCM_RTS | TIOCM_DTR;
++      ioctl (fd, TIOCMBIC, &bits);
++      struct termios tio;
++      if (tcgetattr (fd, &tio) == 0)
++        {
++          tio.c_cflag &= ~static_cast<tcflag_t> (HUPCL);
++          tcsetattr (fd, TCSANOW, &tio);
++        }
++    }
++#endif
++}
++
++void InhibitAgent::try_set_usb_latency ()
++{
++#if defined (Q_OS_LINUX)
++  QString name = cfg_.serial_port;
++  if (name.startsWith (QLatin1String ("/dev/")))
++    {
++      name = name.section (QLatin1Char ('/'), -1);
++    }
++  QStringList paths {
++    QStringLiteral ("/sys/class/tty/%1/device/latency_timer").arg (name),
++    QStringLiteral ("/sys/bus/usb-serial/devices/%1/latency_timer").arg (name),
++  };
++  for (QString const& path : paths)
++    {
++      QFile f (path);
++      if (f.open (QIODevice::WriteOnly | QIODevice::Truncate))
++        {
++          f.write ("1");
++          return;
++        }
++    }
++#else
++  (void) 0;
++#endif
++}
++
++void InhibitAgent::set_state (AgentState s, QString const& detail)
++{
++  bool changed = (s != state_);
++  state_ = s;
++  if (s != AgentState::SenseFault)
++    {
++      fault_.clear ();
++    }
++  if (changed)
++    {
++      emit stateChanged (s, detail);
++    }
++}
++
++void InhibitAgent::enter_fault (QString const& reason)
++{
++  fault_ = reason;
++  poll_.stop ();
++  if (hold_active_)
++    {
++      end_hold ("sense fault");
++    }
++  if (serial_.isOpen ())
++    {
++      force_outputs_idle ();
++      serial_.close ();
++    }
++  set_state (AgentState::SenseFault, reason);
++  emit logLine (QStringLiteral ("SENSE FAULT  %1").arg (reason));
++}
++
++bool InhibitAgent::read_key (bool * keyed)
++{
++  if (!serial_.isOpen ())
++    {
++      return false;
++    }
++  QSerialPort::PinoutSignals pins = serial_.pinoutSignals ();
++  if (serial_.error () != QSerialPort::NoError
++      && serial_.error () != QSerialPort::TimeoutError)
++    {
++      return false;
++    }
++  if (pins & QSerialPort::RequestToSendSignal)
++    {
++      force_outputs_idle ();
++      if (!warned_rts_)
++        {
++          warned_rts_ = true;
++          emit logLine (QStringLiteral (
++              "RTS was asserted — forced idle (Keyline J3 must not key)"));
++        }
++    }
++  bool cts = (pins & QSerialPort::ClearToSendSignal) != 0;
++  *keyed = cfg_.invert ? !cts : cts;
++  return true;
++}
++
++void InhibitAgent::on_poll ()
++{
++  qint64 now = QDateTime::currentMSecsSinceEpoch ();
++  bool keyed = false;
++  if (!read_key (&keyed))
++    {
++      enter_fault (serial_.isOpen ()
++                   ? QStringLiteral ("CTS read failed on %1: %2")
++                       .arg (cfg_.serial_port, serial_.errorString ())
++                   : QStringLiteral ("serial port closed"));
++      return;
++    }
++  if (keyed != key_down_)
++    {
++      on_key_edge (keyed, now);
++    }
++  if (hang_until_ms_ >= 0 && now >= hang_until_ms_)
++    {
++      hang_until_ms_ = -1;
++      end_hold ("hang done");
++    }
++}
++
++void InhibitAgent::on_key_edge (bool keyed, qint64 now_ms)
++{
++  key_down_ = keyed;
++  if (keyed)
++    {
++      hang_until_ms_ = -1;
++      keying_.on_key_assert (now_ms);
++      start_hold ();
++      set_state (AgentState::Inhibiting, QStringLiteral ("KEY assert"));
++      emit logLine (QStringLiteral ("KEY assert"));
++      return;
++    }
++  int hang_ms = keying_.on_key_open (now_ms);
++  emit logLine (QStringLiteral ("KEY open  class=%1  hang_ms=%2")
++                .arg (QString::fromLatin1 (keying_.class_name ()))
++                .arg (hang_ms));
++  if (hang_ms <= 0)
++    {
++      hang_until_ms_ = -1;
++      end_hold ("KEY open");
++      return;
++    }
++  hang_until_ms_ = now_ms + hang_ms;
++  set_state (AgentState::Hang,
++             QStringLiteral ("hang %1 ms (%2)").arg (hang_ms)
++             .arg (QString::fromLatin1 (keying_.class_name ())));
++}
++
++void InhibitAgent::start_hold ()
++{
++  if (hold_active_)
++    {
++      return;
++    }
++  hold_active_ = true;
++  send_packet (cfg_.hold_timeout_ms, false, nullptr);
++  keepalive_.start ();
++}
++
++void InhibitAgent::end_hold (char const * reason)
++{
++  hang_until_ms_ = -1;
++  if (!hold_active_)
++    {
++      if (state_ != AgentState::SenseFault)
++        {
++          set_state (AgentState::Open, QString::fromLatin1 (reason ? reason : ""));
++        }
++      return;
++    }
++  hold_active_ = false;
++  keepalive_.stop ();
++  send_packet (0, false, reason);
++  if (state_ != AgentState::SenseFault)
++    {
++      set_state (AgentState::Open, QString::fromLatin1 (reason ? reason : "release"));
++    }
++}
++
++void InhibitAgent::on_keepalive ()
++{
++  if (hold_active_)
++    {
++      send_packet (cfg_.hold_timeout_ms, true, nullptr);
++    }
++}
++
++void InhibitAgent::send_packet (int ttl_ms, bool is_keepalive,
++                               char const * release_reason)
++{
++  if (is_keepalive && !hold_active_)
++    {
++      return;
++    }
++  if (cfg_.dest_port == 0 || dest_addr_.isNull ())
++    {
++      return;
++    }
++  QByteArray payload = TxInhibit::build_datagram (
++      cfg_.controller_id, static_cast<quint32> (ttl_ms), cfg_.station);
++  ++seq_;
++  qint64 n = sock_.writeDatagram (payload, dest_addr_, cfg_.dest_port);
++  if (ttl_ms == 0)
++    {
++      ++releases_sent_;
++    }
++  else if (is_keepalive)
++    {
++      ++keepalives_sent_;
++    }
++  else
++    {
++      ++holds_sent_;
++    }
++  QString tag = ttl_ms == 0
++    ? QStringLiteral ("RELEASE")
++    : (is_keepalive ? QStringLiteral ("KEEPALIVE") : QStringLiteral ("HOLD"));
++  QString line = QStringLiteral ("%1  ttl_ms=%2  -> %3  (holds=%4 ka=%5 rel=%6)")
++                   .arg (tag)
++                   .arg (ttl_ms)
++                   .arg (dest_text ())
++                   .arg (holds_sent_)
++                   .arg (keepalives_sent_)
++                   .arg (releases_sent_);
++  if (ttl_ms == 0 && release_reason && release_reason[0])
++    {
++      line += QStringLiteral ("  (%1)").arg (QString::fromLatin1 (release_reason));
++    }
++  if (!is_keepalive)
++    {
++      emit logLine (line);
++    }
++  if (n < 0)
++    {
++      emit logLine (QStringLiteral ("send failed: %1").arg (sock_.errorString ()));
++    }
++}
+diff -ruN wsjtx-baseline/tools/inhibit-agent/agent.hpp wsjtx-work/tools/inhibit-agent/agent.hpp
+--- a/tools/inhibit-agent/agent.hpp	1969-12-31 19:00:00.000000000 -0500
++++ b/tools/inhibit-agent/agent.hpp	2026-09-21 19:06:56.936663178 -0400
+@@ -0,0 +1,102 @@
++// inhibit-agent core — CTS sense + hold sender + KEYing monitor.
++//
++// SPDX-License-Identifier: GPL-3.0-or-later
++
++#ifndef INHIBIT_AGENT_AGENT_HPP_
++#define INHIBIT_AGENT_AGENT_HPP_
++
++#include "keying_monitor.hpp"
++
++#include <QByteArray>
++#include <QHostAddress>
++#include <QObject>
++#include <QSerialPort>
++#include <QString>
++#include <QTimer>
++#include <QUdpSocket>
++
++enum class AgentState
++{
++  Open,
++  Inhibiting,
++  Hang,
++  SenseFault
++};
++
++class InhibitAgent : public QObject
++{
++  Q_OBJECT
++public:
++  struct Config
++  {
++    QString serial_port;
++    QString dest_host {QStringLiteral ("127.0.0.1")};
++    // 0 = unset; must be set from InhibitStatus / operator.
++    quint16 dest_port {0};
++    bool invert {false};
++    int hold_timeout_ms {600};
++    int keepalive_ms {200};
++    // Lease key on the gate (NetworkMessage::TxInhibit Controller ID).
++    QString controller_id {QStringLiteral ("inhibit-agent")};
++    // Human badge text ("held by …"); may match controller_id.
++    QString station {QStringLiteral ("inhibit-agent")};
++  };
++
++  explicit InhibitAgent (Config const& cfg, QObject * parent = nullptr);
++
++  bool start ();
++  void stop ();
++
++  AgentState state () const { return state_; }
++  QString fault_reason () const { return fault_; }
++  QString serial_port () const { return cfg_.serial_port; }
++  QString dest_text () const;
++  Config const& config () const { return cfg_; }
++
++  static QString state_name (AgentState s);
++  static bool parse_dest_addr (QString const& addr, QString * host,
++                               quint16 * port, QString * err);
++  static QString auto_detect_serial_port (QString * note);
++  static QString list_serial_ports ();
++
++signals:
++  void stateChanged (AgentState state, QString detail);
++  void logLine (QString line);
++
++private slots:
++  void on_poll ();
++  void on_keepalive ();
++
++private:
++  void set_state (AgentState s, QString const& detail);
++  void enter_fault (QString const& reason);
++  bool read_key (bool * keyed);
++  void on_key_edge (bool keyed, qint64 now_ms);
++  void start_hold ();
++  void end_hold (char const * reason);
++  void send_packet (int ttl_ms, bool is_keepalive, char const * release_reason);
++  void try_set_usb_latency ();
++  // Keyline J3 is RTS. USB-serial open/close defaults assert RTS and
++  // key the radio. Force RTS+DTR idle and leave them idle on close.
++  void force_outputs_idle ();
++
++  Config cfg_;
++  QHostAddress dest_addr_;
++  QSerialPort serial_;
++  QUdpSocket sock_;
++  QTimer poll_;
++  QTimer keepalive_;
++  KeyingMonitor keying_;
++  AgentState state_ {AgentState::SenseFault};
++  QString fault_;
++  bool key_down_ {false};
++  bool hold_active_ {false};
++  qint64 hang_until_ms_ {-1};
++  qint64 seq_ {1};
++  int holds_sent_ {0};
++  int keepalives_sent_ {0};
++  int releases_sent_ {0};
++  bool warned_rts_ {false};
++};
++
++#endif
+diff -ruN wsjtx-baseline/tools/inhibit-agent/CMakeLists.txt wsjtx-work/tools/inhibit-agent/CMakeLists.txt
+--- a/tools/inhibit-agent/CMakeLists.txt	1969-12-31 19:00:00.000000000 -0500
++++ b/tools/inhibit-agent/CMakeLists.txt	2026-09-21 19:06:56.936663178 -0400
+@@ -0,0 +1,46 @@
++# inhibit-agent — production KEY (CTS) -> localhost/LAN TX Inhibit hold.
++# CLI for scripting; GUI for operators. Linux and Windows.
++
++set (INHIBIT_AGENT_CORE
++  agent.cpp
++  agent.hpp
++  keying_monitor.hpp
++  ${CMAKE_SOURCE_DIR}/Network/NetworkMessage.cpp
++  )
++
++add_executable (inhibit-agent
++  main_cli.cpp
++  ${INHIBIT_AGENT_CORE}
++  )
++target_include_directories (inhibit-agent PRIVATE
++  ${CMAKE_CURRENT_SOURCE_DIR}
++  ${CMAKE_SOURCE_DIR}
++  )
++target_link_libraries (inhibit-agent Qt5::Core Qt5::Network Qt5::SerialPort)
++if (WIN32)
++  set_target_properties (inhibit-agent PROPERTIES WIN32_EXECUTABLE OFF)
++endif ()
++set_target_properties (inhibit-agent PROPERTIES
++  RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}
++  )
++
++add_executable (inhibit-agent-gui
++  main_gui.cpp
++  ${INHIBIT_AGENT_CORE}
++  )
++target_include_directories (inhibit-agent-gui PRIVATE
++  ${CMAKE_CURRENT_SOURCE_DIR}
++  ${CMAKE_SOURCE_DIR}
++  )
++target_link_libraries (inhibit-agent-gui Qt5::Widgets Qt5::Network Qt5::SerialPort)
++if (WIN32)
++  set_target_properties (inhibit-agent-gui PROPERTIES WIN32_EXECUTABLE ON)
++endif ()
++set_target_properties (inhibit-agent-gui PROPERTIES
++  RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}
++  )
++
++install (TARGETS inhibit-agent inhibit-agent-gui
++  RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT runtime
++  BUNDLE DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT runtime
++  )
+diff -ruN wsjtx-baseline/tools/inhibit-agent/keying_monitor.hpp wsjtx-work/tools/inhibit-agent/keying_monitor.hpp
+--- a/tools/inhibit-agent/keying_monitor.hpp	1969-12-31 19:00:00.000000000 -0500
++++ b/tools/inhibit-agent/keying_monitor.hpp	2026-09-21 19:06:56.936663178 -0400
+@@ -0,0 +1,173 @@
++// KEYing monitor — same hang policy as inhibit-test (docs/TX_INHIBIT.md §3).
++// Break-in CW: hang = 1.5 × word gap (10.5 × dit), clamp 315–1260 ms.
++// Continuous KEY (SSB / non-break-in): hang = 0. No software PTT debounce.
++//
++// SPDX-License-Identifier: GPL-3.0-or-later
++
++#ifndef INHIBIT_AGENT_KEYING_MONITOR_HPP_
++#define INHIBIT_AGENT_KEYING_MONITOR_HPP_
++
++#include <QtGlobal>
++
++#include <algorithm>
++#include <cmath>
++
++enum class KeyClass
++{
++  Unknown,
++  BreakInCw,
++  Continuous
++};
++
++class KeyingMonitor
++{
++public:
++  static int const kHangMinMs = 315;          // ~40 WPM
++  static int const kHangMaxMs = 1260;         // ~10 WPM
++  static int const kContinuousMarkMs = 500;
++  static double constexpr kHangWordGapMult = 1.5;
++  static int const kWordGapDits = 7;
++  static double constexpr kMaxIntraTxGapDits = 5.0;
++
++  void reset_transmission ()
++  {
++    key_class_ = KeyClass::Unknown;
++    dit_ms_ = 0.0;
++    mark_open_ = false;
++    mark_start_ms_ = -1;
++    gap_start_ms_ = -1;
++  }
++
++  void on_key_assert (qint64 now_ms)
++  {
++    if (gap_start_ms_ >= 0)
++      {
++        int gap = static_cast<int> (now_ms - gap_start_ms_);
++        on_gap_closed (gap);
++        gap_start_ms_ = -1;
++      }
++    mark_open_ = true;
++    mark_start_ms_ = now_ms;
++  }
++
++  // KEY open — hang_ms to wait before EOT (0 = release now).
++  int on_key_open (qint64 now_ms)
++  {
++    int mark_ms = 0;
++    if (mark_open_ && mark_start_ms_ >= 0)
++      {
++        mark_ms = static_cast<int> (now_ms - mark_start_ms_);
++        note_mark (mark_ms);
++      }
++    mark_open_ = false;
++    mark_start_ms_ = -1;
++    gap_start_ms_ = now_ms;
++
++    if (key_class_ == KeyClass::Continuous
++        || (key_class_ == KeyClass::Unknown && mark_ms >= kContinuousMarkMs))
++      {
++        key_class_ = KeyClass::Continuous;
++        return 0;
++      }
++    if (key_class_ == KeyClass::BreakInCw || dit_ms_ > 0.0)
++      {
++        key_class_ = KeyClass::BreakInCw;
++        return hang_ms_break_in ();
++      }
++    if (mark_ms > 0 && mark_ms < kContinuousMarkMs)
++      {
++        note_dit_sample (static_cast<double> (mark_ms));
++        return hang_ms_break_in ();
++      }
++    return 0;
++  }
++
++  KeyClass key_class () const { return key_class_; }
++  double dit_ms () const { return dit_ms_; }
++
++  int hang_ms_break_in () const
++  {
++    if (dit_ms_ <= 0.0)
++      {
++        return kHangMinMs;
++      }
++    double hang = kHangWordGapMult * static_cast<double> (kWordGapDits) * dit_ms_;
++    int h = static_cast<int> (std::lround (hang));
++    return std::max (kHangMinMs, std::min (kHangMaxMs, h));
++  }
++
++  char const * class_name () const
++  {
++    switch (key_class_)
++      {
++      case KeyClass::BreakInCw: return "break-in CW";
++      case KeyClass::Continuous: return "continuous (non-break-in/SSB)";
++      default: return "unknown";
++      }
++  }
++
++private:
++  void note_mark (int mark_ms)
++  {
++    if (mark_ms <= 0)
++      {
++        return;
++      }
++    if (mark_ms >= kContinuousMarkMs && key_class_ != KeyClass::BreakInCw)
++      {
++        key_class_ = KeyClass::Continuous;
++        return;
++      }
++    if (dit_ms_ <= 0.0)
++      {
++        if (mark_ms < kContinuousMarkMs)
++          {
++            note_dit_sample (static_cast<double> (mark_ms));
++          }
++        return;
++      }
++    if (mark_ms < 2.0 * dit_ms_)
++      {
++        note_dit_sample (static_cast<double> (mark_ms));
++      }
++  }
++
++  void note_dit_sample (double sample_ms)
++  {
++    if (sample_ms <= 0.0)
++      {
++        return;
++      }
++    if (dit_ms_ <= 0.0)
++      {
++        dit_ms_ = sample_ms;
++      }
++    else
++      {
++        dit_ms_ = 0.35 * sample_ms + 0.65 * dit_ms_;
++      }
++  }
++
++  void on_gap_closed (int gap_ms)
++  {
++    if (gap_ms <= 0)
++      {
++        return;
++      }
++    double max_gap = (dit_ms_ > 0.0)
++      ? kMaxIntraTxGapDits * dit_ms_
++      : static_cast<double> (kContinuousMarkMs);
++    if (gap_ms <= max_gap)
++      {
++        key_class_ = KeyClass::BreakInCw;
++      }
++  }
++
++  KeyClass key_class_ {KeyClass::Unknown};
++  double dit_ms_ {0.0};
++  bool mark_open_ {false};
++  qint64 mark_start_ms_ {-1};
++  qint64 gap_start_ms_ {-1};
++};
++
++#endif
+diff -ruN wsjtx-baseline/tools/inhibit-agent/main_cli.cpp wsjtx-work/tools/inhibit-agent/main_cli.cpp
+--- a/tools/inhibit-agent/main_cli.cpp	1969-12-31 19:00:00.000000000 -0500
++++ b/tools/inhibit-agent/main_cli.cpp	2026-09-21 19:06:56.937663167 -0400
+@@ -0,0 +1,218 @@
++// inhibit-agent — CLI (scripting). Requires serial port + dest addr.
++//
++//   inhibit-agent --port /dev/ttyUSB0 --addr 127.0.0.1:51432
++//   inhibit-agent COM7 192.168.1.40:51432
++// Dest port comes from WSJT-X InhibitStatus (type 17) / status-bar tooltip.
++//
++// SPDX-License-Identifier: GPL-3.0-or-later
++
++#include "agent.hpp"
++
++#include <QCommandLineOption>
++#include <QCommandLineParser>
++#include <QCoreApplication>
++#include <QDateTime>
++#include <QTextStream>
++
++#include <csignal>
++
++#if defined (Q_OS_WIN)
++# include <windows.h>
++#endif
++
++namespace {
++
++QCoreApplication * g_app = nullptr;
++
++void request_quit (int)
++{
++  if (g_app)
++    {
++      QCoreApplication::quit ();
++    }
++}
++
++#if defined (Q_OS_WIN)
++BOOL WINAPI console_ctrl (DWORD)
++{
++  request_quit (0);
++  return TRUE;
++}
++#endif
++
++} // namespace
++
++int main (int argc, char * argv[])
++{
++  QCoreApplication app (argc, argv);
++  g_app = &app;
++  QCoreApplication::setApplicationName (QStringLiteral ("inhibit-agent"));
++  QCoreApplication::setApplicationVersion (QStringLiteral ("1.0"));
++
++  QCommandLineParser parser;
++  parser.setApplicationDescription (
++      QStringLiteral (
++          "SSB/CW KEY (USB-serial CTS) -> TX Inhibit hold.\n"
++          "CLI: pass the serial port and dest host:port.\n"
++          "Same hang policy as inhibit-test (CW hang; SSB hang 0)."));
++  parser.addHelpOption ();
++  parser.addVersionOption ();
++  parser.addPositionalArgument (
++      QStringLiteral ("port"),
++      QStringLiteral ("USB-serial device (COM7 or /dev/ttyUSB0)"),
++      QStringLiteral ("[port]"));
++  parser.addPositionalArgument (
++      QStringLiteral ("addr"),
++      QStringLiteral ("Gate address host:port"),
++      QStringLiteral ("[addr]"));
++  QCommandLineOption portOpt {
++    QStringList () << "p" << "port",
++    QStringLiteral ("USB-serial device (CTS = KEY)"),
++    QStringLiteral ("device")};
++  QCommandLineOption addrOpt {
++    QStringList () << "a" << "addr",
++    QStringLiteral ("WSJT-X gate address (host:port)"),
++    QStringLiteral ("host:port")};
++  QCommandLineOption invertOpt {
++    QStringList () << "invert",
++    QStringLiteral ("Invert CTS polarity")};
++  QCommandLineOption listOpt {
++    QStringList () << "list-ports",
++    QStringLiteral ("List serial ports and exit")};
++  QCommandLineOption ttlOpt {
++    QStringList () << "t" << "ttl-ms",
++    QStringLiteral ("hold_timeout_ms on hold/keepalive (default 600)"),
++    QStringLiteral ("ms"),
++    QStringLiteral ("600")};
++  QCommandLineOption controllerOpt {
++    QStringList () << "controller-id",
++    QStringLiteral ("Lease Controller ID (default inhibit-agent)"),
++    QStringLiteral ("id"),
++    QStringLiteral ("inhibit-agent")};
++  QCommandLineOption stationOpt {
++    QStringList () << "station",
++    QStringLiteral ("Badge station text (default: controller-id)"),
++    QStringLiteral ("name")};
++  parser.addOption (portOpt);
++  parser.addOption (addrOpt);
++  parser.addOption (invertOpt);
++  parser.addOption (listOpt);
++  parser.addOption (ttlOpt);
++  parser.addOption (controllerOpt);
++  parser.addOption (stationOpt);
++  parser.process (app);
++
++  QTextStream out (stdout);
++  QTextStream err (stderr);
++
++  if (parser.isSet (listOpt))
++    {
++      out << InhibitAgent::list_serial_ports () << '\n';
++      return 0;
++    }
++
++  QStringList pos = parser.positionalArguments ();
++  QString port = parser.value (portOpt);
++  QString addr = parser.value (addrOpt);
++  if (port.isEmpty () && pos.size () >= 1)
++    {
++      port = pos[0];
++    }
++  if (addr.isEmpty () && pos.size () >= 2)
++    {
++      addr = pos[1];
++    }
++  else if (addr.isEmpty () && pos.size () == 1 && !parser.isSet (portOpt))
++    {
++      // Single positional after --port DEVICE is the addr.
++    }
++  if (addr.isEmpty () && pos.size () == 1 && parser.isSet (portOpt))
++    {
++      addr = pos[0];
++    }
++
++  if (port.isEmpty () || addr.isEmpty ())
++    {
++      err << "inhibit-agent: CLI requires a USB-serial port and dest addr.\n"
++          << "  Dest host:port must match InhibitStatus (type 17) / tooltip.\n"
++          << "  inhibit-agent --port /dev/ttyUSB0 --addr 127.0.0.1:51432\n"
++          << "  inhibit-agent COM7 192.168.1.40:51432\n"
++          << "  inhibit-agent --list-ports\n"
++          << "GUI (no args): inhibit-agent-gui\n";
++      return 2;
++    }
++
++  QString host;
++  quint16 dest_port = 0;
++  QString perr;
++  if (!InhibitAgent::parse_dest_addr (addr, &host, &dest_port, &perr))
++    {
++      err << "inhibit-agent: " << perr << '\n';
++      return 2;
++    }
++
++  int ttl = parser.value (ttlOpt).toInt ();
++  if (ttl < 100 || ttl > 30000)
++    {
++      err << "ttl-ms must be 100..30000\n";
++      return 2;
++    }
++
++  InhibitAgent::Config cfg;
++  cfg.serial_port = port;
++  cfg.dest_host = host;
++  cfg.dest_port = dest_port;
++  cfg.invert = parser.isSet (invertOpt);
++  cfg.hold_timeout_ms = ttl;
++  cfg.controller_id = parser.value (controllerOpt);
++  if (cfg.controller_id.isEmpty ())
++    {
++      err << "controller-id must be non-empty\n";
++      return 2;
++    }
++  cfg.station = parser.isSet (stationOpt) ? parser.value (stationOpt)
++                                          : cfg.controller_id;
++
++  InhibitAgent agent (cfg);
++  QObject::connect (&agent, &InhibitAgent::stateChanged, &app,
++                    [&] (AgentState s, QString detail) {
++                      out << QDateTime::currentDateTime ().toString (
++                          QStringLiteral ("hh:mm:ss.zzz"))
++                          << "  STATE " << InhibitAgent::state_name (s);
++                      if (!detail.isEmpty ())
++                        {
++                          out << "  " << detail;
++                        }
++                      out << '\n';
++                      out.flush ();
++                    });
++  QObject::connect (&agent, &InhibitAgent::logLine, &app,
++                    [&] (QString line) {
++                      out << QDateTime::currentDateTime ().toString (
++                          QStringLiteral ("hh:mm:ss.zzz"))
++                          << "  " << line << '\n';
++                      out.flush ();
++                    });
++
++  if (!agent.start ())
++    {
++      err << "inhibit-agent: " << agent.fault_reason () << '\n';
++      return 1;
++    }
++
++  std::signal (SIGINT, request_quit);
++  std::signal (SIGTERM, request_quit);
++#if defined (Q_OS_WIN)
++  SetConsoleCtrlHandler (console_ctrl, TRUE);
++#endif
++
++  QObject::connect (&app, &QCoreApplication::aboutToQuit, &agent,
++                    [&] () { agent.stop (); });
++
++  out << "inhibit-agent  port=" << cfg.serial_port
++      << "  addr=" << agent.dest_text ()
++      << (cfg.invert ? "  invert" : "")
++      << "\n  CTS asserted = KEY.  Ctrl-C releases and quits.\n";
++  out.flush ();
++  return app.exec ();
++}
+diff -ruN wsjtx-baseline/tools/inhibit-agent/main_gui.cpp wsjtx-work/tools/inhibit-agent/main_gui.cpp
+--- a/tools/inhibit-agent/main_gui.cpp	1969-12-31 19:00:00.000000000 -0500
++++ b/tools/inhibit-agent/main_gui.cpp	2026-09-21 19:06:56.937663167 -0400
+@@ -0,0 +1,259 @@
++// inhibit-agent-gui — CTS KEY in, dest host:port out.
++// Gate address is editable (host:port from InhibitStatus type 17). Serial KEY is
++// auto-picked (Keyline / only USB-serial) unless --port is given.
++//
++// SPDX-License-Identifier: GPL-3.0-or-later
++
++#include "agent.hpp"
++
++#include <QApplication>
++#include <QCommandLineOption>
++#include <QCommandLineParser>
++#include <QDateTime>
++#include <QFont>
++#include <QHBoxLayout>
++#include <QLabel>
++#include <QLineEdit>
++#include <QPlainTextEdit>
++#include <QPushButton>
++#include <QVBoxLayout>
++#include <QWidget>
++
++namespace {
++
++QString state_stylesheet (AgentState s)
++{
++  switch (s)
++    {
++    case AgentState::Open:
++      return QStringLiteral (
++          "QLabel { background: #d8f0d8; color: #145214; border: 2px solid #2a7a2a; }");
++    case AgentState::Inhibiting:
++      return QStringLiteral (
++          "QLabel { background: #f5c4c4; color: #7a1010; border: 2px solid #a01818; }");
++    case AgentState::Hang:
++      return QStringLiteral (
++          "QLabel { background: #ffe4b8; color: #7a4a00; border: 2px solid #c07800; }");
++    case AgentState::SenseFault:
++      return QStringLiteral (
++          "QLabel { background: #ffe566; color: #5a2000; border: 2px solid #c04000; }");
++    }
++  return {};
++}
++
++} // namespace
++
++int main (int argc, char * argv[])
++{
++  QApplication app (argc, argv);
++  QApplication::setApplicationName (QStringLiteral ("inhibit-agent"));
++  QApplication::setApplicationVersion (QStringLiteral ("1.0"));
++
++  QCommandLineParser parser;
++  parser.setApplicationDescription (
++      QStringLiteral (
++          "SSB/CW KEY (USB-serial CTS) -> TX Inhibit hold.\n"
++          "Set dest host:port from InhibitStatus (type 17) / status-bar tooltip."));
++  parser.addHelpOption ();
++  parser.addVersionOption ();
++  QCommandLineOption portOpt {
++    QStringList () << "p" << "port",
++    QStringLiteral ("Override USB-serial device (CTS = KEY)"),
++    QStringLiteral ("device")};
++  QCommandLineOption addrOpt {
++    QStringList () << "a" << "addr",
++    QStringLiteral ("Initial gate address (host:port)"),
++    QStringLiteral ("host:port")};
++  QCommandLineOption invertOpt {
++    QStringList () << "invert",
++    QStringLiteral ("Invert CTS polarity")};
++  parser.addOption (portOpt);
++  parser.addOption (addrOpt);
++  parser.addOption (invertOpt);
++  parser.process (app);
++
++  InhibitAgent::Config cfg;
++  cfg.invert = parser.isSet (invertOpt);
++  QString pick_note;
++  if (parser.isSet (portOpt))
++    {
++      cfg.serial_port = parser.value (portOpt);
++      pick_note = QStringLiteral ("port from --port");
++    }
++  else
++    {
++      cfg.serial_port = InhibitAgent::auto_detect_serial_port (&pick_note);
++    }
++  if (parser.isSet (addrOpt))
++    {
++      QString err;
++      if (!InhibitAgent::parse_dest_addr (parser.value (addrOpt),
++                                          &cfg.dest_host, &cfg.dest_port, &err))
++        {
++          pick_note = err;
++        }
++    }
++
++  QWidget win;
++  win.setWindowTitle (QStringLiteral ("inhibit-agent"));
++  win.resize (560, 400);
++
++  auto * state = new QLabel (QStringLiteral ("STARTING"));
++  state->setAlignment (Qt::AlignCenter);
++  QFont sf = state->font ();
++  sf.setPointSize (28);
++  sf.setBold (true);
++  state->setFont (sf);
++  state->setMinimumHeight (88);
++  state->setStyleSheet (state_stylesheet (AgentState::Open));
++
++  auto * dest_edit = new QLineEdit;
++  if (cfg.dest_port != 0)
++    {
++      dest_edit->setText (cfg.dest_host + QLatin1Char (':')
++                          + QString::number (cfg.dest_port));
++    }
++  dest_edit->setPlaceholderText (QStringLiteral ("127.0.0.1:<port from type 17>"));
++  dest_edit->setClearButtonEnabled (true);
++  auto * dest_apply = new QPushButton (QStringLiteral ("Apply"));
++  dest_apply->setToolTip (QStringLiteral ("Send holds to this WSJT-X gate"));
++
++  auto * dest_row = new QHBoxLayout;
++  dest_row->addWidget (new QLabel (QStringLiteral ("Gate")));
++  dest_row->addWidget (dest_edit, 1);
++  dest_row->addWidget (dest_apply);
++
++  auto * info = new QLabel;
++  QFont bf = info->font ();
++  bf.setPointSize (12);
++  info->setFont (bf);
++  info->setWordWrap (true);
++
++  auto * log = new QPlainTextEdit;
++  log->setReadOnly (true);
++  log->setMaximumBlockCount (200);
++  QFont lf = log->font ();
++  lf.setPointSize (11);
++  lf.setFamily (QStringLiteral ("monospace"));
++  log->setFont (lf);
++
++  auto * quit = new QPushButton (QStringLiteral ("Quit"));
++  quit->setMinimumHeight (32);
++
++  auto * layout = new QVBoxLayout (&win);
++  layout->addWidget (state);
++  layout->addLayout (dest_row);
++  layout->addWidget (info);
++  layout->addWidget (log, 1);
++  auto * row = new QHBoxLayout;
++  row->addStretch (1);
++  row->addWidget (quit);
++  layout->addLayout (row);
++
++  auto append_log = [log] (QString const& line) {
++    log->appendPlainText (
++        QDateTime::currentDateTime ().toString (QStringLiteral ("hh:mm:ss.zzz"))
++        + QLatin1Char (' ') + line);
++  };
++
++  InhibitAgent * agent = new InhibitAgent (cfg, &win);
++
++  auto refresh_info = [info, &agent, &pick_note] () {
++    info->setText (
++        QStringLiteral ("CTS KEY on %1\nGate %2\n%3")
++            .arg (agent->serial_port ().isEmpty ()
++                  ? QStringLiteral ("(none)")
++                  : agent->serial_port ())
++            .arg (agent->dest_text ())
++            .arg (pick_note));
++  };
++
++  auto hook_agent = [&] () {
++    QObject::connect (agent, &InhibitAgent::stateChanged, &win,
++                      [state] (AgentState s, QString detail) {
++                        QString t = InhibitAgent::state_name (s);
++                        if (!detail.isEmpty ())
++                          {
++                            t += QLatin1Char ('\n') + detail;
++                          }
++                        state->setText (t);
++                        state->setStyleSheet (state_stylesheet (s));
++                      });
++    QObject::connect (agent, &InhibitAgent::logLine, &win, append_log);
++  };
++  hook_agent ();
++
++  auto show_need_gate = [&] () {
++    state->setText (QStringLiteral ("NEED GATE"));
++    state->setStyleSheet (
++        QStringLiteral ("QLabel{background:#666;color:#fff;padding:8px;}"));
++    refresh_info ();
++  };
++
++  auto start_agent = [&] () {
++    refresh_info ();
++    if (cfg.dest_port == 0 || cfg.dest_host.isEmpty ())
++      {
++        show_need_gate ();
++        append_log (QStringLiteral (
++            "set Gate host:port from InhibitStatus / tooltip, then Apply"));
++        return;
++      }
++    if (cfg.serial_port.isEmpty ())
++      {
++        state->setText (QStringLiteral ("SENSE FAULT"));
++        state->setStyleSheet (state_stylesheet (AgentState::SenseFault));
++        append_log (pick_note.isEmpty ()
++                    ? QStringLiteral ("no KEY serial")
++                    : pick_note);
++        return;
++      }
++    if (!agent->start ())
++      {
++        state->setText (QStringLiteral ("SENSE FAULT"));
++        state->setStyleSheet (state_stylesheet (AgentState::SenseFault));
++        append_log (agent->fault_reason ());
++      }
++    else
++      {
++        append_log (pick_note.isEmpty ()
++                    ? QStringLiteral ("started")
++                    : pick_note);
++      }
++  };
++
++  auto apply_dest = [&] () {
++    QString err;
++    QString host;
++    quint16 port = 0;
++    if (!InhibitAgent::parse_dest_addr (dest_edit->text ().trimmed (),
++                                        &host, &port, &err)
++        || port == 0)
++      {
++        append_log (err.isEmpty ()
++                    ? QStringLiteral ("gate addr must be host:port with non-zero port")
++                    : err);
++        show_need_gate ();
++        return;
++      }
++    cfg.dest_host = host;
++    cfg.dest_port = port;
++    pick_note = QStringLiteral ("gate %1").arg (dest_edit->text ().trimmed ());
++    agent->stop ();
++    delete agent;
++    agent = new InhibitAgent (cfg, &win);
++    hook_agent ();
++    start_agent ();
++  };
++
++  QObject::connect (dest_apply, &QPushButton::clicked, &win, apply_dest);
++  QObject::connect (dest_edit, &QLineEdit::returnPressed, &win, apply_dest);
++  QObject::connect (quit, &QPushButton::clicked, &app, &QCoreApplication::quit);
++  QObject::connect (&app, &QCoreApplication::aboutToQuit, &win,
++                    [&] () { agent->stop (); });
++
++  // Do not arm KEY→hold until Gate host:port is set (ephemeral port from type 17).
++  start_agent ();
++  win.show ();
++  return app.exec ();
++}
+diff -ruN wsjtx-baseline/tools/inhibit-agent/test_keying_monitor.cpp wsjtx-work/tools/inhibit-agent/test_keying_monitor.cpp
+--- a/tools/inhibit-agent/test_keying_monitor.cpp	1969-12-31 19:00:00.000000000 -0500
++++ b/tools/inhibit-agent/test_keying_monitor.cpp	2026-09-21 19:06:56.937663167 -0400
+@@ -0,0 +1,81 @@
++// Self-running hang-policy checks (no serial / no UDP).
++// SPDX-License-Identifier: GPL-3.0-or-later
++
++#include "keying_monitor.hpp"
++
++#include <cstdio>
++
++static int g_fails = 0;
++
++#define CHECK(cond) do { \
++  if (!(cond)) { \
++    std::fprintf (stderr, "FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond); \
++    ++g_fails; \
++  } \
++} while (0)
++
++static void test_continuous_ssb_hang_zero ()
++{
++  KeyingMonitor m;
++  m.on_key_assert (0);
++  int hang = m.on_key_open (2000);   // 2 s PTT
++  CHECK (hang == 0);
++  CHECK (m.key_class () == KeyClass::Continuous);
++}
++
++static void test_mark_over_500_is_continuous ()
++{
++  KeyingMonitor m;
++  m.on_key_assert (0);
++  int hang = m.on_key_open (500);
++  CHECK (hang == 0);
++  CHECK (m.key_class () == KeyClass::Continuous);
++}
++
++static void test_breakin_short_mark_has_hang ()
++{
++  KeyingMonitor m;
++  m.on_key_assert (0);
++  int hang = m.on_key_open (60);     // 20 WPM dit
++  CHECK (hang >= KeyingMonitor::kHangMinMs);
++  CHECK (hang <= KeyingMonitor::kHangMaxMs);
++  CHECK (m.key_class () == KeyClass::BreakInCw || m.dit_ms () > 0.0);
++}
++
++static void test_breakin_rekey_during_hang ()
++{
++  KeyingMonitor m;
++  m.on_key_assert (0);
++  int hang = m.on_key_open (60);
++  CHECK (hang > 0);
++  m.on_key_assert (60 + 80);         // gap shorter than hang
++  hang = m.on_key_open (60 + 80 + 180);
++  CHECK (hang > 0);
++  CHECK (m.key_class () == KeyClass::BreakInCw);
++}
++
++static void test_hang_covers_word_gap_sizing ()
++{
++  KeyingMonitor m;
++  m.on_key_assert (0);
++  m.on_key_open (60);
++  int hang = m.hang_ms_break_in ();
++  // 1.5 × 7 × 60 = 630, inside 315..1260
++  CHECK (hang == 630);
++}
++
++int main ()
++{
++  test_continuous_ssb_hang_zero ();
++  test_mark_over_500_is_continuous ();
++  test_breakin_short_mark_has_hang ();
++  test_breakin_rekey_during_hang ();
++  test_hang_covers_word_gap_sizing ();
++  if (g_fails)
++    {
++      std::fprintf (stderr, "%d check(s) failed\n", g_fails);
++      return 1;
++    }
++  std::printf ("test_keying_monitor: 5/5 passed\n");
++  return 0;
++}
+diff -ruN wsjtx-baseline/tools/inhibit-test/main.cpp wsjtx-work/tools/inhibit-test/main.cpp
+--- a/tools/inhibit-test/main.cpp	2026-08-14 09:37:50.000000000 -0400
++++ b/tools/inhibit-test/main.cpp	2026-09-21 19:06:56.937663167 -0400
+@@ -1,7 +1,7 @@
+ // inhibit-test — KEY-agent stand-in for TX Inhibit (docs/TX_INHIBIT.md §3)
+ //
+ // Canonical name: inhibit-test (installed as bin/inhibit-test next to wsjtx).
+-// Formerly inhibit-spacebar. Implements two cooperating roles on one rare KEY:
++// Implements two cooperating roles on one rare KEY:
+ //
+ //   KEY stand-in key: left quote / grave accent `  (not Space — typing
+ //   spaces must not false-trigger holds).
+@@ -31,6 +31,8 @@
+ #include <QtGlobal>
+ #include <QSocketNotifier>
+ 
++#include "TxInhibit/TxInhibitLogic.hpp"
++
+ #include <algorithm>
+ #include <cmath>
+ #include <cstdio>
+@@ -55,7 +57,7 @@
+ 
+ namespace {
+ 
+-static int const kDefaultPort = 22372;
++// --port is required (from InhibitStatus / tooltip).
+ // hold_timeout_ms (wire ttl_ms) — safety on lost hold packets, not hang.
+ static int const kDefaultHoldTimeoutMs = 600;
+ static int const kKeepaliveMs = 200;
+@@ -73,21 +75,7 @@
+ // Letter gap = 3 dits; use up to ~5 dits as "still break-in" open.
+ static double const kMaxIntraTxGapDits = 5.0;
+ 
+-QByteArray encode_hold (QString const& station, QString const& band,
+-                        qint64 seq, int ttl_ms)
+-{
+-  QByteArray body;
+-  body += "{\"tx_inhibit\":1,\"ttl_ms\":";
+-  body += QByteArray::number (ttl_ms);
+-  body += ",\"station\":\"";
+-  body += station.toUtf8 ();
+-  body += "\",\"band\":\"";
+-  body += band.toUtf8 ();
+-  body += "\",\"seq\":";
+-  body += QByteArray::number (seq);
+-  body += '}';
+-  return body;
+-}
++
+ 
+ // --- KEY level readers (grave/backtick ` — rare key, not Space) ------------
+ // Linux: KEY_GRAVE. Windows: VK_OEM_3 (US `~ key). Stdin: '`' (or '~').
+@@ -706,17 +694,16 @@
+                               QStringLiteral ("host"),
+                               QStringLiteral ("127.0.0.1")};
+   QCommandLineOption portOpt {QStringList () << "p" << "port",
+-                              QStringLiteral ("Inhibit UDP port (default 22372)"),
+-                              QStringLiteral ("port"),
+-                              QString::number (kDefaultPort)};
++                              QStringLiteral ("Inhibit UDP port from InhibitStatus / tooltip (required)"),
++                              QStringLiteral ("port")};
++  QCommandLineOption controllerOpt {
++    QStringList () << "controller-id",
++    QStringLiteral ("Lease Controller ID (default TEST-KEY)"),
++    QStringLiteral ("id"),
++    QStringLiteral ("TEST-KEY")};
+   QCommandLineOption stationOpt {QStringList () << "s" << "station",
+-                                 QStringLiteral ("Badge station id"),
+-                                 QStringLiteral ("name"),
+-                                 QStringLiteral ("TEST-KEY")};
+-  QCommandLineOption bandOpt {QStringList () << "b" << "band",
+-                              QStringLiteral ("Band field (informational)"),
+-                              QStringLiteral ("band"),
+-                              QStringLiteral ("144")};
++                                 QStringLiteral ("Badge station text (default: controller-id)"),
++                                 QStringLiteral ("name")};
+   QCommandLineOption ttlOpt {QStringList () << "t" << "ttl-ms",
+                              QStringLiteral ("hold_timeout_ms on hold/keepalive packets (default 600)"),
+                              QStringLiteral ("ms"),
+@@ -733,8 +720,8 @@
+     QStringLiteral ("Log every keepalive (default: HOLD, KEY events, RELEASE only).")};
+   parser.addOption (hostOpt);
+   parser.addOption (portOpt);
++  parser.addOption (controllerOpt);
+   parser.addOption (stationOpt);
+-  parser.addOption (bandOpt);
+   parser.addOption (ttlOpt);
+   parser.addOption (fixedHangOpt);
+   parser.addOption (globalKeysOpt);
+@@ -742,11 +729,30 @@
+   parser.process (app);
+ 
+   QString const host = parser.value (hostOpt);
++  if (!parser.isSet (portOpt))
++    {
++      QTextStream err (stderr);
++      err << "inhibit-test: --port is required (value from InhibitStatus / tooltip)\n";
++      return 2;
++    }
+   quint16 const port = static_cast<quint16> (parser.value (portOpt).toUInt ());
+-  QString const station = parser.value (stationOpt);
+-  QString const band = parser.value (bandOpt);
++  if (port == 0)
++    {
++      QTextStream err (stderr);
++      err << "inhibit-test: --port must be non-zero\n";
++      return 2;
++    }
++  QString const controller_id = parser.value (controllerOpt);
++  QString const station = parser.isSet (stationOpt) ? parser.value (stationOpt)
++                                                    : controller_id;
+   int const hold_timeout_ms = parser.value (ttlOpt).toInt ();
+   bool const fixed_hang_set = parser.isSet (fixedHangOpt);
++  if (controller_id.isEmpty ())
++    {
++      QTextStream err (stderr);
++      err << "controller-id must be non-empty\n";
++      return 2;
++    }
+   int const fixed_hang_ms = fixed_hang_set ? parser.value (fixedHangOpt).toInt () : 0;
+   bool const global_keys = parser.isSet (globalKeysOpt);
+   bool const verbose_ka = parser.isSet (quietKaOpt);
+@@ -855,7 +861,9 @@
+       {
+         return; // END_HOLD already cleared hold_active
+       }
+-    QByteArray payload = encode_hold (station, band, seq++, ttl);
++    QByteArray payload = TxInhibit::build_datagram (
++        controller_id, static_cast<quint32> (ttl), station);
++    ++seq;
+     qint64 n = sock.writeDatagram (payload, QHostAddress (host), port);
+     QTextStream out (stdout);
+     char const * tag = ttl == 0 ? "RELEASE" : (is_keepalive ? "KEEPALIVE" : "HOLD");
+@@ -932,7 +940,7 @@
+       << "  ` (grave) = KEY level: hold to assert, release to open  - not Space\n"
+       << "  ~ (shift+grave) = LATCH on; press ` or ~ again to release\n"
+       << "  q or Esc  = release hold and quit\n"
+-      << "  station=" << station << "  band=" << band << '\n'
++      << "  controller_id=" << controller_id << "  station=" << station << '\n'
+       << "  hold_timeout_ms=" << hold_timeout_ms
+       << "  keepalive every " << kKeepaliveMs << " ms while hold active\n"
+       << "  key poll=" << poll_ms << " ms"
+diff -ruN wsjtx-baseline/tools/README-INHIBIT-TESTER.md wsjtx-work/tools/README-INHIBIT-TESTER.md
+--- a/tools/README-INHIBIT-TESTER.md	2026-08-13 03:42:09.000000000 -0400
++++ b/tools/README-INHIBIT-TESTER.md	2026-09-21 19:06:56.937663167 -0400
+@@ -7,22 +7,25 @@
+ 
+ | Name | Role |
+ |------|------|
+-| **`inhibit-test`** | **Canonical console.** Cross-platform; installed as `bin/inhibit-test` next to `wsjtx`. |
+-| **`inhibit-test-gui`** | **Windows GUI.** Same protocol/hang policy; mouse or grave `` ` ``. `bin/inhibit-test-gui.exe`. (Source still under `tools/inhibit_spacebar/`.) |
++| **`inhibit-agent`** | **Standalone KEY agent (CLI).** USB-serial **CTS** + dest `host:port`. |
++| **`inhibit-agent-gui`** | **Standalone KEY agent (GUI).** CTS in; dest `host:port` in the window. |
++| **`wims-key-agent`** | **WIMS KEY agent.** Destinations from WIMS discovery. WIMS tree, not this repo. |
++| **`inhibit-test`** | **Bench console.** Keyboard KEY stand-in. |
+ | `send_inhibit_hold.py` | Python stand-in (dev / scripted tests). |
+ 
+-Prefer **`inhibit-test`** (console) or **`inhibit-test-gui`** (Windows GUI) in docs and scripts.
++**KEY agent** is the role. Standalone program: [docs/INHIBIT_AGENT.md](../docs/INHIBIT_AGENT.md).
++
++Prefer **`inhibit-test`** (console) in docs and scripts.
+ 
+ ## Build / install
+ 
+ ```text
+ tools/inhibit-test/main.cpp       →  target inhibit-test       →  bin/inhibit-test[.exe]
+-tools/inhibit_spacebar/*.c        →  target inhibit-test-gui   →  bin/inhibit-test-gui.exe  (Windows only)
+ ```
+ 
+-## Behaviour (both tools)
++## Behaviour
+ 
+-**KEY key = grave/backtick `` ` ``** (not Space — avoids false holds while typing). GUI also accepts mouse on the big button.
++**KEY key = grave/backtick `` ` ``** (not Space — avoids false holds while typing).
+ 
+ 1. **KEY assert** → **hold** immediately (`ttl_ms` = hold_timeout_ms, default 600) + keepalives ~200 ms.  
+ 2. **KEYing monitor** classifies break-in CW vs continuous KEY; measures dit if break-in.  
+@@ -62,19 +65,13 @@
+ 
+ ```bash
+ sudo usermod -aG input "$USER"   # Linux; then full log out/in
+-inhibit-test --host 127.0.0.1 --port 22372 --station TEST-KEY --ttl-ms 600
++inhibit-test --host 127.0.0.1 --port <from-tooltip> --station TEST-KEY --ttl-ms 600
+ inhibit-test --fixed-hang-ms 0
+ inhibit-test --global-keys             # ` and ~ readable from any window
+ ```
+ 
+-### Windows GUI (`inhibit-test-gui`)
+-
+-Keys only when the GUI window is focused. Optional **fixed hang ms** field (empty = KEYing monitor). Esc / Force RELEASE skips hang.
+-
+-```text
+-bin\inhibit-test-gui.exe
+-bin\inhibit-test.exe          optional console sibling (Qt)
+-```
++`--port` is required: use the inhibit listen port from the WSJT-X status-bar
++tooltip or InhibitStatus (type 17).
+ 
+ **Tip:** hold `` ` `` ≥500 ms for hang=0 (continuous). Short taps use break-in hang unless fixed hang is 0.
+ 
+diff -ruN wsjtx-baseline/tools/Send-InhibitHold.ps1 wsjtx-work/tools/Send-InhibitHold.ps1
+--- a/tools/Send-InhibitHold.ps1	2026-08-13 03:42:09.000000000 -0400
++++ b/tools/Send-InhibitHold.ps1	2026-09-21 19:06:56.937663167 -0400
+@@ -3,32 +3,28 @@
+   Minimal TX Inhibit KEY-agent stand-in for Windows. Needs no keyboard focus.
+ 
+ .DESCRIPTION
+-  Sends the UDP hold protocol from docs/TX_INHIBIT.md so TX Inhibit can be
+-  exercised while you are driving the WSJT-X window with mouse and keyboard.
++  Sends NetworkMessage::TxInhibit (type 18) UDP to the dedicated inhibit port
++  (docs/TX_INHIBIT.md) so TX Inhibit can be exercised while you drive WSJT-X.
+ 
+-  The interactive helpers (inhibit-test, inhibit-test-gui) read a held key and
+-  therefore need focus themselves, which makes it impossible to hold the KEY
+-  and press Tune in WSJT-X at the same time. This script holds from a separate
+-  window instead, leaving WSJT-X free.
++  The interactive helper (inhibit-test) reads a held key and therefore
++  needs focus itself, which makes it impossible to hold the KEY and
++  press Tune in WSJT-X at the same time. This script holds from a
++  separate window instead, leaving WSJT-X free.
+ 
+-  Mirrors the Hold-sender half of a real KEY agent (docs/TX_INHIBIT.md 3):
++  Mirrors the Hold-sender half of a real KEY agent (docs/TX_INHIBIT.md §3):
+   an immediate hold, keepalives about every 200 ms, and an explicit release
+-  (ttl_ms 0) on exit.
++  (TTL 0) on exit for this Controller ID only.
+ 
+-  Fail-safe: if this script is killed without releasing, the station's own hold
+-  timeout clears the hold after -TtlMs (default 600 ms). That is the deadman
+-  path, and it is the reason keepalives exist.
++  Fail-safe: if this script is killed without releasing, the station's own
++  lease timeout clears this controller's row after -TtlMs (default 600 ms).
+ 
+ .EXAMPLE
+-  # Hold until Ctrl+C. Start this, then go press Tune in WSJT-X.
+   .\Send-InhibitHold.ps1
+ 
+ .EXAMPLE
+-  # Hold for 20 seconds, then release automatically.
+   .\Send-InhibitHold.ps1 -Seconds 20
+ 
+ .EXAMPLE
+-  # Clear a stuck hold.
+   .\Send-InhibitHold.ps1 -Release
+ 
+ .NOTES
+@@ -37,12 +33,15 @@
+ [CmdletBinding()]
+ param(
+   [string]$TargetHost = '127.0.0.1',
+-  [int]$Port = 22372,
+-  [string]$Station = 'PS-TEST',
++  # Required: inhibit listen port from InhibitStatus / status-bar tooltip.
++  [Parameter(Mandatory = $true)]
++  [int]$Port,
++  [string]$ControllerId = 'PS-TEST',
++  [string]$Station = '',
+   # 0 = hold until Ctrl+C
+   [int]$Seconds = 0,
+-  # Wire ttl_ms: how long the station keeps the hold without a new packet.
+-  # Protocol range is 100..30000.
++  # Wire TTL ms: how long the station keeps this lease without a new packet.
++  # Protocol range is 100..30000 (0 = release this controller).
+   [int]$TtlMs = 600,
+   [int]$KeepaliveMs = 200,
+   [switch]$Release
+@@ -50,61 +49,70 @@
+ 
+ $ErrorActionPreference = 'Stop'
+ 
+-if ($TtlMs -lt 100 -or $TtlMs -gt 30000) {
+-  throw "TtlMs must be 100..30000 (protocol range); got $TtlMs"
++if ([string]::IsNullOrEmpty($ControllerId)) {
++  throw 'ControllerId must be non-empty (lease key)'
+ }
+-if ($Station -match '["\\]') {
+-  throw 'Station must not contain quotes or backslashes (the payload is hand-built JSON)'
++if ($Station -eq '') {
++  $Station = $ControllerId
++}
++if ($TtlMs -ne 0 -and ($TtlMs -lt 100 -or $TtlMs -gt 30000)) {
++  throw "TtlMs must be 0 or 100..30000 (protocol range); got $TtlMs"
++}
++
++function Encode-QByteArray([byte[]]$Data) {
++  $len = [BitConverter]::GetBytes([uint32]$Data.Length)
++  if ([BitConverter]::IsLittleEndian) { [Array]::Reverse($len) }
++  return $len + $Data
++}
++
++function Encode-TxInhibit([string]$Controller, [uint32]$Ttl, [string]$StationText) {
++  # magic, schema 3, type 18 — big-endian quint32
++  $hdr = New-Object byte[] 12
++  $vals = @([uint32]0xADBCCBDA, [uint32]3, [uint32]18)
++  for ($i = 0; $i -lt 3; $i++) {
++    $b = [BitConverter]::GetBytes($vals[$i])
++    if ([BitConverter]::IsLittleEndian) { [Array]::Reverse($b) }
++    [Array]::Copy($b, 0, $hdr, $i * 4, 4)
++  }
++  $utf8 = [Text.Encoding]::UTF8
++  $targetId = Encode-QByteArray @()   # empty Id = any instance at this port
++  $controller = Encode-QByteArray ($utf8.GetBytes($Controller))
++  $ttlBytes = [BitConverter]::GetBytes($Ttl)
++  if ([BitConverter]::IsLittleEndian) { [Array]::Reverse($ttlBytes) }
++  $station = Encode-QByteArray ($utf8.GetBytes($StationText))
++  return $hdr + $targetId + $controller + $ttlBytes + $station
+ }
+ 
+ $udp = [System.Net.Sockets.UdpClient]::new()
+-$seq = 0
+ 
+ function Send-Hold {
+   param([int]$Ttl)
+-  $script:seq++
+-  $json = '{"tx_inhibit":1,"ttl_ms":' + $Ttl +
+-          ',"station":"' + $Station +
+-          '","seq":' + $script:seq + '}'
+-  $bytes = [Text.Encoding]::UTF8.GetBytes($json)
++  $bytes = Encode-TxInhibit -Controller $ControllerId -Ttl ([uint32]$Ttl) -StationText $Station
+   [void]$udp.Send($bytes, $bytes.Length, $TargetHost, $Port)
+-  return $json
++  return $bytes.Length
+ }
+ 
+ try {
+   if ($Release) {
+-    $sent = Send-Hold -Ttl 0
+-    Write-Host "release -> ${TargetHost}:${Port}  $sent"
++    $n = Send-Hold -Ttl 0
++    Write-Host "release controller=$ControllerId -> ${TargetHost}:${Port}  ($n bytes type-18)"
+     return
+   }
+ 
+-  Write-Host "Holding TX Inhibit on ${TargetHost}:${Port} (ttl ${TtlMs} ms, keepalive ${KeepaliveMs} ms)"
+-  if ($Seconds -gt 0) {
+-    Write-Host "Auto-release after $Seconds s."
+-  } else {
+-    Write-Host 'Ctrl+C to release. WSJT-X keeps focus - go press Tune.'
+-  }
+-
+-  $deadline = if ($Seconds -gt 0) { (Get-Date).AddSeconds($Seconds) } else { $null }
+-  $ticks = 0
+-  while ($true) {
+-    [void](Send-Hold -Ttl $TtlMs)
+-    $ticks++
+-    # One line per second, so the console shows it is alive without scrolling.
+-    if (($ticks * $KeepaliveMs) % 1000 -lt $KeepaliveMs) {
+-      Write-Host ('  holding... {0:n0}s' -f ($ticks * $KeepaliveMs / 1000))
+-    }
+-    if ($deadline -and (Get-Date) -ge $deadline) { break }
++  Write-Host "HOLD controller=$ControllerId station=$Station ttl_ms=$TtlMs -> ${TargetHost}:${Port}"
++  [void](Send-Hold -Ttl $TtlMs)
++  $deadline = if ($Seconds -gt 0) { [datetime]::UtcNow.AddSeconds($Seconds) } else { [datetime]::MaxValue }
++  while ([datetime]::UtcNow -lt $deadline) {
+     Start-Sleep -Milliseconds $KeepaliveMs
++    [void](Send-Hold -Ttl $TtlMs)
+   }
+ }
+ finally {
+-  # Normal end of a hold is an explicit release, not a timeout.
+-  try {
+-    $sent = Send-Hold -Ttl 0
+-    Write-Host "released  $sent"
+-  } catch {
+-    Write-Warning "release failed: $_  (the hold will expire after ${TtlMs} ms anyway)"
++  if (-not $Release) {
++    try {
++      [void](Send-Hold -Ttl 0)
++      Write-Host "RELEASE controller=$ControllerId -> ${TargetHost}:${Port}"
++    } catch {}
+   }
+-  $udp.Close()
++  $udp.Dispose()
+ }
+diff -ruN wsjtx-baseline/tools/send_inhibit_hold.py wsjtx-work/tools/send_inhibit_hold.py
+--- a/tools/send_inhibit_hold.py	2026-08-13 03:42:09.000000000 -0400
++++ b/tools/send_inhibit_hold.py	2026-09-21 19:06:56.937663167 -0400
+@@ -10,19 +10,18 @@
+   python3 tools/send_inhibit_hold.py --ttl-ms 3000 --station TEST
+   python3 tools/send_inhibit_hold.py --ttl-ms 0
+ 
+-Default UDP port is 22372.
++UDP port must match the station InhibitStatus / status-bar tooltip (ephemeral).
+ """
+ from __future__ import annotations
+ 
+ import argparse
+-import json
+ import os
+ import select
+ import socket
++import struct
+ import sys
+ import time
+ 
+-DEFAULT_PORT = 22372
+ DEFAULT_TTL_MS = 600  # hold_timeout_ms (safety), not hang
+ KEEPALIVE_S = 0.2
+ # Hang = 1.5 × word gap = 10.5 × dit (docs/TX_INHIBIT.md §3.4); WPM ~10..40
+@@ -31,18 +30,32 @@
+ HANG_DIT_MULT = 10.5
+ CONTINUOUS_MARK_S = 0.5  # non-break-in / SSB → hang 0
+ 
+-
+-def encode(station: str, band: str, seq: int, ttl_ms: int) -> bytes:
+-    return json.dumps(
+-        {
+-            "tx_inhibit": 1,
+-            "ttl_ms": int(ttl_ms),
+-            "station": station,
+-            "band": band,
+-            "seq": int(seq),
+-        },
+-        separators=(",", ":"),
+-    ).encode()
++# NetworkMessage framing (schema 3 / Qt_5_4, big-endian).
++_NM_MAGIC = 0xADBCCBDA
++_NM_SCHEMA = 3
++_NM_TX_INHIBIT = 18  # NetworkMessage::TxInhibit
++
++
++def _qbytearray(data: bytes) -> bytes:
++    """QDataStream QByteArray: quint32 length + bytes (empty length 0)."""
++    return struct.pack(">I", len(data)) + data
++
++
++def encode(
++    controller_id: str,
++    ttl_ms: int,
++    station: str = "",
++    target_id: str = "",
++) -> bytes:
++    """Build NetworkMessage::TxInhibit (type 18) for the dedicated inhibit port."""
++    if not controller_id:
++        raise ValueError("controller_id must be non-empty")
++    body = struct.pack(">III", _NM_MAGIC, _NM_SCHEMA, _NM_TX_INHIBIT)
++    body += _qbytearray(target_id.encode("utf-8"))
++    body += _qbytearray(controller_id.encode("utf-8"))
++    body += struct.pack(">I", int(ttl_ms) & 0xFFFFFFFF)
++    body += _qbytearray(station.encode("utf-8"))
++    return body
+ 
+ 
+ def send_to(sock: socket.socket, host: str, port: int, payload: bytes) -> None:
+@@ -50,10 +63,13 @@
+ 
+ 
+ def one_shot(args: argparse.Namespace) -> None:
+-    msg = encode(args.station, args.band, args.seq, args.ttl_ms)
++    msg = encode(args.controller_id, args.ttl_ms, args.station, args.target_id)
+     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+     send_to(sock, args.host, args.port, msg)
+-    print(f"sent {msg!r} -> {args.host}:{args.port}")
++    print(
++        f"sent type-18 controller={args.controller_id!r} ttl_ms={args.ttl_ms} "
++        f"({len(msg)} bytes) -> {args.host}:{args.port}"
++    )
+ 
+ 
+ class HangPolicy:
+@@ -176,13 +192,15 @@
+ 
+     def emit(ttl_ms: int) -> None:
+         nonlocal seq
+-        payload = encode(args.station, args.band, seq, ttl_ms)
++        payload = encode(
++            args.controller_id, ttl_ms, args.station, args.target_id
++        )
+         send_to(sock, args.host, args.port, payload)
+         seq += 1
+         action = "HOLD" if ttl_ms else "RELEASE"
+         print(
+             f"{time.strftime('%H:%M:%S')}  {action}  ttl_ms={ttl_ms}  "
+-            f"-> {args.host}:{args.port}",
++            f"controller={args.controller_id!r} -> {args.host}:{args.port}",
+             flush=True,
+         )
+ 
+@@ -200,7 +218,8 @@
+         f"  grave/`  = KEY level (press = hold, release = hang then free)\n"
+         f"  (not Space — typing won't false-trigger)\n"
+         f"  Ctrl-C    = quit\n"
+-        f"  station={args.station!r}  ttl_ms={args.ttl_ms}  "
++        f"  controller={args.controller_id!r}  station={args.station!r}  "
++        f"ttl_ms={args.ttl_ms}  "
+         f"hang={'fixed '+str(fixed_hang)+'ms' if use_fixed else 'adaptive'}\n",
+         flush=True,
+     )
+@@ -260,15 +279,33 @@
+         description="Send TX Inhibit hold/release UDP datagrams to wsjtx-inhibit"
+     )
+     p.add_argument("--host", default="127.0.0.1")
+-    p.add_argument("--port", type=int, default=DEFAULT_PORT)
++    p.add_argument(
++        "--port",
++        type=int,
++        required=True,
++        help="Inhibit UDP port from InhibitStatus / tooltip",
++    )
+     p.add_argument(
+         "--ttl-ms",
+         type=int,
+         default=DEFAULT_TTL_MS,
+         help="Hold TTL ms; 0 = release (one-shot). Interactive: keepalive TTL.",
+     )
+-    p.add_argument("--station", default="TEST-SSB")
+-    p.add_argument("--band", default="144")
++    p.add_argument(
++        "--controller-id",
++        default="TEST-SSB",
++        help="Lease Controller ID (required non-empty on the wire)",
++    )
++    p.add_argument(
++        "--station",
++        default=None,
++        help="Badge station text (default: controller-id)",
++    )
++    p.add_argument(
++        "--target-id",
++        default="",
++        help="NetworkMessage Id (empty=any; non-empty must match instance Id)",
++    )
+     p.add_argument("--seq", type=int, default=1)
+     p.add_argument(
+         "-i",
+@@ -283,6 +320,10 @@
+         help="Interactive: fixed hang after KEY up instead of adaptive",
+     )
+     args = p.parse_args()
++    if not args.controller_id:
++        p.error("controller-id must be non-empty")
++    if args.station is None:
++        args.station = args.controller_id
+     if args.interactive:
+         interactive(args)
+     else:
+diff -ruN wsjtx-baseline/Transceiver/DXLabSuiteCommanderTransceiver.cpp wsjtx-work/Transceiver/DXLabSuiteCommanderTransceiver.cpp
+--- a/Transceiver/DXLabSuiteCommanderTransceiver.cpp	2026-08-13 04:06:29.000000000 -0400
++++ b/Transceiver/DXLabSuiteCommanderTransceiver.cpp	2026-09-21 19:42:42.015252180 -0400
+@@ -64,6 +64,8 @@
+                this, &Transceiver::tx_inhibit_changed);
+       connect (wrapped_.get (), &Transceiver::tx_inhibit_port_bound,
+                this, &Transceiver::tx_inhibit_port_bound);
++      connect (wrapped_.get (), &Transceiver::tx_inhibit_error,
++               this, &Transceiver::tx_inhibit_error);
+     }
+ }
+ 
+diff -ruN wsjtx-baseline/Transceiver/EmulateSplitTransceiver.cpp wsjtx-work/Transceiver/EmulateSplitTransceiver.cpp
+--- a/Transceiver/EmulateSplitTransceiver.cpp	2026-08-13 04:06:29.000000000 -0400
++++ b/Transceiver/EmulateSplitTransceiver.cpp	2026-09-21 19:42:42.015252180 -0400
+@@ -23,6 +23,7 @@
+   connect (wrapped_.get (), &Transceiver::failure, this, &Transceiver::failure);
+   connect (wrapped_.get (), &Transceiver::tx_inhibit_changed, this, &Transceiver::tx_inhibit_changed);
+   connect (wrapped_.get (), &Transceiver::tx_inhibit_port_bound, this, &Transceiver::tx_inhibit_port_bound);
++  connect (wrapped_.get (), &Transceiver::tx_inhibit_error, this, &Transceiver::tx_inhibit_error);
+ }
+ 
+ void EmulateSplitTransceiver::set (TransceiverState const& s, unsigned sequence_number) noexcept
+diff -ruN wsjtx-baseline/Transceiver/HamlibTransceiver.cpp wsjtx-work/Transceiver/HamlibTransceiver.cpp
+--- a/Transceiver/HamlibTransceiver.cpp	2026-08-14 09:37:50.000000000 -0400
++++ b/Transceiver/HamlibTransceiver.cpp	2026-09-21 19:42:42.015252180 -0400
+@@ -1,10 +1,12 @@
+ #include "HamlibTransceiver.hpp"
+ #include "TxInhibit/TxInhibitGate.hpp"
++#include "TxInhibit/TxInhibitSimPort.hpp"
+ 
+ #include <cstring>
+ #include <cmath>
+ #include <tuple>
+ #include <QByteArray>
++#include <QCoreApplication>
+ #include <QString>
+ #include <QStandardPaths>
+ #include <QFile>
+@@ -445,6 +447,12 @@
+     case TransceiverFactory::PTT_method_RTS:
+       // Stock Hamlib RTS/DTR (shared CAT port uses same fd). TX Inhibit
+       // filters do_ptt → apply_physical_ptt; it does not open the port.
++      if (is_inhibit_sim_port (ptt_port))
++        {
++          // Dummy PTT port: start the gate, do not open a UART.
++          m_->set_conf ("ptt_type", "None");
++          break;
++        }
+       if (!ptt_port.isEmpty ())
+         {
+ #if defined (WIN32)
+@@ -562,6 +570,12 @@
+ 
+     case TransceiverFactory::PTT_method_DTR:
+     case TransceiverFactory::PTT_method_RTS:
++      if (is_inhibit_sim_port (params.ptt_port))
++        {
++          // Dummy PTT port: start the gate, do not open a UART.
++          m_->set_conf ("ptt_type", "None");
++          break;
++        }
+       if (params.ptt_port.size ()
+           && params.ptt_port != "None"
+           && (m_->is_dummy_
+@@ -913,10 +927,12 @@
+            this, &Transceiver::tx_inhibit_changed);
+   connect (inhibit_gate_, &TxInhibitGate::portBound,
+            this, &Transceiver::tx_inhibit_port_bound);
+-  // UDP bind problems are non-fatal: keep stock intent→pin path, log only.
++  // UDP bind problems are non-fatal for CAT/PTT: keep stock intent→pin path.
++  // Surface to the UI so Enable-on with no listen port is visible.
+   connect (inhibit_gate_, &TxInhibitGate::lineError,
+            this, [this] (QString const& msg) {
+              CAT_TRACE (msg);
++             Q_EMIT tx_inhibit_error (msg);
+            });
+   // Pin apply failure: same visibility as stock rig_set_ptt throw path.
+   // Exception is already contained in the gate (no qFatal from timer slots).
+@@ -925,8 +941,10 @@
+              CAT_TRACE (msg);
+              Q_EMIT failure (msg);
+            });
++  // Same Id MessageClient puts on Heartbeat / InhibitStatus (type 17).
++  inhibit_gate_->set_instance_id (QCoreApplication::applicationName ());
+   inhibit_gate_->start_listening ();
+-  CAT_TRACE ("TX Inhibit gate listening (pin filter on do_ptt)");
++  CAT_TRACE ("TX Inhibit gate listening (ephemeral port; pin filter on do_ptt)");
+ }
+ 
+ void HamlibTransceiver::stop_tx_inhibit_gate ()
+diff -ruN wsjtx-baseline/Transceiver/HRDTransceiver.cpp wsjtx-work/Transceiver/HRDTransceiver.cpp
+--- a/Transceiver/HRDTransceiver.cpp	2026-08-13 04:06:29.000000000 -0400
++++ b/Transceiver/HRDTransceiver.cpp	2026-09-21 19:42:42.015252180 -0400
+@@ -134,6 +134,8 @@
+                this, &Transceiver::tx_inhibit_changed);
+       connect (wrapped_.get (), &Transceiver::tx_inhibit_port_bound,
+                this, &Transceiver::tx_inhibit_port_bound);
++      connect (wrapped_.get (), &Transceiver::tx_inhibit_error,
++               this, &Transceiver::tx_inhibit_error);
+     }
+ }
+ 
+diff -ruN wsjtx-baseline/Transceiver/OmniRigTransceiver.cpp wsjtx-work/Transceiver/OmniRigTransceiver.cpp
+--- a/Transceiver/OmniRigTransceiver.cpp	2026-08-13 04:06:29.000000000 -0400
++++ b/Transceiver/OmniRigTransceiver.cpp	2026-09-21 19:42:42.016252167 -0400
+@@ -121,6 +121,8 @@
+                this, &Transceiver::tx_inhibit_changed);
+       connect (wrapped_.get (), &Transceiver::tx_inhibit_port_bound,
+                this, &Transceiver::tx_inhibit_port_bound);
++      connect (wrapped_.get (), &Transceiver::tx_inhibit_error,
++               this, &Transceiver::tx_inhibit_error);
+     }
+   CAT_TRACE ("constructed");
+ }
+diff -ruN wsjtx-baseline/Transceiver/TCITransceiver.cpp wsjtx-work/Transceiver/TCITransceiver.cpp
+--- a/Transceiver/TCITransceiver.cpp	2026-08-13 04:06:29.000000000 -0400
++++ b/Transceiver/TCITransceiver.cpp	2026-09-21 19:42:42.016252167 -0400
+@@ -216,6 +216,8 @@
+                this, &Transceiver::tx_inhibit_changed);
+       connect (wrapped_.get (), &Transceiver::tx_inhibit_port_bound,
+                this, &Transceiver::tx_inhibit_port_bound);
++      connect (wrapped_.get (), &Transceiver::tx_inhibit_error,
++               this, &Transceiver::tx_inhibit_error);
+     }
+   m_samplesPerFFT = 6912 / 2;
+   tci_Ready = false;
+diff -ruN wsjtx-baseline/Transceiver/Transceiver.hpp wsjtx-work/Transceiver/Transceiver.hpp
+--- a/Transceiver/Transceiver.hpp	2026-08-13 04:06:29.000000000 -0400
++++ b/Transceiver/Transceiver.hpp	2026-09-21 19:42:42.015252180 -0400
+@@ -260,6 +260,8 @@
+                                     , quint32 hold_rx, quint32 release_rx
+                                     , quint32 expiries, quint32 invalid) const;
+   Q_SIGNAL void tx_inhibit_port_bound (quint16 port) const;
++  // Bind / listen arming failed (e.g. ephemeral port stayed 0). Not a CAT fault.
++  Q_SIGNAL void tx_inhibit_error (QString const& message) const;
+ 
+   // Ready to be destroyed.
+   Q_SIGNAL void finished () const;
+diff -ruN wsjtx-baseline/TxInhibit/TxInhibitGate.cpp wsjtx-work/TxInhibit/TxInhibitGate.cpp
+--- a/TxInhibit/TxInhibitGate.cpp	2026-08-14 09:37:50.000000000 -0400
++++ b/TxInhibit/TxInhibitGate.cpp	2026-09-21 19:42:22.864492443 -0400
+@@ -2,16 +2,75 @@
+ 
+ #include <exception>
+ 
++#include <QByteArray>
+ #include <QHostAddress>
+ #include <QTimer>
+ #include <QUdpSocket>
+ 
++#ifdef Q_OS_WIN
++# include <winsock2.h>
++# include <ws2tcpip.h>
++#else
++# include <arpa/inet.h>
++# include <netinet/in.h>
++# include <sys/socket.h>
++#endif
++
++namespace
++{
++  // Qt 5 can return true from QUdpSocket::bind(port 0) while localPort()
++  // is still 0. Controllers reject InhibitStatus type 17 with port 0, so a
++  // portBound(0) leaves the KEY-agent target list empty.
++  quint16 native_udp_local_port (QUdpSocket * udp)
++  {
++    if (!udp)
++      {
++        return 0;
++      }
++    qintptr const fd = udp->socketDescriptor ();
++    if (fd < 0)
++      {
++        return 0;
++      }
++    sockaddr_storage ss {};
++#ifdef Q_OS_WIN
++    int len = sizeof ss;
++    SOCKET const s = static_cast<SOCKET> (fd);
++    if (::getsockname (s, reinterpret_cast<sockaddr *> (&ss), &len) != 0)
++      {
++        return 0;
++      }
++#else
++    socklen_t len = sizeof ss;
++    if (::getsockname (static_cast<int> (fd), reinterpret_cast<sockaddr *> (&ss),
++                       &len) != 0)
++      {
++        return 0;
++      }
++#endif
++    if (ss.ss_family == AF_INET)
++      {
++        return ntohs (reinterpret_cast<sockaddr_in *> (&ss)->sin_port);
++      }
++    if (ss.ss_family == AF_INET6)
++      {
++        return ntohs (reinterpret_cast<sockaddr_in6 *> (&ss)->sin6_port);
++      }
++    return 0;
++  }
++}
++
+ TxInhibitGate::TxInhibitGate (QObject * parent)
+   : QObject {parent}
+ {
+   uptime_.start ();
+ }
+ 
++void TxInhibitGate::set_instance_id (QString const& id)
++{
++  logic_.set_instance_id (id);
++}
++
+ TxInhibitGate::~TxInhibitGate ()
+ {
+   // Never emit physicalPtt from the destructor — Hamlib may already be closed.
+@@ -32,7 +91,6 @@
+   // Not hypothetical for this audience: WSJT-X operators run Meinberg NTP,
+   // Dimension4, BktTimeSync and similar, all of which step the system clock,
+   // often repeatedly. QElapsedTimer is unaffected by clock changes.
+-  // See docs/REVIEW-rc2.md C1.
+   return uptime_.isValid () ? uptime_.elapsed () : 0;
+ }
+ 
+@@ -55,24 +113,42 @@
+       return false;
+     }
+   udp_ = new QUdpSocket (this);
+-  // Prefer well-known port 22372 so KEY agents can use a fixed default.
+-  // ShareAddress|ReuseAddressHint lets multiple local WSJT-X stations share 22372;
+-  // which process receives a given datagram is OS-dependent — one WSJT-X station per
+-  // host (or exclusive bind) is preferred for multi-op.
++  // Bind an ephemeral port (OS-assigned). Controllers learn the port from
++  // InhibitStatus (type 17) on the UDP Server stream. Each instance on a
++  // host gets its own port.
+   QHostAddress const any4 {QHostAddress::AnyIPv4};
+-  if (!udp_->bind (any4, TxInhibit::default_gate_port,
+-                   QUdpSocket::ShareAddress | QUdpSocket::ReuseAddressHint))
++  auto fail_bind = [this] (QString const& err) {
++    if (udp_)
++      {
++        udp_->close ();
++        udp_->deleteLater ();
++        udp_ = nullptr;
++      }
++    bound_port_ = 0;
++    Q_EMIT lineError (QStringLiteral ("TX Inhibit: UDP bind failed: %1").arg (err));
++    return false;
++  };
++  // Test hook: WSJTX_TX_INHIBIT_FORCE_BIND_FAIL=1 forces arming failure
++  // (no listen port, lineError, no portBound).
++  if (qgetenv ("WSJTX_TX_INHIBIT_FORCE_BIND_FAIL") == QByteArray {"1"})
+     {
+-      if (!udp_->bind (any4, quint16 (0)))
+-        {
+-          QString const err = udp_->errorString ();
+-          udp_->deleteLater ();
+-          udp_ = nullptr;
+-          Q_EMIT lineError (QStringLiteral ("TX Inhibit: UDP bind failed: %1").arg (err));
+-          return false;
+-        }
++      return fail_bind (QStringLiteral ("forced bind failure (WSJTX_TX_INHIBIT_FORCE_BIND_FAIL=1)"));
++    }
++  if (!udp_->bind (any4, quint16 (0)))
++    {
++      return fail_bind (udp_->errorString ());
+     }
+   bound_port_ = udp_->localPort ();
++  if (0 == bound_port_)
++    {
++      bound_port_ = native_udp_local_port (udp_);
++    }
++  if (0 == bound_port_)
++    {
++      // bind() succeeded but the OS-assigned port is not visible.
++      // Do not emit portBound(0): controllers drop type 17 with port 0.
++      return fail_bind (QStringLiteral ("ephemeral port is 0 after bind"));
++    }
+   QObject::connect (udp_, &QUdpSocket::readyRead, this, &TxInhibitGate::on_udp_ready);
+   Q_EMIT portBound (bound_port_);
+ 
+diff -ruN wsjtx-baseline/TxInhibit/TxInhibitGate.hpp wsjtx-work/TxInhibit/TxInhibitGate.hpp
+--- a/TxInhibit/TxInhibitGate.hpp	2026-08-14 09:37:50.000000000 -0400
++++ b/TxInhibit/TxInhibitGate.hpp	2026-09-21 19:42:22.864492443 -0400
+@@ -7,9 +7,9 @@
+ //   assert PTT  ⇔  want_tx  and  not hold
+ //
+ // • want_tx arrives from HamlibTransceiver::do_ptt() via set_intent().
+-// • Hold is private (UDP keepalives + hold_timeout_ms safety timeout).
++// • Hold is private (per-controller leases OR'd + lease TTL deadman).
+ //   CW anti-chatter hang lives only in the KEY agent; normal end is
+-//   release hold (ttl_ms: 0). See docs/TX_INHIBIT.md §3.
++//   release of that controller's lease (TTL 0). See docs/TX_INHIBIT.md §3.
+ // • No serial I/O here. Hamlib owns CAT and RTS/DTR; this only decides
+ //   whether to assert PTT or release PTT on the pin.
+ // • WSJT-X station = this WSJT-X station (app + PC + radio + antenna).
+@@ -38,6 +38,10 @@
+   explicit TxInhibitGate (QObject * parent = nullptr);
+   ~TxInhibitGate () override;
+ 
++  // NetworkMessage Id for this station (usually QApplication::applicationName()).
++  // Type-18 datagrams with a non-empty target Id must match; empty Id = any.
++  void set_instance_id (QString const& id);
++
+ public slots:
+   // Bind UDP + start hold-timeout poll timer (once on transceiver thread).
+   void start_listening ();
+@@ -61,7 +65,8 @@
+                        , quint32 hold_rx, quint32 release_rx
+                        , quint32 expiries, quint32 invalid);
+ 
+-  // Bound UDP port (22372 or ephemeral).
++  // Bound UDP inhibit listen port (always ephemeral / OS-assigned).
++  // Never emitted with port 0: that is not a usable KEY-agent target.
+   void portBound (quint16 port);
+ 
+   // Non-fatal operator-visible problems (e.g. total UDP bind failure).
+@@ -78,7 +83,7 @@
+   void tick ();
+ 
+ private:
+-  // Returns true if UDP is listening (preferred or ephemeral port).
++  // Returns true if UDP is listening (ephemeral OS-assigned port).
+   bool ensure_udp ();
+   void apply_line ();
+   // Emits physicalPtt with exceptions contained. The slot on the other end
+diff -ruN wsjtx-baseline/TxInhibit/TxInhibitLogic.hpp wsjtx-work/TxInhibit/TxInhibitLogic.hpp
+--- a/TxInhibit/TxInhibitLogic.hpp	2026-08-13 03:42:08.000000000 -0400
++++ b/TxInhibit/TxInhibitLogic.hpp	2026-09-21 19:42:22.864492443 -0400
+@@ -2,61 +2,66 @@
+ #define TX_INHIBIT_LOGIC_HPP__
+ 
+ // ---------------------------------------------------------------------------
+-// Pure, I/O-free TX Inhibit logic (parse + hold timeout)
++// Pure, I/O-free TX Inhibit logic (parse + per-controller leases)
+ //
+ // No sockets, no serial. Unit-testable; keep in sync with KEY-agent senders.
+ //
+ // Glossary: docs/TX_INHIBIT.md
+ //
+-//   assert PTT  ⇔  want_tx and not hold
++//   assert PTT  ⇔  want_tx  and  not hold
+ //
+-//   WSJT-X station only: hold packets + hold_timeout_ms (wire ttl_ms) — safety
+-//   timeout if keepalives stop. Agent hang (CW anti-chatter after release
+-//   KEY, then release hold ttl_ms:0) is KEY-agent only — not here.
+-//   See docs/TX_INHIBIT.md §3.1.
+-//
+-//   1. Datagram: ttl_ms>0 hold/keepalive (hold_timeout_ms); ttl_ms==0 release.
+-//   2. hold active while now < hold_timeout_at_ms_.
+-//   3. line_inhibited => must not assert PTT (UDP hold only; no local CTS).
++//   Hold = logical OR of per-controller leases. Each NetworkMessage::TxInhibit
++//   (type 18) refreshes or releases only that Controller ID's row. Missed
++//   refresh → that row expires (deadman). Agent hang is KEY-agent only.
+ //
+ // SPDX-License-Identifier: GPL-3.0-or-later
+ // ---------------------------------------------------------------------------
+ 
++#include <exception>
++
+ #include <QByteArray>
+-#include <QJsonDocument>
+-#include <QJsonObject>
++#include <QMap>
+ #include <QString>
++#include <QStringList>
+ #include <QtGlobal>
+ 
++#include "Network/NetworkMessage.hpp"
++
+ namespace TxInhibit {
+ 
+ // Project builds with --std=gnu++11 (-Werror); keep this header C++11-clean.
+-static constexpr char const * protocol_key = "tx_inhibit";
+-static constexpr int protocol_version = 1;
+-// Well-known WSJT-X station listen / agent send port (IPv4). Ephemeral fallback is
+-// handled by TxInhibitGate if bind fails.
+-static constexpr quint16 default_gate_port = 22372;
+-// Non-zero hold_timeout_ms (wire ttl_ms) must land in this range
+-// (0 is reserved for release hold).
++// Non-zero TTL ms must land in this range (0 is reserved for release hold).
+ static constexpr int hold_timeout_ms_min = 100;
+ static constexpr int hold_timeout_ms_max = 30000;
+-// Aliases for older call sites / tests.
+ static constexpr int ttl_ms_min = hold_timeout_ms_min;
+ static constexpr int ttl_ms_max = hold_timeout_ms_max;
+ static constexpr int max_datagram_bytes = 512;
+ 
+-// Parsed view of one KEY-agent UDP JSON body.
++// Parsed view of one KEY-agent UDP type-18 body.
+ // valid == false means "ignore this packet; do not change hold state."
+ struct Datagram
+ {
+-  // Wire name ttl_ms; meaning hold_timeout_ms (>0) or 0 = release hold.
++  QString target_id;      // NetworkMessage Id; empty = any instance at this port
++  QString controller_id;  // lease key; required non-empty when valid
++  // Wire TTL ms; meaning hold_timeout_ms (>0) or 0 = release this controller.
+   int ttl_ms {0};
+-  QString station;      // badge: "held by …"
+-  QString band;         // informational (WSJT-X station does not filter by band today)
+-  qint64 seq {0};       // informational agent sequence
++  QString station;        // badge: "held by …"
+   bool valid {false};
+ };
+ 
++// Build one type-18 datagram (agents / tests). Empty target_id = any instance.
++inline QByteArray build_datagram (QString const& controller_id
++                                  , quint32 ttl_ms
++                                  , QString const& station = QString {}
++                                  , QString const& target_id = QString {})
++{
++  QByteArray message;
++  NetworkMessage::Builder out {&message, NetworkMessage::TxInhibit, target_id
++                               , NetworkMessage::Builder::schema_number};
++  out << controller_id.toUtf8 () << ttl_ms << station.toUtf8 ();
++  return message;
++}
++
+ // Validate and unpack one UDP payload. On any failure returns valid=false
+ // (empty Datagram) so callers can count invalids without partial updates.
+ inline Datagram parse_datagram (QByteArray const& data)
+@@ -66,125 +71,119 @@
+     {
+       return out;
+     }
+-  QJsonParseError err;
+-  auto doc = QJsonDocument::fromJson (data, &err);
+-  if (err.error != QJsonParseError::NoError || !doc.isObject ())
++  try
+     {
++      NetworkMessage::Reader in {data};
++      if (in.type () != NetworkMessage::TxInhibit)
++        {
++          return out;
++        }
++      QByteArray controller_id;
++      quint32 ttl = 0;
++      QByteArray station;
++      in >> controller_id >> ttl >> station;
++      if (in.status () != QDataStream::Ok)
++        {
++          return out;
++        }
++      if (controller_id.isEmpty ())
++        {
++          return out;
++        }
++      // 0 = release this controller; otherwise enforce hold_timeout_ms range.
++      if (ttl != 0
++          && (ttl < static_cast<quint32> (hold_timeout_ms_min)
++              || ttl > static_cast<quint32> (hold_timeout_ms_max)))
++        {
++          return out;
++        }
++      out.target_id = in.id ();
++      out.controller_id = QString::fromUtf8 (controller_id);
++      out.ttl_ms = static_cast<int> (ttl);
++      out.station = QString::fromUtf8 (station);
++      out.valid = true;
+       return out;
+     }
+-  auto obj = doc.object ();
+-  // Protocol id must be exactly protocol_version (currently 1).
+-  if (obj.value (QLatin1String (protocol_key)).toInt (-1) != protocol_version)
++  catch (std::exception const&)
+     {
+       return out;
+     }
+-  // Accept JSON number (Qt stores as Double) or string digits (interop).
+-  if (!obj.contains (QLatin1String ("ttl_ms")))
++  catch (...)
+     {
+       return out;
+     }
+-  int ttl = -1;
+-  {
+-    auto const ttl_v = obj.value (QLatin1String ("ttl_ms"));
+-    if (ttl_v.isDouble ())
+-      {
+-        ttl = ttl_v.toInt (-1);
+-      }
+-    else if (ttl_v.isString ())
+-      {
+-        bool ok = false;
+-        ttl = ttl_v.toString ().toInt (&ok);
+-        if (!ok)
+-          {
+-            return out;
+-          }
+-      }
+-    else
+-      {
+-        return out;
+-      }
+-  }
+-  // 0 = release hold; otherwise enforce hold_timeout_ms range.
+-  if (ttl != 0 && (ttl < hold_timeout_ms_min || ttl > hold_timeout_ms_max))
+-    {
+-      return out;
+-    }
+-  out.ttl_ms = ttl; // hold_timeout_ms
+-  out.station = obj.value (QLatin1String ("station")).toString ();
+-  out.band = obj.value (QLatin1String ("band")).toString ();
+-  out.seq = static_cast<qint64> (obj.value (QLatin1String ("seq")).toDouble (0));
+-  out.valid = true;
+-  return out;
+ }
+ 
+-// One UDP hold at a time. Last valid hold wins.
+-// now_ms is supplied by the caller (same time base as hold_timeout_at_ms_).
++// Per-controller leases, OR'd. One expiring row per Controller ID.
++// now_ms is supplied by the caller (same time base as lease expiry times).
+ class GateLogic
+ {
+ public:
+-  // Apply one hold/release packet to the UDP-hold state machine.
+-  //
+-  // Updates hold timeout from the datagram; does not touch serial lines or
+-  // want_tx (those live in TxInhibitGate).
+-  //
+-  // Return value (important):
+-  //   true  = the hold *level* flipped (free↔held), i.e.
+-  //           inhibited(now) after != inhibited(now) before.
+-  //   false = level unchanged — including keepalives that only refresh
+-  //           hold_timeout_ms, invalid packets, and redundant releases.
++  // NetworkMessage Id of this WSJT-X instance. Non-empty target Id on a
++  // type-18 datagram must match; empty target Id is accepted (any instance
++  // at this UDP address/port).
++  void set_instance_id (QString const& id) { instance_id_ = id; }
++  QString instance_id () const { return instance_id_; }
++
++  // Apply one hold/release packet to the lease map.
+   //
+-  // This is NOT "datagram says hold" (a hold while already held returns
+-  // false). It is NOT "RTS/DTR changed" (see line_inhibited / apply_line).
+-  // Callers may ignore the return and re-evaluate line_inhibited() instead;
+-  // TxInhibitGate does exactly that today.
++  // Return value:
++  //   true  = the hold *level* flipped (free↔held)
++  //   false = level unchanged — keepalives, invalid packets, Id mismatch,
++  //           redundant releases, or another controller still holding.
+   bool on_datagram (QByteArray const& data, qint64 now_ms)
+   {
+     auto msg = parse_datagram (data);
+     if (!msg.valid)
+       {
+         ++invalid_;
+-        return false; // no state change
++        return false;
+       }
+-    // Snapshot hold level *before* mutating hold timeout.
+-    bool before = inhibited (now_ms);
++    if (!msg.target_id.isEmpty () && msg.target_id != instance_id_)
++      {
++        ++invalid_;
++        return false;
++      }
++    bool const before = inhibited (now_ms);
+     if (msg.ttl_ms == 0)
+       {
+-        // Explicit release hold (ttl_ms == 0; normal end after agent hang).
+         ++release_rx_;
+-        hold_timeout_at_ms_ = -1;
++        leases_.remove (msg.controller_id);
+       }
+     else
+       {
+-        // Hold or keepalive: set hold_timeout_ms and re-arm expiry.
+         ++hold_rx_;
+-        hold_timeout_at_ms_ = now_ms + msg.ttl_ms;
+-        holder_ = msg.station;
++        Lease row;
++        row.expires_at_ms = now_ms + msg.ttl_ms;
++        row.station = msg.station;
++        leases_.insert (msg.controller_id, row);
+       }
+     return inhibited (now_ms) != before;
+   }
+ 
+-  // Hold active? Also applies hold timeout: if it has passed, clear hold
+-  // and count an expiry (includes deadman / agent silence).
+-  // Side effect on expiry is intentional so a 50 Hz poll can clear hold
+-  // without another packet.
++  // Hold active? Also applies per-row hold timeout (deadman / agent silence).
+   bool inhibited (qint64 now_ms)
+   {
+-    if (hold_timeout_at_ms_ >= 0 && now_ms >= hold_timeout_at_ms_)
+-      {
+-        hold_timeout_at_ms_ = -1;
+-        ++expiries_;
+-      }
+-    return hold_timeout_at_ms_ >= 0;
++    purge_expired (now_ms);
++    return !leases_.isEmpty ();
+   }
+ 
+-  // Station string for the badge while a hold is active; empty if none.
+-  QString holding_station (qint64 now_ms)
++  // Station strings for live leases (sorted by controller id); empty if none.
++  QStringList holding_stations (qint64 now_ms)
+   {
+-    return inhibited (now_ms) ? holder_ : QString {};
++    purge_expired (now_ms);
++    QStringList names;
++    for (auto it = leases_.constBegin (); it != leases_.constEnd (); ++it)
++      {
++        if (!it.value ().station.isEmpty ())
++          {
++            names.append (it.value ().station);
++          }
++      }
++    return names;
+   }
+ 
+   // True => must not assert PTT (regardless of want_tx).
+-  // UDP hold only (no local CTS in this build).
+   bool line_inhibited (qint64 now_ms)
+   {
+     return inhibited (now_ms);
+@@ -199,30 +198,53 @@
+   // Status-bar text; empty means no hold (hide the badge).
+   QString badge_text (qint64 now_ms)
+   {
+-    if (inhibited (now_ms))
++    if (!inhibited (now_ms))
+       {
+-        auto s = holding_station (now_ms);
+-        if (s.isEmpty ())
+-          {
+-            return QStringLiteral ("TX INHIBITED");
+-          }
+-        return QStringLiteral ("TX INHIBITED — held by %1").arg (s);
++        return {};
+       }
+-    return {};
++    auto names = holding_stations (now_ms);
++    if (names.isEmpty ())
++      {
++        return QStringLiteral ("TX INHIBITED");
++      }
++    return QStringLiteral ("TX INHIBITED — held by %1").arg (names.join (QStringLiteral (", ")));
+   }
+ 
+-  // Diagnostics (optional telemetry / InhibitStatus).
+   quint32 hold_rx () const { return hold_rx_; }
+   quint32 release_rx () const { return release_rx_; }
+   quint32 expiries () const { return expiries_; }
+   quint32 invalid () const { return invalid_; }
++  int lease_count (qint64 now_ms)
++  {
++    purge_expired (now_ms);
++    return leases_.size ();
++  }
+ 
+ private:
+-  // Absolute time when the current hold ends (same epoch as now_ms args).
+-  // -1 means no hold. Set to now_ms + hold_timeout_ms (wire ttl_ms) on each
+-  // hold/keepalive packet.
+-  qint64 hold_timeout_at_ms_ {-1};
+-  QString holder_;           // last hold's station field
++  struct Lease
++  {
++    qint64 expires_at_ms {-1};
++    QString station;
++  };
++
++  void purge_expired (qint64 now_ms)
++  {
++    for (auto it = leases_.begin (); it != leases_.end (); )
++      {
++        if (it.value ().expires_at_ms >= 0 && now_ms >= it.value ().expires_at_ms)
++          {
++            it = leases_.erase (it);
++            ++expiries_;
++          }
++        else
++          {
++            ++it;
++          }
++      }
++  }
++
++  QString instance_id_;
++  QMap<QString, Lease> leases_;
+   quint32 hold_rx_ {0};
+   quint32 release_rx_ {0};
+   quint32 expiries_ {0};
+diff -ruN wsjtx-baseline/TxInhibit/TxInhibitSimPort.hpp wsjtx-work/TxInhibit/TxInhibitSimPort.hpp
+--- a/TxInhibit/TxInhibitSimPort.hpp	1969-12-31 19:00:00.000000000 -0500
++++ b/TxInhibit/TxInhibitSimPort.hpp	2026-09-21 19:42:22.864492443 -0400
+@@ -0,0 +1,19 @@
++#ifndef TX_INHIBIT_SIM_PORT_HPP__
++#define TX_INHIBIT_SIM_PORT_HPP__
++
++#include <QString>
++
++// Dummy PTT port name for Settings (Radio None + RTS/DTR). Starts the
++// TX Inhibit gate without opening a UART. Not a KEY source.
++inline char const * inhibit_sim_port_name ()
++{
++  return "inhibit-sim";
++}
++
++inline bool is_inhibit_sim_port (QString const& port)
++{
++  return port.compare (QLatin1String (inhibit_sim_port_name ()),
++                       Qt::CaseInsensitive) == 0;
++}
++
++#endif
+diff -ruN wsjtx-baseline/widgets/mainwindow.cpp wsjtx-work/widgets/mainwindow.cpp
+--- a/widgets/mainwindow.cpp	2026-09-07 03:19:50.000000000 -0400
++++ b/widgets/mainwindow.cpp	2026-09-21 19:43:50.530392512 -0400
+@@ -66,7 +66,7 @@
+ #include "helper_functions.h"
+ #include "revision_utils.hpp"
+ #include "qt_helpers.hpp"
+-#include "TxInhibit/TxInhibitLogic.hpp" // default_gate_port for the inhibit badge
++#include "Network/NetworkMessage.hpp" // InhibitStatus pulse cadence
+ #include "Network/NetworkAccessManager.hpp"
+ #include "Audio/soundout.h"
+ #include "Audio/soundin.h"
+@@ -4729,12 +4729,12 @@
+       tx_status_label.setToolTip ({});
+       m_tx_inhibit_warned_port = 0;
+       m_tx_inhibit_warned = false;
++      m_tx_inhibit_announce_timer.stop ();
+       return;
+     }
+ 
+-  // Read the port from Configuration every time rather than caching it:
+-  // close_rig() zeroes it without emitting, and a stale copy would describe a
+-  // station as protected when nothing is listening.
++  // Always read the UDP inhibit port from Configuration.
++  // A cached copy can disagree after bind/clear.
+   auto const port = m_config.tx_inhibit_port ();
+ 
+   if (m_tx_inhibited)
+@@ -4751,33 +4751,64 @@
+             "The rig may be closed, PTT method may not be RTS/DTR, or the bind failed.\n"
+             "This station is NOT protected."));
+     }
+-  else if (TxInhibit::default_gate_port == port)
+-    {
+-      tx_status_label.setToolTip (
+-        tr ("TX Inhibit: listening for KEY-agent holds on UDP port %1.").arg (port));
+-    }
+   else
+     {
+       tx_status_label.setToolTip (
+-        tr ("TX Inhibit: port %1 was busy, so an ephemeral port (%2) is in use.\n"
+-            "A KEY agent aimed at %1 will NOT reach this station.")
+-        .arg (TxInhibit::default_gate_port).arg (port));
++        tr ("TX Inhibit: listening for KEY-agent holds on UDP port %1.\n"
++            "Controllers learn this port from InhibitStatus (type 17) on the UDP Server stream.")
++        .arg (port));
+     }
+ 
+-  // Unreachable == enabled but not bound to the well-known port. Warn once per
+-  // transition rather than on every refresh.
+-  bool const unreachable = !port || TxInhibit::default_gate_port != port;
+-  if (unreachable && (!m_tx_inhibit_warned || m_tx_inhibit_warned_port != port))
++  // Warn once when enabled but unbound (bind failure / rig closed).
++  bool const unbound = !port;
++  if (unbound && (!m_tx_inhibit_warned || m_tx_inhibit_warned_port != port))
+     {
+-      showStatusMessage (port
+-                         ? tr ("TX Inhibit: listening on %1, not %2 — a KEY agent aimed"
+-                               " at %2 will not reach this station")
+-                           .arg (port).arg (TxInhibit::default_gate_port)
+-                         : tr ("TX Inhibit is enabled but no UDP port is bound —"
+-                               " this station is NOT protected"));
++      showStatusMessage (tr ("TX Inhibit is enabled but no UDP port is bound —"
++                             " this station is NOT protected"));
+     }
+-  m_tx_inhibit_warned = unreachable;
++  m_tx_inhibit_warned = unbound;
+   m_tx_inhibit_warned_port = port;
++
++  // Keep capability/port announcements alive while the feature is enabled so
++  // controllers that join after startup still see type 17.
++  if (!m_tx_inhibit_announce_timer.isActive ())
++    {
++      m_tx_inhibit_announce_timer.start ();
++    }
++}
++
++void MainWindow::send_inhibit_status_announce ()
++{
++  if (!m_messageClient)
++    {
++      return;
++    }
++  // Publish the current picture when enabled, or a final port-0 clear
++  // after disable. UDP Server may be unicast or multicast — same path as
++  // Heartbeat/Status.
++  //
++  // Never send a live type 17 with port 0. Controllers reject port 0, so an
++  // announce during Hamlib open (gate binds after rig_open) empties the
++  // KEY-agent target list. Port 0 is only the disable/clear value.
++  if (!m_config.enable_tx_inhibit ())
++    {
++      if (0 == m_config.tx_inhibit_port ())
++        {
++          m_messageClient->inhibit_status (
++            0, false, QString {},
++            m_tx_inhibit_hold_rx, m_tx_inhibit_release_rx,
++            m_tx_inhibit_expiries, m_tx_inhibit_invalid);
++        }
++      return;
++    }
++  if (0 == m_config.tx_inhibit_port ())
++    {
++      return;
++    }
++  m_messageClient->inhibit_status (
++    m_config.tx_inhibit_port (), m_tx_inhibited, m_tx_inhibit_holder,
++    m_tx_inhibit_hold_rx, m_tx_inhibit_release_rx,
++    m_tx_inhibit_expiries, m_tx_inhibit_invalid);
+ }
+ 
+ void MainWindow::createStatusBar()                           //createStatusBar
+@@ -4788,23 +4819,40 @@
+   tx_status_label.setFrameStyle (QFrame::Panel | QFrame::Sunken);
+   statusBar()->addWidget (&tx_status_label);
+ 
++  // Same cadence as NetworkMessage::pulse (Heartbeat). Late joiners learn the
++  // inhibit port within one pulse without depending on a hold transition.
++  m_tx_inhibit_announce_timer.setInterval (
++    static_cast<int> (NetworkMessage::pulse) * 1000);
++  connect (&m_tx_inhibit_announce_timer, &QTimer::timeout, this,
++           &MainWindow::send_inhibit_status_announce);
++
+   connect (&m_config, &Configuration::tx_inhibit_changed, this,
+            [this] (bool inhibited, QString const& source
+                    , quint32 hold_rx, quint32 release_rx
+                    , quint32 expiries, quint32 invalid) {
+              m_tx_inhibited = inhibited;
+              m_tx_inhibit_holder = inhibited ? source : QString {};
++             m_tx_inhibit_hold_rx = hold_rx;
++             m_tx_inhibit_release_rx = release_rx;
++             m_tx_inhibit_expiries = expiries;
++             m_tx_inhibit_invalid = invalid;
+              update_inhibit_status ();
+-             if (m_messageClient)
+-               {
+-                 m_messageClient->inhibit_status (
+-                   m_config.tx_inhibit_port (), inhibited, source,
+-                   hold_rx, release_rx, expiries, invalid);
+-               }
++             send_inhibit_status_announce ();
+            });
+   connect (&m_config, &Configuration::tx_inhibit_port_changed, this,
+            [this] (quint16) {
++             // Enable on → bind emits port only (no hold change). That used to
++             // update the tooltip and never send type 17 — late listeners saw
++             // nothing after a settings toggle. Announce immediately.
++             update_inhibit_status ();
++             send_inhibit_status_announce ();
++           });
++  connect (&m_config, &Configuration::tx_inhibit_error, this,
++           [this] (QString const& message) {
+              update_inhibit_status ();
++             showStatusMessage (message.isEmpty ()
++                               ? tr ("TX Inhibit failed (no port) — this station is NOT protected")
++                               : message);
+            });
+   update_inhibit_status ();
+ 
+diff -ruN wsjtx-baseline/widgets/mainwindow.h wsjtx-work/widgets/mainwindow.h
+--- a/widgets/mainwindow.h	2026-08-14 04:02:25.000000000 -0400
++++ b/widgets/mainwindow.h	2026-09-21 19:06:23.935040465 -0400
+@@ -820,8 +820,15 @@
+   // physical PTT state rather than the sequencer's intent. See docs/TX_INHIBIT.md.
+   bool m_tx_inhibited {false};
+   QString m_tx_inhibit_holder;     // station named in the current hold, if any
++  quint32 m_tx_inhibit_hold_rx {0};
++  quint32 m_tx_inhibit_release_rx {0};
++  quint32 m_tx_inhibit_expiries {0};
++  quint32 m_tx_inhibit_invalid {0};
+   bool m_tx_inhibit_warned {false};      // "not reachable" already reported?
+   quint16 m_tx_inhibit_warned_port {0};  // port that warning referred to
++  // Periodic InhibitStatus (type 17) on the UDP Server path so late joiners
++  // learn inhibit port/capability without waiting for a hold transition.
++  QTimer m_tx_inhibit_announce_timer;
+   QLabel config_label;
+   QLabel mode_label;
+   QLabel last_tx_label;
+@@ -1025,6 +1032,8 @@
+   void writeSettings();
+   void createStatusBar();
+   void update_inhibit_status ();
++  // Emit NetworkMessage::InhibitStatus (type 17) with the cached gate picture.
++  void send_inhibit_status_announce ();
+   void updateStatusBar();
+   void genStdMsgs(QString rpt, bool unconditional = false);
+   void genCQMsg();

@@ -1,8 +1,22 @@
-# Archive: what was sent to the WSJT-X Improved list
+# Improved list submission artifacts
 
-This directory is a **verbatim backup** of the TX Inhibit submission to
-the WSJT-X Improved community list. It is **not** a patch against this
-mainline tree. Do not apply it here.
+This directory holds patches and cover letters for WSJT-X Improved.
+These are **not** patches against the mainline `wsjtx-inhibit` tree.
+Do not apply them here.
+
+## Current (use this for Improved 3.2.0)
+
+| File | Role |
+|------|------|
+| `tx-inhibit-upgrade-3.2.0_improved_PLUS_260908.patch` | Upgrade in-tree JSON/22372 Inhibit to type 17/18 |
+| `README-3.2.0-PLUS-260908.md` | Apply notes + SHA-256 |
+| `submission-email-3.2.0-PLUS-260908.md` | Cover-letter pointer |
+| `../../docs/announce-rc5-update.md` | Mail body draft |
+
+## Archive: first submission (Improved 3.1.0)
+
+This block is a **verbatim backup** of the first TX Inhibit submission to
+the WSJT-X Improved community list.
 
 | Item | Value |
 |------|--------|
