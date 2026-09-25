@@ -11,7 +11,8 @@
 | **`inhibit-agent-gui`** | **Standalone KEY agent (GUI).** CTS in; dest `host:port` in the window. |
 | **`wims-key-agent`** | **WIMS KEY agent.** Destinations from WIMS discovery. WIMS tree, not this repo. |
 | **`inhibit-test`** | **Bench console.** Keyboard KEY stand-in. |
-| `send_inhibit_hold.py` | Python stand-in (dev / scripted tests). |
+| `send_inhibit_hold.py` | Python stand-in for **this fork’s** dedicated inhibit port. |
+| `probe_tx_inhibit_latency.py` | Measure type-18 latency against **official 3.2-rc1** (Heartbeat command port). See [docs/pr61-review/HANDOFF-3.2-rc1-inhibit-latency.md](../docs/pr61-review/HANDOFF-3.2-rc1-inhibit-latency.md). |
 
 **KEY agent** is the role. Standalone program: [docs/INHIBIT_AGENT.md](../docs/INHIBIT_AGENT.md).
 
