@@ -296,8 +296,10 @@ private Q_SLOTS:
     quint32 release_rx {0};
     quint32 expiries {0};
     quint32 invalid {0};
+    quint64 t_rx_ns {1};
+    quint64 t_pin_ns {1};
     reader >> supported >> inhibited >> source >> hold_rx >> release_rx
-           >> expiries >> invalid;
+           >> expiries >> invalid >> t_rx_ns >> t_pin_ns;
 
     QCOMPARE (reader.status (), QDataStream::Ok);
     QVERIFY (supported);
@@ -308,6 +310,8 @@ private Q_SLOTS:
     QCOMPARE (release_rx, 12u);
     QCOMPARE (expiries, 13u);
     QCOMPARE (invalid, 14u);
+    QCOMPARE (t_rx_ns, quint64 {0});
+    QCOMPARE (t_pin_ns, quint64 {0});
   }
 };
 

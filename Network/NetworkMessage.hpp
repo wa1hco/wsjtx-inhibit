@@ -550,6 +550,8 @@
  *                         Release rx             quint32
  *                         Expiries               quint32
  *                         Invalid                quint32
+ *                         t_rx_ns                quint64
+ *                         t_pin_ns               quint64
  *
  *      Supported means the active transceiver uses DTR or RTS PTT and Accept
  *      UDP requests is enabled, so the instance can apply inhibit commands.

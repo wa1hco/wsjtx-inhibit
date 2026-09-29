@@ -1,5 +1,7 @@
 #include "TxInhibitTransceiver.hpp"
 
+#include "TxInhibitClock.hpp"
+
 #include <algorithm>
 #include <limits>
 
@@ -106,6 +108,8 @@ void TxInhibitTransceiver::apply_requested_state () noexcept
     }
 
   auto const previous_ptt = have_effective_state_ && last_effective_.ptt ();
+  auto const dropping = previous_ptt && !effective.ptt ();
+  if (dropping) TxInhibitClock::arm_pin ().store (true, std::memory_order_release);
   auto final_sent = false;
   if (effective.ptt () != previous_ptt)
     {
@@ -127,6 +131,7 @@ void TxInhibitTransceiver::apply_requested_state () noexcept
         }
     }
   if (!final_sent) wrapped_->set (effective, sequence_number_);
+  if (dropping) TxInhibitClock::arm_pin ().store (false, std::memory_order_release);
   last_effective_ = effective;
   have_effective_state_ = true;
 }

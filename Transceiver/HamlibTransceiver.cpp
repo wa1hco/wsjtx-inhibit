@@ -21,7 +21,25 @@
 #include <hamlib/rig_state.h>
 #endif
 #include "HamlibVfoRoleState.hpp"
+#include "TxInhibitClock.hpp"
 #include "pimpl_impl.hpp"
+
+namespace
+{
+  // Not declared in the installed Hamlib headers. Linux uses TIOCMBIC.
+  // Windows Hamlib turns that into EscapeCommFunction(CLRRTS / CLRDTR).
+  extern "C" int ser_set_rts (hamlib_port_t * p, int state);
+  extern "C" int ser_set_dtr (hamlib_port_t * p, int state);
+
+  int drop_ptt_line (void * raw)
+  {
+    auto * port = static_cast<hamlib_port_t *> (raw);
+    if (!port || port->fd < 0) return -1;
+    if (RIG_PTT_SERIAL_RTS == port->type.ptt) return ser_set_rts (port, 0);
+    if (RIG_PTT_SERIAL_DTR == port->type.ptt) return ser_set_dtr (port, 0);
+    return -1;
+  }
+}
 #include "moc_HamlibTransceiver.cpp"
 
 #if HAVE_HAMLIB_OLD_CACHING
@@ -604,6 +622,15 @@ int HamlibTransceiver::do_start ()
     }
 
   m_->error_check (rig_open (m_->rig_.data ()), tr ("opening connection to rig"));
+  if (auto * ptt = HAMLIB_PTTPORT (m_->rig_.data ()))
+    {
+      auto const kind = ptt->type.ptt;
+      if (ptt->fd >= 0
+          && (RIG_PTT_SERIAL_RTS == kind || RIG_PTT_SERIAL_DTR == kind))
+        {
+          TxInhibitClock::publish_ptt (&drop_ptt_line, ptt);
+        }
+    }
 
   // reset dynamic state
   m_->one_VFO_ = false;
@@ -851,6 +878,7 @@ void HamlibTransceiver::do_stop ()
           rig_get_mode (m_->rig_.data (), RIG_VFO_CURR, &impl::dummy_mode_, &width);
         }
     }
+  TxInhibitClock::clear_ptt ();
   if (m_->rig_)
     {
       rig_close (m_->rig_.data ());
@@ -1279,6 +1307,10 @@ void HamlibTransceiver::do_ptt (bool on)
         {
           ptt_on_ = false;
           CAT_TRACE ("rig_set_ptt PTT=false");
+          if (TxInhibitClock::arm_pin ().load (std::memory_order_acquire))
+            {
+              TxInhibitClock::drop_direct ();
+            }
           m_->error_check (rig_set_ptt (m_->rig_.data (), RIG_VFO_CURR, RIG_PTT_OFF), tr ("setting PTT off"));
         }
     }

@@ -54,6 +54,7 @@ set (wsjt_qt_CXXSRCS
   Transceiver/DXLabSuiteCommanderTransceiver.cpp
   Network/NetworkMessage.cpp
   Network/MessageClient.cpp
+  Network/UdpDispatch.cpp
   widgets/LettersSpinBox.cpp
   widgets/HintedSpinBox.cpp
   widgets/RestrictedSpinBox.cpp
