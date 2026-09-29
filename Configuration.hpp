@@ -392,10 +392,8 @@ public:
   // and CAT remain stock; Configuration does not drive RTS/DTR itself.
   Q_SLOT void transceiver_ptt (bool = true);
 
-  // Settings: Enable TX Inhibit. Default false.
+  // True when PTT method is RTS or DTR, so a hold can drop the pin.
   bool enable_tx_inhibit () const;
-  // Bound UDP block listen port (0 if not active).
-  quint16 tx_inhibit_port () const;
 //  Q_SLOT void transceiver_tune (bool = true);
 
   // Set/unset Audio streaming for TCI.
@@ -487,9 +485,8 @@ public:
   // source empty when clear; otherwise badge text ("TX INHIBITED — …").
   Q_SIGNAL void tx_inhibit_changed (bool inhibited, QString const& source
                                     , quint32 hold_rx, quint32 release_rx
-                                    , quint32 expiries, quint32 invalid) const;
-  Q_SIGNAL void tx_inhibit_port_changed (quint16 port) const;
-  // UDP inhibit listen failed to arm (no port). Settings checkbox label updates.
+                                    , quint32 expiries, quint32 invalid
+                                    , qint64 t_rx_ns, qint64 t_pin_ns) const;
   Q_SIGNAL void tx_inhibit_error (QString const& message) const;
 
   // signal announces audio devices are being enumerated

@@ -1,5 +1,6 @@
 #include <QtTest>
 
+#include "Network/NetworkMessage.hpp"
 #include "TxInhibit/TxInhibitLogic.hpp"
 
 namespace
@@ -17,6 +18,17 @@ class TestTxInhibitLogic : public QObject
   Q_OBJECT
 
 private slots:
+  void type18PeekIgnoresOtherMessages ()
+  {
+    QVERIFY (TxInhibit::is_tx_inhibit_datagram (hold ("A", 100, "S")));
+    QByteArray heartbeat;
+    NetworkMessage::Builder out {&heartbeat, NetworkMessage::Heartbeat,
+                                 QStringLiteral ("WSJT-X"), 2};
+    out << quint32 {2} << QByteArray {"ver"} << QByteArray {"rev"};
+    QVERIFY (!TxInhibit::is_tx_inhibit_datagram (heartbeat));
+    QVERIFY (!TxInhibit::is_tx_inhibit_datagram (QByteArray {}));
+  }
+
   void radiateIsIntentAndNotHold ()
   {
     TxInhibit::GateLogic g;

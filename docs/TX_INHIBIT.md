@@ -406,7 +406,21 @@ logical **OR**. A release clears **only that controller’s** lease.
 ## 4. UDP protocol (WSJT-X station ↔ agent)
 
 **Transport:** UDP, `NetworkMessage` / `QDataStream` (schema 3), max **512** bytes.  
-**Port:** **ephemeral** (WSJT-X station binds; agent sends to the port from type 17).  
+**Port:** the **heartbeat source socket** — the same UDP socket WSJT-X already
+uses for Status, Decode, Halt Tx, and the other commands. A controller replies
+to the source address and port of ordinary WSJT-X traffic. A dedicated thread
+reads that socket. A type 18 that creates the **first** lease is applied to
+the PTT line without waiting for the GUI. A type 18 that only refreshes a
+lease that is already active updates the expiry and does not preempt CAT.
+While that first lease is waiting on the transceiver thread, `do_poll` does
+not start another SWR or power read.
+
+There is no separate inhibit listen port and no Enable TX Inhibit checkbox.
+The gate is armed when PTT method is RTS or DTR. **Accept UDP requests**
+authorizes new type 18 commands. Turning that off sends InhibitStatus
+`Supported=false` and ignores new commands. Leases already running keep the
+pin off until they expire.
+
 **Type:** `NetworkMessage::TxInhibit` = **18** (inbound). Outbound announce/telemetry is
 `InhibitStatus` = **17** on the normal UDP Server path (unicast or multicast).
 

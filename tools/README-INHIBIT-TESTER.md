@@ -11,7 +11,7 @@
 | **`inhibit-agent-gui`** | **Standalone KEY agent (GUI).** CTS in; dest `host:port` in the window. |
 | **`wims-key-agent`** | **WIMS KEY agent.** Destinations from WIMS discovery. WIMS tree, not this repo. |
 | **`inhibit-test`** | **Bench console.** Keyboard KEY stand-in. |
-| `send_inhibit_hold.py` | Python stand-in for **this fork’s** dedicated inhibit port. |
+| `send_inhibit_hold.py` | Python grave-key stand-in. Binds the UDP server port, reads type 17, sends type 18. |
 | `probe_tx_inhibit_latency.py` | Measure type-18 latency against **official 3.2-rc1** (Heartbeat command port). See [docs/pr61-review/HANDOFF-3.2-rc1-inhibit-latency.md](../docs/pr61-review/HANDOFF-3.2-rc1-inhibit-latency.md). |
 
 **KEY agent** is the role. Standalone program: [docs/INHIBIT_AGENT.md](../docs/INHIBIT_AGENT.md).
@@ -66,13 +66,15 @@ return focus to the terminal, or use `--global-keys` to press from anywhere.
 
 ```bash
 sudo usermod -aG input "$USER"   # Linux; then full log out/in
-inhibit-test --host 127.0.0.1 --port <from-tooltip> --station TEST-KEY --ttl-ms 600
-inhibit-test --fixed-hang-ms 0
-inhibit-test --global-keys             # ` and ~ readable from any window
+inhibit-test --global-keys
+inhibit-test --host 127.0.0.1 --port 2237 --id WS --station TEST-KEY
+python3 tools/send_inhibit_hold.py --interactive --port 2237
 ```
 
-`--port` is required: use the inhibit listen port from the WSJT-X status-bar
-tooltip or InhibitStatus (type 17).
+The tool binds `--port` (default 2237), the address in WS's UDP server setting.
+It waits for a Heartbeat, prints type 17 (`supported` / `inhibited`), and sends
+type 18 back to that heartbeat's source port. The Id in the type 18 is the
+Heartbeat Id (`WS` for this build). Do not point it at a private inhibit port.
 
 **Tip:** hold `` ` `` ≥500 ms for hang=0 (continuous). Short taps use break-in hang unless fixed hang is 0.
 

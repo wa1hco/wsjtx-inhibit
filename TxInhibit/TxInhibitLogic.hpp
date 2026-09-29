@@ -23,6 +23,7 @@
 #include <QMap>
 #include <QString>
 #include <QStringList>
+#include <QtEndian>
 #include <QtGlobal>
 
 #include "Network/NetworkMessage.hpp"
@@ -35,7 +36,9 @@ static constexpr int hold_timeout_ms_min = 100;
 static constexpr int hold_timeout_ms_max = 30000;
 static constexpr int ttl_ms_min = hold_timeout_ms_min;
 static constexpr int ttl_ms_max = hold_timeout_ms_max;
-static constexpr int max_datagram_bytes = 512;
+static constexpr int max_datagram_bytes = 4096;
+static constexpr int max_named_controllers = 64;
+static constexpr int max_text_bytes = 128;
 
 // Parsed view of one KEY-agent UDP type-18 body.
 // valid == false means "ignore this packet; do not change hold state."
@@ -48,6 +51,23 @@ struct Datagram
   QString station;        // badge: "held by …"
   bool valid {false};
 };
+
+// True when the datagram is a NetworkMessage type 18. Header only: magic,
+// schema, type. Used by the UDP dispatch thread before any lease work.
+inline bool is_tx_inhibit_datagram (QByteArray const& data)
+{
+  if (data.size () < 12)
+    {
+      return false;
+    }
+  auto const * bytes = reinterpret_cast<uchar const *> (data.constData ());
+  if (qFromBigEndian<quint32> (bytes) != NetworkMessage::Builder::magic)
+    {
+      return false;
+    }
+  return qFromBigEndian<quint32> (bytes + 8)
+    == static_cast<quint32> (NetworkMessage::TxInhibit);
+}
 
 // Build one type-18 datagram (agents / tests). Empty target_id = any instance.
 inline QByteArray build_datagram (QString const& controller_id
@@ -114,6 +134,38 @@ inline Datagram parse_datagram (QByteArray const& data)
     }
 }
 
+// Printable badge text. Nonprinting characters are dropped. Capped so a
+// datagram cannot fill the status bar.
+inline QString sanitize_station (QString const& value)
+{
+  QString result;
+  result.reserve (qMin (value.size (), 64));
+  for (auto const character : value.left (64))
+    {
+      if (character.isPrint ())
+        {
+          result.append (character);
+        }
+    }
+  return result.trimmed ();
+}
+
+inline bool acceptable_controller (QString const& id)
+{
+  if (id.isEmpty () || id.toUtf8 ().size () > max_text_bytes)
+    {
+      return false;
+    }
+  for (auto const character : id)
+    {
+      if (character.isSpace () || !character.isPrint ())
+        {
+          return false;
+        }
+    }
+  return true;
+}
+
 // Per-controller leases, OR'd. One expiring row per Controller ID.
 // now_ms is supplied by the caller (same time base as lease expiry times).
 class GateLogic
@@ -152,11 +204,46 @@ public:
       }
     else
       {
+        if (!acceptable_controller (msg.controller_id))
+          {
+            ++invalid_;
+            return false;
+          }
         ++hold_rx_;
         Lease row;
         row.expires_at_ms = now_ms + msg.ttl_ms;
-        row.station = msg.station;
-        leases_.insert (msg.controller_id, row);
+        row.station = sanitize_station (msg.station);
+        static QString const overflow_key {QStringLiteral ("\n")};
+        if (leases_.contains (msg.controller_id))
+          {
+            leases_.insert (msg.controller_id, row);
+          }
+        else
+          {
+            int named = leases_.size ();
+            if (leases_.contains (overflow_key))
+              {
+                --named;
+              }
+            if (named < max_named_controllers)
+              {
+                leases_.insert (msg.controller_id, row);
+              }
+            else
+              {
+                auto overflow = leases_.find (overflow_key);
+                if (overflow == leases_.end ())
+                  {
+                    Lease extra;
+                    extra.expires_at_ms = row.expires_at_ms;
+                    leases_.insert (overflow_key, extra);
+                  }
+                else if (row.expires_at_ms > overflow->expires_at_ms)
+                  {
+                    overflow->expires_at_ms = row.expires_at_ms;
+                  }
+              }
+          }
       }
     return inhibited (now_ms) != before;
   }

@@ -15,6 +15,9 @@
 #include <QJsonObject>
 #include <QJsonValue>
 #include <QDebug>
+#include <ctime>
+#include <sys/ioctl.h>
+
 #include <hamlib/rig.h>
 #include "pimpl_impl.hpp"
 #include "moc_HamlibTransceiver.cpp"
@@ -975,6 +978,59 @@ void HamlibTransceiver::stop_tx_inhibit_gate ()
   inhibit_gate_ = nullptr;
 }
 
+namespace
+{
+  qint64 monotonic_ns ()
+  {
+    timespec ts {};
+    clock_gettime (CLOCK_MONOTONIC, &ts);
+    return static_cast<qint64> (ts.tv_sec) * 1000000000LL
+      + static_cast<qint64> (ts.tv_nsec);
+  }
+
+  // Drop RTS or DTR with the same ioctl Hamlib uses, and return the time
+  // that ioctl completed. rig_set_ptt() is still called afterwards so its
+  // cache stays right; anything it does after the line change is not this time.
+  qint64 drop_modem_line_ns (hamlib_port_t * port)
+  {
+    if (!port || port->fd < 0)
+      {
+        return 0;
+      }
+    unsigned int bit = 0;
+    if (RIG_PTT_SERIAL_RTS == port->type.ptt)
+      {
+        bit = TIOCM_RTS;
+      }
+    else if (RIG_PTT_SERIAL_DTR == port->type.ptt)
+      {
+        bit = TIOCM_DTR;
+      }
+    else
+      {
+        return 0;
+      }
+#if defined(TIOCMBIC)
+    if (ioctl (port->fd, TIOCMBIC, &bit) < 0)
+      {
+        return 0;
+      }
+#else
+    unsigned int lines = bit;
+    if (ioctl (port->fd, TIOCMGET, &lines) < 0)
+      {
+        return 0;
+      }
+    lines &= ~bit;
+    if (ioctl (port->fd, TIOCMSET, &lines) < 0)
+      {
+        return 0;
+      }
+#endif
+    return monotonic_ns ();
+  }
+}
+
 void HamlibTransceiver::apply_physical_ptt (bool radiate)
 {
   // Lowest-level PTT write through Hamlib (RTS/DTR or CAT PTT type).
@@ -997,6 +1053,11 @@ void HamlibTransceiver::apply_physical_ptt (bool radiate)
   else
     {
       CAT_TRACE ("apply_physical_ptt OFF");
+      qint64 const t_pin = drop_modem_line_ns (&m_->rig_->state.pttport);
+      if (t_pin > 0 && inhibit_gate_)
+        {
+          inhibit_gate_->note_pin_off_ns (t_pin);
+        }
       m_->error_check (rig_set_ptt (m_->rig_.data (), RIG_VFO_CURR, RIG_PTT_OFF), tr ("setting PTT off"));
     }
 }
@@ -1248,6 +1309,16 @@ void HamlibTransceiver::do_poll ()
   pbwidth_t w;
   split_t s;
 
+  // An initiating type 18 has been accepted on the UDP thread and the pin
+  // drop is queued on this thread. Do not start another CAT read in front of it.
+  auto const hold_waiting = [this] () {
+    return inhibit_gate_ && inhibit_gate_->hold_pending ();
+  };
+  if (hold_waiting ())
+    {
+      return;
+    }
+
   if (m_->get_vfo_works_ && rig_get_function_ptr (m_->model_, RIG_FUNCTION_GET_VFO))
     {
       vfo_t v;
@@ -1285,6 +1356,11 @@ void HamlibTransceiver::do_poll ()
         }
     }
 
+  if (hold_waiting ())
+    {
+      return;
+    }
+
   if (m_->freq_query_works_)
     {
       // only read if possible and when receiving or simplex
@@ -1318,6 +1394,11 @@ void HamlibTransceiver::do_poll ()
         }
     }
 
+  if (hold_waiting ())
+    {
+      return;
+    }
+
   // only read when receiving or simplex if direct VFO addressing unavailable
   if ((!state ().ptt () || !state ().split ())
       && m_->mode_query_works_)
@@ -1340,6 +1421,11 @@ void HamlibTransceiver::do_poll ()
         }
     }
 
+  if (hold_waiting ())
+    {
+      return;
+    }
+
   // Under TX Inhibit, software PTT follows WSJT-X intent (do_ptt), not the
   // physical pin (which is held low during a KEY-agent hold). Skip GET_PTT.
   if (!inhibit_gate_
@@ -1357,6 +1443,11 @@ void HamlibTransceiver::do_poll ()
         update_PTT (!(RIG_PTT_OFF == p));
      }
    }
+
+  if (hold_waiting ())
+    {
+      return;
+    }
 
   if (ptt_on_) {
     // update PWR and SWR

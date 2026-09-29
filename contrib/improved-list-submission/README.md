@@ -4,7 +4,16 @@ This directory holds patches and cover letters for WSJT-X Improved.
 These are **not** patches against the mainline `wsjtx-inhibit` tree.
 Do not apply them here.
 
-## Current (use this for Improved 3.2.0)
+## Current (use this for WS 3.2.1 260926)
+
+| File | Role |
+|------|------|
+| `tx-inhibit-ws-3.2.1_260926.patch` | Type 17/18 on the reporting socket, direct RTS/DTR, no checkbox |
+| `README-ws-3.2.1-260926.md` | Apply notes + SHA-256 |
+| `submission-email-ws-3.2.1-260926.md` | Cover-letter pointer |
+| `../../docs/announce-ws-3.2.1-260926.md` | Mail body draft |
+
+## Previous (Improved 3.2.0 PLUS_260908)
 
 | File | Role |
 |------|------|

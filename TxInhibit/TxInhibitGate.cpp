@@ -1,62 +1,46 @@
 #include "TxInhibitGate.hpp"
 
 #include <exception>
+#include <cstdio>
 
 #include <QByteArray>
-#include <QHostAddress>
+#include <QMutex>
+#include <QMutexLocker>
 #include <QTimer>
-#include <QUdpSocket>
-
-#ifdef Q_OS_WIN
-# include <winsock2.h>
-# include <ws2tcpip.h>
-#else
-# include <arpa/inet.h>
-# include <netinet/in.h>
-# include <sys/socket.h>
-#endif
 
 namespace
 {
-  // Qt 5 can return true from QUdpSocket::bind(port 0) while localPort()
-  // is still 0. Controllers reject InhibitStatus type 17 with port 0, so a
-  // portBound(0) leaves the KEY-agent target list empty.
-  quint16 native_udp_local_port (QUdpSocket * udp)
+  QMutex& gate_mu ()
   {
-    if (!udp)
+    static QMutex mu;
+    return mu;
+  }
+
+  TxInhibitGate *& current_gate ()
+  {
+    static TxInhibitGate * gate = nullptr;
+    return gate;
+  }
+
+  // Accept UDP requests. Off ignores new type 18. Live leases still expire.
+  std::atomic<bool>& commands_enabled ()
+  {
+    static std::atomic<bool> enabled {false};
+    return enabled;
+  }
+
+  // One line per actual RTS/DTR release. dt is socket read until the ioctl.
+  // until rig_set_ptt(OFF) returns, not the type-17 GUI announce.
+  void log_pin_release (qint64 dt_us)
+  {
+    std::fprintf (stderr, "TXINHIBIT_PIN dt_us=%lld\n",
+                  static_cast<long long> (dt_us));
+    std::fflush (stderr);
+    if (FILE * out = std::fopen ("/home/jeff/ham/wsjtx-32rc1-latency/pin-dt.log", "a"))
       {
-        return 0;
+        std::fprintf (out, "%lld\n", static_cast<long long> (dt_us));
+        std::fclose (out);
       }
-    qintptr const fd = udp->socketDescriptor ();
-    if (fd < 0)
-      {
-        return 0;
-      }
-    sockaddr_storage ss {};
-#ifdef Q_OS_WIN
-    int len = sizeof ss;
-    SOCKET const s = static_cast<SOCKET> (fd);
-    if (::getsockname (s, reinterpret_cast<sockaddr *> (&ss), &len) != 0)
-      {
-        return 0;
-      }
-#else
-    socklen_t len = sizeof ss;
-    if (::getsockname (static_cast<int> (fd), reinterpret_cast<sockaddr *> (&ss),
-                       &len) != 0)
-      {
-        return 0;
-      }
-#endif
-    if (ss.ss_family == AF_INET)
-      {
-        return ntohs (reinterpret_cast<sockaddr_in *> (&ss)->sin_port);
-      }
-    if (ss.ss_family == AF_INET6)
-      {
-        return ntohs (reinterpret_cast<sockaddr_in6 *> (&ss)->sin6_port);
-      }
-    return 0;
   }
 }
 
@@ -68,7 +52,50 @@ TxInhibitGate::TxInhibitGate (QObject * parent)
 
 void TxInhibitGate::set_instance_id (QString const& id)
 {
+  QMutexLocker lock (&gate_mu ());
   logic_.set_instance_id (id);
+}
+
+void TxInhibitGate::set_commands_enabled (bool enabled)
+{
+  commands_enabled ().store (enabled, std::memory_order_release);
+}
+
+void TxInhibitGate::note_pin_off_ns (qint64 ns)
+{
+  t_pin_ns_.store (ns, std::memory_order_release);
+}
+
+void TxInhibitGate::submit_shared (QByteArray const& data, qint64 t_rx_ns)
+{
+  // Hold the mutex through the queued post. shutdown() takes the same mutex
+  // before deleteLater, so the ingest event is ordered ahead of destruction.
+  QMutexLocker lock (&gate_mu ());
+  if (!commands_enabled ().load (std::memory_order_acquire))
+    {
+      return;
+    }
+  TxInhibitGate * gate = current_gate ();
+  if (!gate || gate->stopped_)
+    {
+      return;
+    }
+  auto const msg = TxInhibit::parse_datagram (data);
+  bool const id_ok = msg.target_id.isEmpty ()
+    || msg.target_id == gate->logic_.instance_id ();
+  // First lease only. A refresh while already inhibited does not preempt CAT.
+  bool const initiating = msg.valid && msg.ttl_ms > 0 && id_ok
+    && !gate->inhibited_published_.load (std::memory_order_acquire);
+  if (initiating)
+    {
+      gate->pending_.store (true, std::memory_order_release);
+      if (t_rx_ns > 0)
+        {
+          gate->t_rx_ns_.store (t_rx_ns, std::memory_order_release);
+        }
+    }
+  QMetaObject::invokeMethod (gate, "ingest_shared", Qt::QueuedConnection,
+                             Q_ARG (QByteArray, data));
 }
 
 TxInhibitGate::~TxInhibitGate ()
@@ -97,70 +124,15 @@ qint64 TxInhibitGate::now_ms () const
 void TxInhibitGate::start_listening ()
 {
   stopped_ = false;
-  // On bind failure ensure_udp emits lineError once; gate still applies intent
-  // as a pin filter but never receives holds. Non-fatal for CAT/PTT.
-  (void) ensure_udp ();
-}
-
-bool TxInhibitGate::ensure_udp ()
-{
-  if (udp_)
-    {
-      return true;
-    }
-  if (stopped_)
-    {
-      return false;
-    }
-  udp_ = new QUdpSocket (this);
-  // Bind an ephemeral port (OS-assigned). Controllers learn the port from
-  // InhibitStatus (type 17) on the UDP Server stream. Each instance on a
-  // host gets its own port.
-  QHostAddress const any4 {QHostAddress::AnyIPv4};
-  auto fail_bind = [this] (QString const& err) {
-    if (udp_)
-      {
-        udp_->close ();
-        udp_->deleteLater ();
-        udp_ = nullptr;
-      }
-    bound_port_ = 0;
-    Q_EMIT lineError (QStringLiteral ("TX Inhibit: UDP bind failed: %1").arg (err));
-    return false;
-  };
-  // Test hook: WSJTX_TX_INHIBIT_FORCE_BIND_FAIL=1 forces arming failure
-  // (no listen port, lineError, no portBound).
-  if (qgetenv ("WSJTX_TX_INHIBIT_FORCE_BIND_FAIL") == QByteArray {"1"})
-    {
-      return fail_bind (QStringLiteral ("forced bind failure (WSJTX_TX_INHIBIT_FORCE_BIND_FAIL=1)"));
-    }
-  if (!udp_->bind (any4, quint16 (0)))
-    {
-      return fail_bind (udp_->errorString ());
-    }
-  bound_port_ = udp_->localPort ();
-  if (0 == bound_port_)
-    {
-      bound_port_ = native_udp_local_port (udp_);
-    }
-  if (0 == bound_port_)
-    {
-      // bind() succeeded but the OS-assigned port is not visible.
-      // Do not emit portBound(0): controllers drop type 17 with port 0.
-      return fail_bind (QStringLiteral ("ephemeral port is 0 after bind"));
-    }
-  QObject::connect (udp_, &QUdpSocket::readyRead, this, &TxInhibitGate::on_udp_ready);
-  Q_EMIT portBound (bound_port_);
-
   if (!timer_)
     {
-      timer_ = new QTimer (this);
-      // hold_timeout_ms poll; UDP hold packets are event-driven.
+      timer_ = new QTimer {this};
       timer_->setInterval (20);
       QObject::connect (timer_, &QTimer::timeout, this, &TxInhibitGate::tick);
       timer_->start ();
     }
-  return true;
+  QMutexLocker lock (&gate_mu ());
+  current_gate () = this;
 }
 
 void TxInhibitGate::set_intent (bool on)
@@ -175,7 +147,16 @@ void TxInhibitGate::set_intent (bool on)
 
 void TxInhibitGate::shutdown (bool emit_pin)
 {
-  stopped_ = true;
+  {
+    QMutexLocker lock (&gate_mu ());
+    stopped_ = true;
+    if (current_gate () == this)
+      {
+        current_gate () = nullptr;
+      }
+  }
+  pending_.store (false, std::memory_order_release);
+  inhibited_published_.store (false, std::memory_order_release);
   intent_ = false;
 
   if (emit_pin && last_radiate_)
@@ -195,31 +176,30 @@ void TxInhibitGate::shutdown (bool emit_pin)
       timer_->deleteLater ();
       timer_ = nullptr;
     }
-  if (udp_)
-    {
-      udp_->disconnect (this);
-      udp_->close ();
-      udp_->deleteLater ();
-      udp_ = nullptr;
-      bound_port_ = 0;
-    }
 }
 
-void TxInhibitGate::on_udp_ready ()
+void TxInhibitGate::ingest_shared (QByteArray data)
 {
-  if (!udp_ || stopped_)
+  if (stopped_)
     {
+      pending_.store (false, std::memory_order_release);
+      t_rx_ns_.store (0, std::memory_order_release);
       return;
     }
-  while (udp_->hasPendingDatagrams ())
-    {
-      QByteArray data;
-      data.resize (static_cast<int> (udp_->pendingDatagramSize ()));
-      udp_->readDatagram (data.data (), data.size ());
-      (void) logic_.on_datagram (data, now_ms ());
-    }
+  bool const was_radiate = last_radiate_;
+  qint64 const t_rx = t_rx_ns_.exchange (0, std::memory_order_acq_rel);
+  t_pin_ns_.store (0, std::memory_order_release);
+  (void) logic_.on_datagram (data, now_ms ());
   apply_line ();
-  emit_state_if_changed ();
+  qint64 const t_pin = t_pin_ns_.exchange (0, std::memory_order_acq_rel);
+  bool const dropped = t_rx > 0 && t_pin > t_rx && was_radiate && !last_radiate_;
+  emit_state_if_changed (dropped ? t_rx : 0, dropped ? t_pin : 0);
+  publish_inhibited ();
+  pending_.store (false, std::memory_order_release);
+  if (dropped)
+    {
+      log_pin_release ((t_pin - t_rx) / 1000);
+    }
 }
 
 void TxInhibitGate::tick ()
@@ -231,6 +211,13 @@ void TxInhibitGate::tick ()
   (void) logic_.inhibited (now_ms ());
   apply_line ();
   emit_state_if_changed ();
+  publish_inhibited ();
+}
+
+void TxInhibitGate::publish_inhibited ()
+{
+  inhibited_published_.store (logic_.line_inhibited (now_ms ()),
+                              std::memory_order_release);
 }
 
 void TxInhibitGate::apply_line ()
@@ -291,7 +278,7 @@ void TxInhibitGate::emit_physical_ptt (bool radiate)
     }
 }
 
-void TxInhibitGate::emit_state_if_changed ()
+void TxInhibitGate::emit_state_if_changed (qint64 t_rx_ns, qint64 t_pin_ns)
 {
   qint64 t = now_ms ();
   bool inh = logic_.line_inhibited (t);
@@ -302,6 +289,7 @@ void TxInhibitGate::emit_state_if_changed ()
       last_badge_ = badge;
       Q_EMIT inhibitChanged (inh, badge
                              , logic_.hold_rx (), logic_.release_rx ()
-                             , logic_.expiries (), logic_.invalid ());
+                             , logic_.expiries (), logic_.invalid ()
+                             , t_rx_ns, t_pin_ns);
     }
 }

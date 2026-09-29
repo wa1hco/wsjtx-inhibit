@@ -38,6 +38,7 @@ public:
                  QString const& server_name, port_type server_port,
                  QStringList const& network_interface_names,
                  int TTL, QObject * parent = nullptr);
+  ~MessageClient () override;
 
   // query server details
   QHostAddress server_address () const;
@@ -85,11 +86,15 @@ public:
   // of record marker
   Q_SLOT void logged_ADIF (QByteArray const& ADIF_record);
 
-  // TX Inhibit status (NetworkMessage::InhibitStatus) — WSJT-X station telemetry for agents/tools.
-  Q_SLOT void inhibit_status (quint16 inhibit_port, bool inhibited
+  // TX Inhibit status (NetworkMessage::InhibitStatus). Supported is RTS/DTR
+  // plus Accept UDP requests. Inhibited is any live lease.
+  // t_rx_ns and t_pin_ns are CLOCK_MONOTONIC nanoseconds. Zero unless this
+  // datagram is the hold that dropped the modem line.
+  Q_SLOT void inhibit_status (bool supported, bool inhibited
                               , QString const& source_station
                               , quint32 hold_rx, quint32 release_rx
-                              , quint32 expiries, quint32 invalid);
+                              , quint32 expiries, quint32 invalid
+                              , qint64 t_rx_ns, qint64 t_pin_ns);
 
   // this signal is emitted if the server has requested a decode
   // window clear action

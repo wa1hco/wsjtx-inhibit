@@ -19,6 +19,7 @@
 #include <QSignalSpy>
 #include <QUdpSocket>
 
+#include "Network/MessageClient.hpp"
 #include "TxInhibit/TxInhibitGate.hpp"
 #include "TxInhibit/TxInhibitLogic.hpp"
 
@@ -40,45 +41,6 @@ class TestTxInhibitGate final
 
 private slots:
 
-  // bind(0) must never advertise port 0. Controllers drop type-17 port 0, so
-  // portBound(0) leaves the KEY-agent target list empty.
-  void bindNeverAnnouncesPortZero ()
-  {
-    TxInhibitGate gate;
-    QSignalSpy bound {&gate, &TxInhibitGate::portBound};
-    QSignalSpy err {&gate, &TxInhibitGate::lineError};
-
-    gate.start_listening ();
-    if (bound.count () == 1)
-      {
-        auto const port = bound.at (0).at (0).value<quint16> ();
-        QVERIFY2 (port != 0, "portBound must not advertise port 0");
-        QCOMPARE (err.count (), 0);
-      }
-    else
-      {
-        QCOMPARE (bound.count (), 0);
-        QCOMPARE (err.count (), 1);
-      }
-    gate.shutdown (false);
-  }
-
-  // Operator test hook: force arming failure without a real OS bind fault.
-  void forceBindFailEmitsLineErrorOnly ()
-  {
-    qputenv ("WSJTX_TX_INHIBIT_FORCE_BIND_FAIL", QByteArray {"1"});
-    TxInhibitGate gate;
-    QSignalSpy bound {&gate, &TxInhibitGate::portBound};
-    QSignalSpy err {&gate, &TxInhibitGate::lineError};
-
-    gate.start_listening ();
-    QCOMPARE (bound.count (), 0);
-    QCOMPARE (err.count (), 1);
-    QVERIFY (err.at (0).at (0).toString ().contains (QStringLiteral ("forced bind failure")));
-    gate.shutdown (false);
-    qunsetenv ("WSJTX_TX_INHIBIT_FORCE_BIND_FAIL");
-  }
-
   // The core equation, end to end: assert PTT <=> want_tx and not hold.
   // Crucially, want_tx never changes here -- only the hold does. That is the
   // whole point of the feature, and the thing a careless refactor breaks.
@@ -86,12 +48,8 @@ private slots:
   {
     TxInhibitGate gate;
     QSignalSpy pin {&gate, &TxInhibitGate::physicalPtt};
-    QSignalSpy bound {&gate, &TxInhibitGate::portBound};
-
     gate.start_listening ();
-    QCOMPARE (bound.count (), 1);
-    auto const port = bound.at (0).at (0).value<quint16> ();
-    QVERIFY2 (port != 0, "gate did not bind any UDP port");
+    TxInhibitGate::set_commands_enabled (true);
 
     // want_tx on, no hold -> assert
     gate.set_intent (true);
@@ -99,13 +57,12 @@ private slots:
     QCOMPARE (pin.at (0).at (0).toBool (), true);
 
     // hold arrives; want_tx is untouched -> release
-    QUdpSocket agent;
-    agent.writeDatagram (hold_packet (5000), QHostAddress::LocalHost, port);
+    TxInhibitGate::submit_shared (hold_packet (5000));
     QTRY_COMPARE (pin.count (), 2);
     QCOMPARE (pin.at (1).at (0).toBool (), false);
 
     // explicit release; want_tx still on -> assert again
-    agent.writeDatagram (hold_packet (0), QHostAddress::LocalHost, port);
+    TxInhibitGate::submit_shared (hold_packet (0));
     QTRY_COMPARE (pin.count (), 3);
     QCOMPARE (pin.at (2).at (0).toBool (), true);
 
@@ -117,16 +74,13 @@ private slots:
   void holdTimeoutRecoversWithoutRelease ()
   {
     TxInhibitGate gate;
-    QSignalSpy bound {&gate, &TxInhibitGate::portBound};
     gate.start_listening ();
-    auto const port = bound.at (0).at (0).value<quint16> ();
+    TxInhibitGate::set_commands_enabled (true);
 
     gate.set_intent (true);
     QSignalSpy pin {&gate, &TxInhibitGate::physicalPtt};
 
-    QUdpSocket agent;
-    agent.writeDatagram (hold_packet (TxInhibit::hold_timeout_ms_min),
-                         QHostAddress::LocalHost, port);
+    TxInhibitGate::submit_shared (hold_packet (TxInhibit::hold_timeout_ms_min));
     QTRY_COMPARE (pin.count (), 1);
     QCOMPARE (pin.at (0).at (0).toBool (), false);   // held
 
@@ -141,15 +95,13 @@ private slots:
   void releaseWithoutIntentDoesNotKey ()
   {
     TxInhibitGate gate;
-    QSignalSpy bound {&gate, &TxInhibitGate::portBound};
     gate.start_listening ();
-    auto const port = bound.at (0).at (0).value<quint16> ();
+    TxInhibitGate::set_commands_enabled (true);
 
     QSignalSpy pin {&gate, &TxInhibitGate::physicalPtt};
-    QUdpSocket agent;
-    agent.writeDatagram (hold_packet (200), QHostAddress::LocalHost, port);
+    TxInhibitGate::submit_shared (hold_packet (200));
     QTest::qWait (400);                      // hold applied and expired
-    agent.writeDatagram (hold_packet (0), QHostAddress::LocalHost, port);
+    TxInhibitGate::submit_shared (hold_packet (0));
     QTest::qWait (100);
 
     QCOMPARE (pin.count (), 0);              // never keyed: want_tx was false
@@ -160,20 +112,18 @@ private slots:
   void reportsStateChangesOnce ()
   {
     TxInhibitGate gate;
-    QSignalSpy bound {&gate, &TxInhibitGate::portBound};
     gate.start_listening ();
-    auto const port = bound.at (0).at (0).value<quint16> ();
+    TxInhibitGate::set_commands_enabled (true);
 
     QSignalSpy changed {&gate, &TxInhibitGate::inhibitChanged};
-    QUdpSocket agent;
-    agent.writeDatagram (hold_packet (5000, "W1AW"), QHostAddress::LocalHost, port);
+    TxInhibitGate::submit_shared (hold_packet (5000, "W1AW"));
     QTRY_VERIFY (changed.count () >= 1);
     QCOMPARE (changed.at (0).at (0).toBool (), true);
     QVERIFY (changed.at (0).at (1).toString ().contains (QStringLiteral ("W1AW")));
 
     // A keepalive refreshes the timeout but is not a state change.
     int const before = changed.count ();
-    agent.writeDatagram (hold_packet (5000, "W1AW"), QHostAddress::LocalHost, port);
+    TxInhibitGate::submit_shared (hold_packet (5000, "W1AW"));
     QTest::qWait (100);
     QCOMPARE (changed.count (), before);
 
@@ -208,17 +158,15 @@ private slots:
   void holdTimingUsesMonotonicBase ()
   {
     TxInhibitGate gate;
-    QSignalSpy bound {&gate, &TxInhibitGate::portBound};
     gate.start_listening ();
-    auto const port = bound.at (0).at (0).value<quint16> ();
+    TxInhibitGate::set_commands_enabled (true);
     gate.set_intent (true);
 
     QSignalSpy pin {&gate, &TxInhibitGate::physicalPtt};
-    QUdpSocket agent;
 
     QElapsedTimer measured;
     measured.start ();
-    agent.writeDatagram (hold_packet (300), QHostAddress::LocalHost, port);
+    TxInhibitGate::submit_shared (hold_packet (300));
     QTRY_COMPARE (pin.count (), 1);          // held
     QTRY_COMPARE (pin.count (), 2);          // expired
     auto const elapsed = measured.elapsed ();
@@ -231,6 +179,74 @@ private slots:
     QVERIFY2 (elapsed >= 250 && elapsed < 3000,
               qPrintable (QStringLiteral ("hold lasted %1 ms, expected ~300")
                           .arg (elapsed)));
+
+    gate.shutdown (false);
+  }
+
+  // Heartbeat-source type 18: the first lease is pending until this thread
+  // applies it. A refresh of that lease is not pending.
+  void sharedSocketFirstLeaseIsPendingRefreshIsNot ()
+  {
+    TxInhibitGate gate;
+    gate.set_instance_id (QStringLiteral ("WSJT-X"));
+    gate.start_listening ();
+    TxInhibitGate::set_commands_enabled (true);
+
+    QSignalSpy pin {&gate, &TxInhibitGate::physicalPtt};
+    gate.set_intent (true);
+    QCOMPARE (pin.count (), 1);
+    QCOMPARE (pin.at (0).at (0).toBool (), true);
+
+    TxInhibitGate::submit_shared (hold_packet (5000, "W1AW", "KEY"));
+    QVERIFY (gate.hold_pending ());
+    QTRY_COMPARE (pin.count (), 2);
+    QCOMPARE (pin.at (1).at (0).toBool (), false);
+    QVERIFY (!gate.hold_pending ());
+
+    TxInhibitGate::submit_shared (hold_packet (5000, "W1AW", "KEY"));
+    QVERIFY (!gate.hold_pending ());
+    QTest::qWait (50);
+    QCOMPARE (pin.count (), 2);
+
+    auto const other = TxInhibit::build_datagram (QStringLiteral ("KEY"), 5000,
+                                                   QStringLiteral ("W1AW"),
+                                                   QStringLiteral ("OTHER"));
+    TxInhibitGate::submit_shared (other);
+    QVERIFY (!gate.hold_pending ());
+
+    gate.shutdown (false);
+  }
+
+  // The dispatch thread reads the heartbeat socket and delivers an initiating
+  // type 18 to the gate without a GUI parse.
+  void dispatchThreadDeliversFirstLease ()
+  {
+    QUdpSocket server;
+    QVERIFY (server.bind (QHostAddress {QHostAddress::LocalHost}, quint16 {0}));
+
+    TxInhibitGate gate;
+    gate.set_instance_id (QStringLiteral ("WSJT-X"));
+    gate.start_listening ();
+    QSignalSpy pin {&gate, &TxInhibitGate::physicalPtt};
+    gate.set_intent (true);
+    QCOMPARE (pin.count (), 1);
+    TxInhibitGate::set_commands_enabled (true);
+
+    MessageClient client {QStringLiteral ("WSJT-X"), QStringLiteral ("t"),
+                          QStringLiteral ("t"), QStringLiteral ("127.0.0.1"),
+                          server.localPort (), {}, 1};
+    QTRY_VERIFY (server.hasPendingDatagrams ());
+    QByteArray buf;
+    buf.resize (server.pendingDatagramSize ());
+    QHostAddress from;
+    quint16 from_port = 0;
+    QCOMPARE (server.readDatagram (buf.data (), buf.size (), &from, &from_port), buf.size ());
+    QVERIFY (from_port != 0);
+
+    QUdpSocket agent;
+    agent.writeDatagram (hold_packet (5000, "W1AW", "KEY"), QHostAddress::LocalHost, from_port);
+    QTRY_COMPARE (pin.count (), 2);
+    QCOMPARE (pin.at (1).at (0).toBool (), false);
 
     gate.shutdown (false);
   }

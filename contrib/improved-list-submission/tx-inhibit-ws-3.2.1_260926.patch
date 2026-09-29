@@ -1,0 +1,1993 @@
+diff -ruN a/CMakeLists.txt b/CMakeLists.txt
+--- a/CMakeLists.txt	2026-09-25 02:54:19.000000000 -0400
++++ b/CMakeLists.txt	2026-09-26 23:05:06.096175940 -0400
+@@ -256,6 +256,7 @@
+   TxInhibit/TxInhibitGate.cpp
+   Network/NetworkMessage.cpp
+   Network/MessageClient.cpp
++  Network/UdpDispatch.cpp
+   widgets/LettersSpinBox.cpp
+   widgets/HintedSpinBox.cpp
+   widgets/RestrictedSpinBox.cpp
+diff -ruN a/Configuration.cpp b/Configuration.cpp
+--- a/Configuration.cpp	2026-09-26 04:06:45.000000000 -0400
++++ b/Configuration.cpp	2026-09-26 23:24:58.081631267 -0400
+@@ -2338,7 +2338,6 @@
+   ui_->sbBandwidth->setValue (RxBandwidth_);
+   ui_->tci_audio_check_box->setChecked (tci_audio_);
+   ui_->PTT_method_button_group->button (rig_params_.ptt_type)->setChecked (true);
+-  ui_->tx_inhibit_check_box->setChecked (enable_tx_inhibit_);
+   ui_->PWR_and_SWR_check_box->setChecked (PWR_and_SWR_);
+   ui_->check_SWR_check_box->setChecked (check_SWR_);
+   if (!ui_->PWR_and_SWR_check_box->isChecked()) ui_->check_SWR_check_box->setEnabled (false);
+@@ -2845,8 +2844,10 @@
+   rig_params_.ptt_type = settings_->value ("PTTMethod", QVariant::fromValue (TransceiverFactory::PTT_method_VOX)).value<TransceiverFactory::PTTMethod> ();
+   rig_params_.audio_source = settings_->value ("TXAudioSource", QVariant::fromValue (TransceiverFactory::TX_audio_source_front)).value<TransceiverFactory::TXAudioSource> ();
+   rig_params_.ptt_port = settings_->value ("PTTport").toString ();
+-  enable_tx_inhibit_ = settings_->value ("EnableTxInhibit", false).toBool ();
+-  rig_params_.enable_tx_inhibit = enable_tx_inhibit_;
++  rig_params_.enable_tx_inhibit =
++    TransceiverFactory::PTT_method_DTR == rig_params_.ptt_type
++    || TransceiverFactory::PTT_method_RTS == rig_params_.ptt_type;
++  enable_tx_inhibit_ = rig_params_.enable_tx_inhibit;
+   data_mode_ = settings_->value ("DataMode", QVariant::fromValue (data_mode_none)).value<Configuration::DataMode> ();
+   bLowSidelobes_ = settings_->value("LowSidelobes",true).toBool();
+   prompt_to_log_ = settings_->value ("PromptToLog", false).toBool ();
+@@ -3069,7 +3070,6 @@
+   settings_->setValue ("CATTCIPort", rig_params_.tci_port);
+   settings_->setValue ("PTTMethod", QVariant::fromValue (rig_params_.ptt_type));
+   settings_->setValue ("PTTport", rig_params_.ptt_port);
+-  settings_->setValue ("EnableTxInhibit", enable_tx_inhibit_);
+   settings_->setValue ("SaveDir", save_directory_.absolutePath ());
+   settings_->setValue ("AzElDir", azel_directory_.absolutePath ());
+   if (!audio_input_device_.isNull ()) {
+@@ -3290,8 +3290,6 @@
+   auto enable_ptt_port = TransceiverFactory::PTT_method_CAT != ptt_method && TransceiverFactory::PTT_method_VOX != ptt_method;
+   ui_->PTT_port_combo_box->setEnabled (enable_ptt_port);
+   ui_->PTT_port_label->setEnabled (enable_ptt_port);
+-  // TX Inhibit only applies to RTS/DTR pin keying.
+-  ui_->tx_inhibit_check_box->setEnabled (enable_ptt_port && !is_tci_);
+ 
+   if (CAT_indirect_serial_PTT)
+     {
+@@ -3559,9 +3557,9 @@
+   if (is_tci_ && ui_->tci_audio_check_box->isChecked ()) result.poll_interval |= tci__audio;
+   result.ptt_type = static_cast<TransceiverFactory::PTTMethod> (ui_->PTT_method_button_group->checkedId ());
+   result.ptt_port = ui_->PTT_port_combo_box->currentText ();
+-  result.enable_tx_inhibit = ui_->tx_inhibit_check_box->isChecked ()
+-    && (TransceiverFactory::PTT_method_DTR == result.ptt_type
+-        || TransceiverFactory::PTT_method_RTS == result.ptt_type);
++  result.enable_tx_inhibit =
++    TransceiverFactory::PTT_method_DTR == result.ptt_type
++    || TransceiverFactory::PTT_method_RTS == result.ptt_type;
+   result.audio_source = static_cast<TransceiverFactory::TXAudioSource> (ui_->TX_audio_source_button_group->checkedId ());
+   result.split_mode = static_cast<TransceiverFactory::SplitMode> (ui_->split_mode_button_group->checkedId ());
+   return result;
+@@ -3794,9 +3792,7 @@
+   bLowSidelobes_ = ui_->rbLowSidelobes->isChecked();
+   save_directory_.setPath (ui_->save_path_display_label->text ());
+   azel_directory_.setPath (ui_->azel_path_display_label->text ());
+-  // Match gather_rig_data(): inhibit is only live for RTS/DTR. Using the raw
+-  // checkbox here left enable_tx_inhibit_ true under CAT/VOX while the gate
+-  // never started — permanent "NOT protected" status (checkbox often disabled).
++  // Armed exactly when PTT is RTS or DTR. CAT and VOX do not install the gate.
+   enable_tx_inhibit_ = rig_params_.enable_tx_inhibit;
+   enable_VHF_features_ = ui_->enable_VHF_features_check_box->isChecked ();
+   decode_at_52s_ = ui_->decode_at_52s_check_box->isChecked ();
+@@ -5517,6 +5513,12 @@
+                                          tx_inhibit_port_ = port;
+                                          Q_EMIT self_->tx_inhibit_port_changed (port);
+                                        });
++          rig_connections_ << connect (self_, &Configuration::tx_inhibit_command,
++                                       rig.get (), &Transceiver::tx_inhibit_command,
++                                       Qt::QueuedConnection);
++          rig_connections_ << connect (self_, &Configuration::tx_inhibit_invalid,
++                                       rig.get (), &Transceiver::tx_inhibit_invalid,
++                                       Qt::QueuedConnection);
+           rig_connections_ << connect (rig.get (), &Transceiver::tciframeswritten, this, &Configuration::impl::handle_transceiver_tciframeswritten);
+           rig_connections_ << connect (rig.get (), &Transceiver::tci_mod_active, this, &Configuration::impl::handle_transceiver_tci_mod_active);
+           rig_connections_ << connect (this, &Configuration::impl::enqueue_jtty_pcm,
+diff -ruN a/Configuration.hpp b/Configuration.hpp
+--- a/Configuration.hpp	2026-09-25 02:50:25.000000000 -0400
++++ b/Configuration.hpp	2026-09-26 23:24:57.721627358 -0400
+@@ -404,12 +404,12 @@
+   // the "Emulate Split" mode requires PTT information to coordinate
+   // frequency changes.
+   //
+-  // When PTT is DTR/RTS and TX Inhibit is enabled, HamlibTransceiver may
+-  // install a pin filter (assert PTT ⇔ want_tx and not hold). Sequencing
+-  // and CAT remain stock; Configuration does not drive RTS/DTR itself.
++  // When PTT is DTR or RTS, HamlibTransceiver installs the inhibit pin
++  // filter (assert PTT only when this station wants to transmit and no
++  // type 18 hold is active). Configuration does not drive RTS/DTR itself.
+   Q_SLOT void transceiver_ptt (bool = true);
+ 
+-  // Settings: Enable TX Inhibit. Default false.
++  // True when the selected PTT method is RTS or DTR.
+   bool enable_tx_inhibit () const;
+   // Bound UDP block listen port (0 if not active).
+   quint16 tx_inhibit_port () const;
+@@ -517,6 +517,10 @@
+                                     , quint32 hold_rx, quint32 release_rx
+                                     , quint32 expiries, quint32 invalid) const;
+   Q_SIGNAL void tx_inhibit_port_changed (quint16 port) const;
++  // Type 18, from MessageClient on the reporting socket to the rig thread.
++  Q_SIGNAL void tx_inhibit_command (QString const& controller, quint32 ttl_ms,
++                                    QString const& station);
++  Q_SIGNAL void tx_inhibit_invalid (quint64 count) const;
+ 
+   // signal announces audio devices are being enumerated
+   //
+diff -ruN a/Configuration.ui b/Configuration.ui
+--- a/Configuration.ui	2026-09-25 02:50:25.000000000 -0400
++++ b/Configuration.ui	2026-09-26 23:24:57.956629910 -0400
+@@ -1471,7 +1471,7 @@
+               <item row="0" column="1">
+                <widget class="QRadioButton" name="PTT_DTR_radio_button">
+                 <property name="toolTip">
+-                 <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Use the RS-232 DTR control line to toggle your radio's PTT, requires hardware to interface the line.&lt;/p&gt;&lt;p&gt;Some commercial interface units also use this method.&lt;/p&gt;&lt;p&gt;The DTR control line of the CAT serial port may be used for this or a DTR control line on a different serial port may be used.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
++                 <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Use the RS-232 DTR control line to toggle your radio's PTT, requires hardware to interface the line.&lt;/p&gt;&lt;p&gt;Some commercial interface units also use this method.&lt;/p&gt;&lt;p&gt;The DTR control line of the CAT serial port may be used for this or a DTR control line on a different serial port may be used.&lt;/p&gt;&lt;p&gt;Selecting DTR also arms TX Inhibit. Type 18 commands are accepted on the reporting UDP socket when Accept UDP requests is on.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+                 </property>
+                 <property name="text">
+                  <string>&amp;DTR</string>
+@@ -1502,7 +1502,7 @@
+               <item row="1" column="1">
+                <widget class="QRadioButton" name="PTT_RTS_radio_button">
+                 <property name="toolTip">
+-                 <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Use the RS-232 RTS control line to toggle your radio's PTT, requires hardware to interface the line.&lt;/p&gt;&lt;p&gt;Some commercial interface units also use this method.&lt;/p&gt;&lt;p&gt;The RTS control line of the CAT serial port may be used for this or a RTS control line on a different serial port may be used. Note that this option is not available on the CAT serial port when hardware flow control is used.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
++                 <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Use the RS-232 RTS control line to toggle your radio's PTT, requires hardware to interface the line.&lt;/p&gt;&lt;p&gt;Some commercial interface units also use this method.&lt;/p&gt;&lt;p&gt;The RTS control line of the CAT serial port may be used for this or a RTS control line on a different serial port may be used. Note that this option is not available on the CAT serial port when hardware flow control is used. Selecting RTS also arms TX Inhibit. Type 18 commands are accepted on the reporting UDP socket when Accept UDP requests is on.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+                 </property>
+                 <property name="text">
+                  <string>R&amp;TS</string>
+@@ -1552,16 +1552,6 @@
+                   </property>
+                  </widget>
+                 </item>
+-                <item row="1" column="0" colspan="2">
+-                 <widget class="QCheckBox" name="tx_inhibit_check_box">
+-                  <property name="toolTip">
+-                   <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;&lt;b&gt;TX Inhibit&lt;/b&gt; (RTS/DTR PTT only).&lt;/p&gt;&lt;p&gt;This &lt;b&gt;WS station&lt;/b&gt; is the app, PC, network, radio, and antenna (may be a remote go-box). When enabled, listen for UDP from a KEY agent (default port 22372). The KEY agent &lt;b&gt;tells WS stations not to transmit&lt;/b&gt; while a priority radio is keyed. Physical outcome: &lt;code&gt;assert PTT ⇔ want_tx and not hold&lt;/code&gt;. Sequencing continues; only whether this station may assert PTT is filtered.&lt;/p&gt;&lt;p&gt;Default is off (stock PTT). Co-band multi-op stations that share a band with a priority radio should enable this and run a KEY agent.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+-                  </property>
+-                  <property name="text">
+-                   <string>Enable TX &amp;Inhibit</string>
+-                  </property>
+-                 </widget>
+-                </item>
+                </layout>
+               </item>
+              </layout>
+diff -ruN a/Network/MessageClient.cpp b/Network/MessageClient.cpp
+--- a/Network/MessageClient.cpp	2026-09-25 02:50:25.000000000 -0400
++++ b/Network/MessageClient.cpp	2026-09-26 23:06:14.040827593 -0400
+@@ -5,7 +5,6 @@
+ #include <algorithm>
+ #include <limits>
+ 
+-#include <QUdpSocket>
+ #include <QNetworkInterface>
+ #include <QHostInfo>
+ #include <QTimer>
+@@ -14,8 +13,10 @@
+ #include <QDataStream>
+ #include <QColor>
+ #include <QDebug>
++#include <QtEndian>
+ 
+ #include "NetworkMessage.hpp"
++#include "UdpDispatch.hpp"
+ #include "qt_helpers.hpp"
+ #include "pimpl_impl.hpp"
+ 
+@@ -28,15 +29,39 @@
+ #define TRACE_UDP(MSG)
+ #endif
+ 
++namespace
++{
++  int constexpr inhibit_message_limit {4096};
++
++  bool read_inhibit_text (QDataStream& in, QString& text, quint32 limit, bool identity)
++  {
++    quint32 length {0};
++    in >> length;
++    if (length == 0xffffffff && !identity) length = 0;
++    if (in.status () != QDataStream::Ok || length > limit
++        || length > quint64 (in.device ()->bytesAvailable ())) return false;
++    QByteArray bytes (int (length), '\0');
++    if (in.readRawData (bytes.data (), bytes.size ()) != bytes.size ()) return false;
++    text = QString::fromUtf8 (bytes);
++    if (text.toUtf8 () != bytes || (identity && text.isEmpty ())) return false;
++    for (auto character : text.toUcs4 ())
++      {
++        if (!QChar::isPrint (character) || (identity && QChar::isSpace (character))) return false;
++      }
++    return true;
++  }
++}
++
+ class MessageClient::impl
+-  : public QUdpSocket
++  : public QObject
+ {
+   Q_OBJECT;
+ 
+ public:
+   impl (QString const& id, QString const& version, QString const& revision,
+         port_type server_port, int TTL, MessageClient * self)
+-    : self_ {self}
++    : QObject {}
++    , self_ {self}
+     , enabled_ {false}
+     , id_ {id}
+     , version_ {version}
+@@ -48,7 +73,20 @@
+     , heartbeat_timer_ {new QTimer {this}}
+   {
+     connect (heartbeat_timer_, &QTimer::timeout, this, &impl::heartbeat);
+-    connect (this, &QIODevice::readyRead, this, &impl::pending_datagrams);
++    dispatch_.set_id (id_);
++    dispatch_.set_ttl (TTL_);
++    connect (&dispatch_, &UdpDispatch::gui_datagram, this, &impl::pending_datagrams,
++             Qt::QueuedConnection);
++    connect (&dispatch_, &UdpDispatch::io_error, this, [this] (QString const& message) {
++        Q_EMIT self_->error (message);
++      });
++    inhibit_invalid_timer_.setParent (this);
++    inhibit_invalid_timer_.setSingleShot (true);
++    connect (&inhibit_invalid_timer_, &QTimer::timeout, this, [this] {
++        auto const count = inhibit_invalid_count_;
++        inhibit_invalid_count_ = 0;
++        Q_EMIT self_->tx_inhibit_invalid (count);
++      });
+ 
+     heartbeat_timer_->start (NetworkMessage::pulse * 1000);
+   }
+@@ -68,7 +106,13 @@
+   Q_SLOT void host_info_results (QHostInfo);
+   void start ();
+   void parse_message (QByteArray const&);
+-  void pending_datagrams ();
++  void pending_datagrams (QByteArray const& datagram, quint16 sender_port);
++  bool parse_tx_inhibit (QByteArray const&);
++  void invalid_inhibit ();
++  bool inhibit_available () const;
++  void update_inhibit_status (bool supported, bool inhibited, QString const& source_station,
++                              quint32 hold_rx, quint32 release_rx, quint32 expiries, quint32 invalid);
++  void send_inhibit_status (bool supported);
+   static bool has_our_magic (QByteArray const& datagram)
+   {
+     if (datagram.size () < static_cast<int> (sizeof (quint32))) return false;
+@@ -107,6 +151,20 @@
+   quint32 schema_;
+   QTimer * heartbeat_timer_;
+   std::vector<QHostAddress> blocked_addresses_;
++  struct InhibitSnapshot
++  {
++    bool valid {false};
++    bool supported {false};
++    bool inhibited {false};
++    QString source_station;
++    quint32 hold_rx {0};
++    quint32 release_rx {0};
++    quint32 expiries {0};
++    quint32 invalid {0};
++  } inhibit_status_;
++  QTimer inhibit_invalid_timer_;
++  quint64 inhibit_invalid_count_ {0};
++  UdpDispatch dispatch_;
+ 
+   // hold messages sent before host lookup completes asynchronously
+   QQueue<QByteArray> pending_messages_;
+@@ -184,22 +242,18 @@
+     }
+ 
+   TRACE_UDP ("Trying server:" << server_.toString ());
+-  QHostAddress interface_addr {IPv6Protocol == server_.protocol () ? QHostAddress::AnyIPv6 : QHostAddress::AnyIPv4};
++  QHostAddress interface_addr {QAbstractSocket::IPv6Protocol == server_.protocol ()
++                               ? QHostAddress::AnyIPv6 : QHostAddress::AnyIPv4};
+ 
+-  if (localAddress () != interface_addr)
++  if (dispatch_.local_address () != interface_addr.toString ())
+     {
+-      if (UnconnectedState != state () || state ())
++      if (!dispatch_.is_unconnected ())
+         {
+-          close ();
++          dispatch_.close_socket ();
+         }
+-      // bind to an ephemeral port on the selected interface and set
+-      // up for sending datagrams
+-      bind (interface_addr);
+-      // qDebug () << "Bound to UDP port:" << localPort () << "on:" << localAddress ();
+-
+-      // set multicast TTL to limit scope when sending to multicast
+-      // group addresses
+-      setSocketOption (MulticastTtlOption, TTL_);
++      // Ephemeral source port. Replies, including type 18, come back here.
++      dispatch_.bind (interface_addr);
++      dispatch_.set_ttl (TTL_);
+     }
+ 
+   // send initial heartbeat which allows schema negotiation
+@@ -212,38 +266,76 @@
+     }
+ }
+ 
+-void MessageClient::impl::pending_datagrams ()
++void MessageClient::impl::pending_datagrams (QByteArray const& datagram, quint16 sender_port)
+ {
+-  while (hasPendingDatagrams ())
++  TRACE_UDP ("message received from port:" << sender_port << "size:" << datagram.size ());
++  // A UDP server that answers us replies from the socket it bound on
++  // the server port, so a datagram from any other source port that
++  // does not even carry our magic number is not a reply at all.
++  if (sender_port != server_port_ && !has_our_magic (datagram))
+     {
+-      QByteArray datagram;
+-      datagram.resize (pendingDatagramSize ());
+-      QHostAddress sender_address;
+-      port_type sender_port;
+-      if (0 <= readDatagram (datagram.data (), datagram.size (), &sender_address, &sender_port))
++      TRACE_UDP ("ignored foreign datagram from port:" << sender_port << "size:" << datagram.size ());
++      return;
++    }
++  parse_message (datagram);
++}
++
++void MessageClient::impl::invalid_inhibit ()
++{
++  ++inhibit_invalid_count_;
++  if (!inhibit_invalid_timer_.isActive ()) inhibit_invalid_timer_.start (100);
++}
++
++bool MessageClient::impl::parse_tx_inhibit (QByteArray const& msg)
++{
++  if (msg.size () < 12
++      || qFromBigEndian<quint32> (reinterpret_cast<uchar const *> (msg.constData () + 8))
++           != NetworkMessage::TxInhibit) return false;
++  if (!enabled_) return true;
++  if (msg.size () < 16 || msg.size () > inhibit_message_limit
++      || qFromBigEndian<quint32> (reinterpret_cast<uchar const *> (msg.constData () + 12)) > 1024
++      || qFromBigEndian<quint32> (reinterpret_cast<uchar const *> (msg.constData ()))
++           != NetworkMessage::Builder::magic)
++    {
++      invalid_inhibit ();
++      return true;
++    }
++  try
++    {
++      NetworkMessage::Reader in {msg};
++      if (in.status () != QDataStream::Ok || in.schema () < 2)
+         {
+-          TRACE_UDP ("message received from:" << sender_address << "port:" << sender_port);
+-          // A UDP server that answers us replies from the socket it bound on
+-          // the server port, so a datagram from any other source port that
+-          // does not even carry our magic number is not a reply at all: it
+-          // is a program spraying a fixed port that happened to be the
+-          // ephemeral port we drew. Seen in the field (DL1SUZ, 2026-09):
+-          // the SDR bridge streams Linrad IQ blocks at 127.0.0.1:50004 and
+-          // WSJT-X had bound 50004, so every 5 ms tick raised a modal
+-          // "Invalid message format". Drop those silently; a malformed
+-          // datagram from the real server still reports, as before.
+-          if (sender_port != server_port_ && !has_our_magic (datagram))
+-            {
+-              TRACE_UDP ("ignored foreign datagram from:" << sender_address << "port:" << sender_port << "size:" << datagram.size ());
+-              continue;
+-            }
+-          parse_message (datagram);
++          invalid_inhibit ();
++          return true;
++        }
++      auto const id_length = qFromBigEndian<quint32> (reinterpret_cast<uchar const *> (msg.constData () + 12));
++      if (in.id ().toUtf8 () != msg.mid (16, int (id_length)))
++        {
++          invalid_inhibit ();
++          return true;
+         }
++      if (in.id () != id_) return true;
++      QString controller;
++      QString station;
++      quint32 ttl {0};
++      bool valid = read_inhibit_text (in, controller, 128, true);
++      in >> ttl;
++      valid = valid && in.status () == QDataStream::Ok
++        && (!ttl || (ttl >= 100 && ttl <= 30000))
++        && read_inhibit_text (in, station, 128, false);
++      if (!valid) invalid_inhibit ();
++      else Q_EMIT self_->tx_inhibit_command (controller, ttl, station);
+     }
++  catch (std::exception const&)
++    {
++      invalid_inhibit ();
++    }
++  return true;
+ }
+ 
+ void MessageClient::impl::parse_message (QByteArray const& msg)
+ {
++  if (parse_tx_inhibit (msg)) return;
+   try
+     {
+       // 
+@@ -470,9 +562,46 @@
+           << version_.toUtf8 () << revision_.toUtf8 ();
+       TRACE_UDP ("schema:" << schema_ << "max schema:" << NetworkMessage::Builder::schema_number << "version:" << version_ << "revision:" << revision_);
+       send_message (out, message, false, true);
++      if (inhibit_available ()) send_inhibit_status (true);
+     }
+ }
+ 
++bool MessageClient::impl::inhibit_available () const
++{
++  return enabled_ && inhibit_status_.valid && inhibit_status_.supported;
++}
++
++void MessageClient::impl::update_inhibit_status (
++  bool supported, bool inhibited, QString const& source_station,
++  quint32 hold_rx, quint32 release_rx, quint32 expiries, quint32 invalid)
++{
++  auto const was_available = inhibit_available ();
++  inhibit_status_.valid = true;
++  inhibit_status_.supported = supported;
++  inhibit_status_.inhibited = inhibited;
++  inhibit_status_.source_station = source_station;
++  inhibit_status_.hold_rx = hold_rx;
++  inhibit_status_.release_rx = release_rx;
++  inhibit_status_.expiries = expiries;
++  inhibit_status_.invalid = invalid;
++  if (inhibit_available ()) send_inhibit_status (true);
++  else if (was_available) send_inhibit_status (false);
++}
++
++void MessageClient::impl::send_inhibit_status (bool supported)
++{
++  if (!inhibit_status_.valid || !server_port_ || server_.isNull ()) return;
++  QByteArray message;
++  NetworkMessage::Builder out {&message, NetworkMessage::InhibitStatus, id_, schema_};
++  out << supported << inhibit_status_.inhibited
++      << inhibit_status_.source_station.toUtf8 ()
++      << inhibit_status_.hold_rx << inhibit_status_.release_rx
++      << inhibit_status_.expiries << inhibit_status_.invalid;
++  TRACE_UDP ("supported:" << supported << "inhibited:" << inhibit_status_.inhibited
++             << "source:" << inhibit_status_.source_station);
++  send_message (out, message, false, true);
++}
++
+ void MessageClient::impl::closedown ()
+ {
+    if (server_port_ && !server_.isNull ())
+@@ -494,18 +623,14 @@
+             {
+               if (is_multicast_address (server_))
+                 {
+-                  // send datagram on each selected network interface
+                   std::for_each (network_interfaces_.begin (), network_interfaces_.end ()
+                                  , [&] (QNetworkInterface const& net_if) {
+-                                     setMulticastInterface (net_if);
+-                                     // qDebug () << "Multicast UDP datagram sent to:" << server_ << "port:" << server_port_ << "on:" << multicastInterface ().humanReadableName ();
+-                                     writeDatagram (message, server_, server_port_);
++                                     dispatch_.send_one (message, server_, server_port_, net_if.name ());
+                                    });
+                 }
+               else
+                 {
+-                  // qDebug () << "Unicast UDP datagram sent to:" << server_ << "port:" << server_port_;
+-                  writeDatagram (message, server_, server_port_);
++                  dispatch_.send_one (message, server_, server_port_, QString {});
+                 }
+               last_message_ = message;
+             }
+@@ -549,24 +674,6 @@
+   : QObject {self}
+   , m_ {id, version, revision, server_port, TTL, this}
+ {
+-  connect (&*m_
+-#if QT_VERSION < QT_VERSION_CHECK(5, 15, 0)
+-           , static_cast<void (impl::*) (impl::SocketError)> (&impl::error), [this] (impl::SocketError e)
+-#else
+-           , &impl::errorOccurred, [this] (impl::SocketError e)
+-#endif
+-                                   {
+-#if defined (Q_OS_WIN)
+-                                     if (e != impl::NetworkError // take this out when Qt 5.5 stops doing this spuriously
+-                                         && e != impl::ConnectionRefusedError) // not interested in this with UDP socket
+-                                       {
+-#else
+-                                       {
+-                                         Q_UNUSED (e);
+-#endif
+-                                         Q_EMIT error (m_->errorString ());
+-                                       }
+-                                       });
+   m_->set_server (server_name, network_interface_names);
+ }
+ 
+@@ -593,12 +700,17 @@
+ void MessageClient::set_TTL (int TTL)
+ {
+   m_->TTL_ = TTL;
+-  m_->setSocketOption (QAbstractSocket::MulticastTtlOption, m_->TTL_);
++  m_->dispatch_.set_ttl (m_->TTL_);
+ }
+ 
+ void MessageClient::enable (bool flag)
+ {
++  if (m_->enabled_ == flag) return;
++  auto const was_available = m_->inhibit_available ();
+   m_->enabled_ = flag;
++  m_->dispatch_.set_commands_enabled (flag);
++  if (m_->inhibit_available ()) m_->send_inhibit_status (true);
++  else if (was_available) m_->send_inhibit_status (false);
+ }
+ 
+ void MessageClient::set_id (QString const& id)
+@@ -609,6 +721,7 @@
+       // id and announce the new one straight away
+       m_->closedown ();
+       m_->id_ = id;
++      m_->dispatch_.set_id (id);
+       m_->heartbeat ();
+     }
+ }
+@@ -654,21 +767,13 @@
+     }
+ }
+ 
+-void MessageClient::inhibit_status (quint16 inhibit_port, bool inhibited
++void MessageClient::inhibit_status (bool supported, bool inhibited
+                                     , QString const& source_station
+                                     , quint32 hold_rx, quint32 release_rx
+                                     , quint32 expiries, quint32 invalid)
+ {
+-  if (m_->server_port_ && !m_->server_.isNull ())
+-    {
+-      QByteArray message;
+-      NetworkMessage::Builder out {&message, NetworkMessage::InhibitStatus, m_->id_, m_->schema_};
+-      out << inhibit_port << inhibited << source_station.toUtf8 ()
+-          << hold_rx << release_rx << expiries << invalid;
+-      TRACE_UDP ("inhibit_port:" << inhibit_port << "inhibited:" << inhibited
+-                 << "source:" << source_station);
+-      m_->send_message (out, message);
+-    }
++  m_->update_inhibit_status (supported, inhibited, source_station,
++                             hold_rx, release_rx, expiries, invalid);
+ }
+ 
+ void MessageClient::WSPR_decode (bool is_new, QTime time, qint32 snr, float delta_time, Frequency frequency
+diff -ruN a/Network/MessageClient.hpp b/Network/MessageClient.hpp
+--- a/Network/MessageClient.hpp	2026-09-25 02:50:25.000000000 -0400
++++ b/Network/MessageClient.hpp	2026-09-26 23:05:06.119176161 -0400
+@@ -57,6 +57,11 @@
+   // enable incoming messages
+   Q_SLOT void enable (bool);
+ 
++  // Type 18 on this same socket. The socket thread has already cleared
++  // RTS or DTR when the datagram is a hold.
++  Q_SIGNAL void tx_inhibit_command (QString const& controller, quint32 ttl_ms, QString const& station);
++  Q_SIGNAL void tx_inhibit_invalid (quint64 count);
++
+   // change the id sent with every message
+   Q_SLOT void set_id (QString const& id);
+ 
+@@ -88,8 +93,9 @@
+   // of record marker
+   Q_SLOT void logged_ADIF (QByteArray const& ADIF_record);
+ 
+-  // TX Inhibit status (NetworkMessage::InhibitStatus) — WSJT-X station telemetry for agents/tools.
+-  Q_SLOT void inhibit_status (quint16 inhibit_port, bool inhibited
++  // Type 17. Repeated after each Heartbeat while supported, and sent
++  // again when the snapshot changes. supported false withdraws it.
++  Q_SLOT void inhibit_status (bool supported, bool inhibited
+                               , QString const& source_station
+                               , quint32 hold_rx, quint32 release_rx
+                               , quint32 expiries, quint32 invalid);
+diff -ruN a/Network/NetworkMessage.hpp b/Network/NetworkMessage.hpp
+--- a/Network/NetworkMessage.hpp	2026-09-25 02:50:25.000000000 -0400
++++ b/Network/NetworkMessage.hpp	2026-09-26 23:05:06.121176180 -0400
+@@ -534,7 +534,7 @@
+  *
+  * InhibitStatus  Out      17
+  *                         Id (unique key)        utf8
+- *                         Inhibit port           quint16
++ *                         Supported              bool
+  *                         Inhibited              bool
+  *                         Source station         utf8
+  *                         Hold rx                quint32
+@@ -542,15 +542,27 @@
+  *                         Expiries               quint32
+  *                         Invalid                quint32
+  *
+- *      Optional telemetry when TX Inhibit is enabled (Settings → Radio)
+- *      and the WSJT-X station block level or badge text changes. KEY-agent UDP
+- *      protocol is separate; see docs/TX_INHIBIT.md.
++ *      Supported means the active transceiver uses DTR or RTS PTT, TX Inhibit
++ *      is enabled, and Accept UDP requests is on. A supported snapshot is
++ *      sent when that state changes and after each Heartbeat. A final
++ *      unsupported snapshot withdraws the advertisement. Inhibited means at
++ *      least one hold is active. Source station summarizes the holders.
++ *      Counters are cumulative for the current transceiver lifetime.
+  *
+- *      Inhibit port: UDP listen port for KEY-agent blocks (usually 22372;
+- *      may be ephemeral). Inhibited: block active. Source station: badge
+- *      text (may be empty). Four quint32 counters: hold packets received,
+- *      explicit release hold, hold timeout expiries (incl. after a deadman),
+- *      invalid datagrams (field names hold_rx etc. are historical wire labels).
++ * TxInhibit      In       18
++ *                         Id (target unique key) utf8
++ *                         Controller ID          utf8
++ *                         TTL milliseconds       quint32
++ *                         Station                utf8
++ *
++ *      Send commands to the source address and ephemeral source port learned
++ *      from ordinary WS traffic, using its Id and schema. Accept UDP requests
++ *      authorizes a new command. Disabling requests does not clear existing
++ *      holds. A zero TTL releases only this controller. A TTL from 100 through
++ *      30000 milliseconds creates or refreshes its hold. All unexpired holds
++ *      combine with logical OR. Up to 64 controllers are tracked; further
++ *      identities extend one aggregate hold. Datagrams are limited to 4096
++ *      bytes. Unknown trailing fields are ignored.
+  *
+  *      Unknown types are ignored; schema number unchanged.
+  */
+@@ -585,11 +597,15 @@
+       SwitchConfiguration,
+       Configure,
+       AnnotationInfo,
+-      InhibitStatus,            // Out 17 — see protocol comment above
++      InhibitStatus = 17,
++      TxInhibit = 18,
+       maximum_message_type_     // ONLY add new message types
+                                 // immediately before here
+     };
+ 
++  static_assert (InhibitStatus == 17, "TX-inhibit protocol type must remain 17");
++  static_assert (TxInhibit == 18, "TX-inhibit command type must remain 18");
++
+   quint32 constexpr pulse {15}; // seconds
+ 
+   //
+diff -ruN a/Network/UdpDispatch.cpp b/Network/UdpDispatch.cpp
+--- a/Network/UdpDispatch.cpp	1969-12-31 19:00:00.000000000 -0500
++++ b/Network/UdpDispatch.cpp	2026-09-27 13:48:09.907135113 -0400
+@@ -0,0 +1,201 @@
++#include "UdpDispatch.hpp"
++
++#include <QNetworkInterface>
++#include <QUdpSocket>
++#include <QtEndian>
++
++#include "NetworkMessage.hpp"
++#include "TxInhibit/TxInhibitDrop.hpp"
++
++UdpDispatchWorker::UdpDispatchWorker (QObject * parent)
++  : QObject {parent}
++{
++}
++
++void UdpDispatchWorker::init ()
++{
++  if (sock_) return;
++  sock_ = new QUdpSocket {this};
++  connect (sock_, &QUdpSocket::readyRead, this, &UdpDispatchWorker::read_pending);
++#if QT_VERSION >= QT_VERSION_CHECK(5, 15, 0)
++  connect (sock_, &QUdpSocket::errorOccurred, this, &UdpDispatchWorker::on_error);
++#else
++  connect (sock_, static_cast<void (QUdpSocket::*) (QAbstractSocket::SocketError)> (&QUdpSocket::error),
++           this, &UdpDispatchWorker::on_error);
++#endif
++}
++
++void UdpDispatchWorker::shutdown ()
++{
++  if (!sock_) return;
++  sock_->disconnect (this);
++  sock_->close ();
++  delete sock_;
++  sock_ = nullptr;
++}
++
++void UdpDispatchWorker::do_set_id (QString id)
++{
++  id_ = id;
++}
++
++void UdpDispatchWorker::do_set_commands_enabled (bool enabled)
++{
++  commands_enabled_ = enabled;
++}
++
++void UdpDispatchWorker::do_bind (QString address)
++{
++  if (!sock_) return;
++  QHostAddress const addr {address};
++  if (sock_->state () != QAbstractSocket::UnconnectedState) sock_->close ();
++  sock_->bind (addr);
++  sock_->setSocketOption (QAbstractSocket::MulticastTtlOption, ttl_);
++}
++
++void UdpDispatchWorker::do_close ()
++{
++  if (sock_ && sock_->state () != QAbstractSocket::UnconnectedState) sock_->close ();
++}
++
++void UdpDispatchWorker::do_set_ttl (int ttl)
++{
++  ttl_ = ttl;
++  if (sock_) sock_->setSocketOption (QAbstractSocket::MulticastTtlOption, ttl_);
++}
++
++void UdpDispatchWorker::do_write (QByteArray message, QString address, quint16 port, QString interface_name)
++{
++  if (!sock_) return;
++  QHostAddress const dest {address};
++  if (!interface_name.isEmpty ())
++    {
++      sock_->setMulticastInterface (QNetworkInterface::interfaceFromName (interface_name));
++    }
++  sock_->writeDatagram (message, dest, port);
++}
++
++QString UdpDispatchWorker::read_local_address () const
++{
++  if (!sock_ || sock_->state () == QAbstractSocket::UnconnectedState) return {};
++  return sock_->localAddress ().toString ();
++}
++
++bool UdpDispatchWorker::is_unconnected () const
++{
++  return !sock_ || sock_->state () == QAbstractSocket::UnconnectedState;
++}
++
++bool UdpDispatchWorker::is_inhibit_hold (QByteArray const& msg) const
++{
++  if (msg.size () < 16) return false;
++  auto const * bytes = reinterpret_cast<uchar const *> (msg.constData ());
++  if (!commands_enabled_) return false;
++  if (qFromBigEndian<quint32> (bytes) != NetworkMessage::Builder::magic) return false;
++  if (qFromBigEndian<quint32> (bytes + 8) != NetworkMessage::TxInhibit) return false;
++  quint32 const id_len = qFromBigEndian<quint32> (bytes + 12);
++  if (id_len > 1024 || 16 + int (id_len) + 4 > msg.size ()) return false;
++  if (QString::fromUtf8 (msg.constData () + 16, int (id_len)) != id_) return false;
++  int off = 16 + int (id_len);
++  quint32 const controller_len = qFromBigEndian<quint32> (bytes + off);
++  off += 4 + int (controller_len);
++  if (controller_len > 128 || off + 4 > msg.size ()) return false;
++  quint32 const ttl = qFromBigEndian<quint32> (bytes + off);
++  return ttl >= 100 && ttl <= 30000;
++}
++
++void UdpDispatchWorker::read_pending ()
++{
++  if (!sock_) return;
++  while (sock_->hasPendingDatagrams ())
++    {
++      QByteArray data;
++      data.resize (static_cast<int> (sock_->pendingDatagramSize ()));
++      quint16 sender_port = 0;
++      if (sock_->readDatagram (data.data (), data.size (), nullptr, &sender_port) < 0) continue;
++      // Type 18 hold: clear RTS/DTR before this datagram is queued.
++      if (is_inhibit_hold (data)) TxInhibitDrop::drop_direct ();
++      Q_EMIT gui_datagram (data, sender_port);
++    }
++}
++
++void UdpDispatchWorker::on_error ()
++{
++  if (!sock_) return;
++#if defined (Q_OS_WIN)
++  auto const e = sock_->error ();
++  if (e == QAbstractSocket::NetworkError || e == QAbstractSocket::ConnectionRefusedError) return;
++#endif
++  Q_EMIT io_error (sock_->errorString ());
++}
++
++UdpDispatch::UdpDispatch ()
++{
++  worker_ = new UdpDispatchWorker;
++  worker_->moveToThread (&thread_);
++  connect (worker_, &UdpDispatchWorker::gui_datagram, this, &UdpDispatch::gui_datagram, Qt::QueuedConnection);
++  connect (worker_, &UdpDispatchWorker::io_error, this, &UdpDispatch::io_error, Qt::QueuedConnection);
++  thread_.setObjectName (QStringLiteral ("udp-dispatch"));
++  thread_.start ();
++  QMetaObject::invokeMethod (worker_, "init", Qt::BlockingQueuedConnection);
++}
++
++UdpDispatch::~UdpDispatch ()
++{
++  if (!worker_) return;
++  QMetaObject::invokeMethod (worker_, "shutdown", Qt::BlockingQueuedConnection);
++  thread_.quit ();
++  thread_.wait ();
++  delete worker_;
++  worker_ = nullptr;
++}
++
++void UdpDispatch::set_id (QString const& id)
++{
++  QMetaObject::invokeMethod (worker_, "do_set_id", Qt::BlockingQueuedConnection, Q_ARG (QString, id));
++}
++
++void UdpDispatch::set_commands_enabled (bool enabled)
++{
++  QMetaObject::invokeMethod (worker_, "do_set_commands_enabled", Qt::BlockingQueuedConnection,
++                             Q_ARG (bool, enabled));
++}
++
++void UdpDispatch::bind (QHostAddress const& address)
++{
++  QMetaObject::invokeMethod (worker_, "do_bind", Qt::BlockingQueuedConnection, Q_ARG (QString, address.toString ()));
++}
++
++void UdpDispatch::close_socket ()
++{
++  QMetaObject::invokeMethod (worker_, "do_close", Qt::BlockingQueuedConnection);
++}
++
++QString UdpDispatch::local_address () const
++{
++  QString addr;
++  QMetaObject::invokeMethod (worker_, "read_local_address", Qt::BlockingQueuedConnection, Q_RETURN_ARG (QString, addr));
++  return addr;
++}
++
++bool UdpDispatch::is_unconnected () const
++{
++  bool unconnected = true;
++  QMetaObject::invokeMethod (worker_, "is_unconnected", Qt::BlockingQueuedConnection, Q_RETURN_ARG (bool, unconnected));
++  return unconnected;
++}
++
++void UdpDispatch::set_ttl (int ttl)
++{
++  QMetaObject::invokeMethod (worker_, "do_set_ttl", Qt::BlockingQueuedConnection, Q_ARG (int, ttl));
++}
++
++void UdpDispatch::send_one (QByteArray const& message, QHostAddress const& address, quint16 port,
++                            QString const& interface_name)
++{
++  QMetaObject::invokeMethod (worker_, "do_write", Qt::BlockingQueuedConnection,
++                             Q_ARG (QByteArray, message),
++                             Q_ARG (QString, address.toString ()),
++                             Q_ARG (quint16, port),
++                             Q_ARG (QString, interface_name));
++}
+diff -ruN a/Network/UdpDispatch.hpp b/Network/UdpDispatch.hpp
+--- a/Network/UdpDispatch.hpp	1969-12-31 19:00:00.000000000 -0500
++++ b/Network/UdpDispatch.hpp	2026-09-27 13:48:09.907944949 -0400
+@@ -0,0 +1,88 @@
++#ifndef UDP_DISPATCH_HPP__
++#define UDP_DISPATCH_HPP__
++
++// Thread that owns the WSJT-X UDP socket (the heartbeat source).
++//
++// Inbound datagrams are read here, off the GUI thread. A type 18 hold
++// clears RTS or DTR on this thread before the datagram is queued back
++// for the existing parsers.
++
++#include <QByteArray>
++#include <QHostAddress>
++#include <QObject>
++#include <QString>
++#include <QStringList>
++#include <QThread>
++
++class QUdpSocket;
++
++class UdpDispatchWorker final
++  : public QObject
++{
++  Q_OBJECT
++
++public:
++  explicit UdpDispatchWorker (QObject * parent = nullptr);
++
++public slots:
++  void init ();
++  void shutdown ();
++  void do_set_id (QString id);
++  void do_set_commands_enabled (bool enabled);
++  void do_bind (QString address);
++  void do_close ();
++  void do_set_ttl (int ttl);
++  void do_write (QByteArray message, QString address, quint16 port, QString interface_name);
++  QString read_local_address () const;
++  bool is_unconnected () const;
++
++signals:
++  void gui_datagram (QByteArray data, quint16 sender_port);
++  void io_error (QString message);
++
++private slots:
++  void read_pending ();
++  void on_error ();
++
++private:
++  bool is_inhibit_hold (QByteArray const& msg) const;
++
++  QUdpSocket * sock_ {nullptr};
++  QString id_;
++  int ttl_ {1};
++  bool commands_enabled_ {false};
++};
++
++class UdpDispatch final
++  : public QObject
++{
++  Q_OBJECT
++
++public:
++  UdpDispatch ();
++  ~UdpDispatch () override;
++
++  void set_id (QString const& id);
++  // Accept UDP requests. Type 18 is ignored, and the pin is not cleared,
++  // while this is false. An in-flight hold is not cleared here.
++  void set_commands_enabled (bool enabled);
++  void bind (QHostAddress const& address);
++  void close_socket ();
++  QString local_address () const;
++  bool is_unconnected () const;
++  void set_ttl (int ttl);
++  // Empty interface_name sends one unicast datagram. A name sends one
++  // multicast datagram on that interface.
++  void send_one (QByteArray const& message, QHostAddress const& address, quint16 port,
++                 QString const& interface_name);
++
++signals:
++  void gui_datagram (QByteArray const& data, quint16 sender_port);
++  void io_error (QString const& message);
++
++private:
++  QThread thread_;
++  UdpDispatchWorker * worker_ {nullptr};
++};
++
++#endif
+diff -ruN a/tests/test_tx_inhibit_gate.cpp b/tests/test_tx_inhibit_gate.cpp
+--- a/tests/test_tx_inhibit_gate.cpp	2026-09-25 02:50:27.000000000 -0400
++++ b/tests/test_tx_inhibit_gate.cpp	2026-09-26 23:08:26.682101303 -0400
+@@ -14,20 +14,16 @@
+ 
+ #include <QtTest>
+ 
+-#include <QHostAddress>
+ #include <QSignalSpy>
+-#include <QUdpSocket>
+ 
+ #include "TxInhibit/TxInhibitGate.hpp"
+-#include "TxInhibit/TxInhibitLogic.hpp"
+ 
+ namespace
+ {
+-  QByteArray hold_packet (int ttl_ms, char const * station = "TEST")
++  void hold (TxInhibitGate& gate, int ttl_ms, char const * station = "TEST")
+   {
+-    return QByteArray {"{\"tx_inhibit\":1,\"ttl_ms\":"}
+-      + QByteArray::number (ttl_ms)
+-      + ",\"station\":\"" + station + "\"}";
++    gate.command (QString::fromLatin1 (station), static_cast<quint32> (ttl_ms),
++                  QString::fromLatin1 (station));
+   }
+ }
+ 
+@@ -45,12 +41,8 @@
+   {
+     TxInhibitGate gate;
+     QSignalSpy pin {&gate, &TxInhibitGate::physicalPtt};
+-    QSignalSpy bound {&gate, &TxInhibitGate::portBound};
+ 
+     gate.start_listening ();
+-    QCOMPARE (bound.count (), 1);
+-    auto const port = bound.at (0).at (0).value<quint16> ();
+-    QVERIFY2 (port != 0, "gate did not bind any UDP port");
+ 
+     // want_tx on, no hold -> assert
+     gate.set_intent (true);
+@@ -58,14 +50,13 @@
+     QCOMPARE (pin.at (0).at (0).toBool (), true);
+ 
+     // hold arrives; want_tx is untouched -> release
+-    QUdpSocket agent;
+-    agent.writeDatagram (hold_packet (5000), QHostAddress::LocalHost, port);
+-    QTRY_COMPARE (pin.count (), 2);
++    hold (gate, 5000);
++    QCOMPARE (pin.count (), 2);
+     QCOMPARE (pin.at (1).at (0).toBool (), false);
+ 
+     // explicit release; want_tx still on -> assert again
+-    agent.writeDatagram (hold_packet (0), QHostAddress::LocalHost, port);
+-    QTRY_COMPARE (pin.count (), 3);
++    hold (gate, 0);
++    QCOMPARE (pin.count (), 3);
+     QCOMPARE (pin.at (2).at (0).toBool (), true);
+ 
+     gate.shutdown (false);
+@@ -76,17 +67,13 @@
+   void holdTimeoutRecoversWithoutRelease ()
+   {
+     TxInhibitGate gate;
+-    QSignalSpy bound {&gate, &TxInhibitGate::portBound};
+     gate.start_listening ();
+-    auto const port = bound.at (0).at (0).value<quint16> ();
+ 
+     gate.set_intent (true);
+     QSignalSpy pin {&gate, &TxInhibitGate::physicalPtt};
+ 
+-    QUdpSocket agent;
+-    agent.writeDatagram (hold_packet (TxInhibit::hold_timeout_ms_min),
+-                         QHostAddress::LocalHost, port);
+-    QTRY_COMPARE (pin.count (), 1);
++    hold (gate, 100);
++    QCOMPARE (pin.count (), 1);
+     QCOMPARE (pin.at (0).at (0).toBool (), false);   // held
+ 
+     // No release sent. The hold must expire on its own.
+@@ -100,15 +87,12 @@
+   void releaseWithoutIntentDoesNotKey ()
+   {
+     TxInhibitGate gate;
+-    QSignalSpy bound {&gate, &TxInhibitGate::portBound};
+     gate.start_listening ();
+-    auto const port = bound.at (0).at (0).value<quint16> ();
+ 
+     QSignalSpy pin {&gate, &TxInhibitGate::physicalPtt};
+-    QUdpSocket agent;
+-    agent.writeDatagram (hold_packet (200), QHostAddress::LocalHost, port);
++    hold (gate, 200);
+     QTest::qWait (400);                      // hold applied and expired
+-    agent.writeDatagram (hold_packet (0), QHostAddress::LocalHost, port);
++    hold (gate, 0);
+     QTest::qWait (100);
+ 
+     QCOMPARE (pin.count (), 0);              // never keyed: want_tx was false
+@@ -119,21 +103,17 @@
+   void reportsStateChangesOnce ()
+   {
+     TxInhibitGate gate;
+-    QSignalSpy bound {&gate, &TxInhibitGate::portBound};
+     gate.start_listening ();
+-    auto const port = bound.at (0).at (0).value<quint16> ();
+ 
+     QSignalSpy changed {&gate, &TxInhibitGate::inhibitChanged};
+-    QUdpSocket agent;
+-    agent.writeDatagram (hold_packet (5000, "W1AW"), QHostAddress::LocalHost, port);
+-    QTRY_VERIFY (changed.count () >= 1);
+-    QCOMPARE (changed.at (0).at (0).toBool (), true);
+-    QVERIFY (changed.at (0).at (1).toString ().contains (QStringLiteral ("W1AW")));
++    hold (gate, 5000, "W1AW");
++    QVERIFY (changed.count () >= 1);
++    QCOMPARE (changed.at (changed.count () - 1).at (0).toBool (), true);
++    QVERIFY (changed.at (changed.count () - 1).at (1).toString ().contains (QStringLiteral ("W1AW")));
+ 
+     // A keepalive refreshes the timeout but is not a state change.
+     int const before = changed.count ();
+-    agent.writeDatagram (hold_packet (5000, "W1AW"), QHostAddress::LocalHost, port);
+-    QTest::qWait (100);
++    hold (gate, 5000, "W1AW");
+     QCOMPARE (changed.count (), before);
+ 
+     gate.shutdown (false);
+@@ -167,18 +147,15 @@
+   void holdTimingUsesMonotonicBase ()
+   {
+     TxInhibitGate gate;
+-    QSignalSpy bound {&gate, &TxInhibitGate::portBound};
+     gate.start_listening ();
+-    auto const port = bound.at (0).at (0).value<quint16> ();
+     gate.set_intent (true);
+ 
+     QSignalSpy pin {&gate, &TxInhibitGate::physicalPtt};
+-    QUdpSocket agent;
+ 
+     QElapsedTimer measured;
+     measured.start ();
+-    agent.writeDatagram (hold_packet (300), QHostAddress::LocalHost, port);
+-    QTRY_COMPARE (pin.count (), 1);          // held
++    hold (gate, 300);
++    QCOMPARE (pin.count (), 1);              // held
+     QTRY_COMPARE (pin.count (), 2);          // expired
+     auto const elapsed = measured.elapsed ();
+ 
+diff -ruN a/Transceiver/DXLabSuiteCommanderTransceiver.hpp b/Transceiver/DXLabSuiteCommanderTransceiver.hpp
+--- a/Transceiver/DXLabSuiteCommanderTransceiver.hpp	2026-09-25 02:50:25.000000000 -0400
++++ b/Transceiver/DXLabSuiteCommanderTransceiver.hpp	2026-09-26 23:07:24.321502239 -0400
+@@ -38,6 +38,15 @@
+   void do_tx_frequency (Frequency, MODE, bool no_ignore) override;
+   void do_mode (MODE) override;
+   void do_ptt (bool on) override;
++  void tx_inhibit_command (QString const& controller, quint32 ttl_ms,
++                           QString const& station) override
++  {
++    if (wrapped_) wrapped_->tx_inhibit_command (controller, ttl_ms, station);
++  }
++  void tx_inhibit_invalid (quint64 count) override
++  {
++    if (wrapped_) wrapped_->tx_inhibit_invalid (count);
++  }
+ 
+   void do_poll () override;
+ 
+diff -ruN a/Transceiver/EmulateSplitTransceiver.hpp b/Transceiver/EmulateSplitTransceiver.hpp
+--- a/Transceiver/EmulateSplitTransceiver.hpp	2026-09-25 02:50:25.000000000 -0400
++++ b/Transceiver/EmulateSplitTransceiver.hpp	2026-09-26 23:07:24.321502239 -0400
+@@ -46,6 +46,12 @@
+     wrapped_->enqueue_jtty_pcm (samples, epoch, enqueueId);
+   }
+   void clear_jtty_pcm (TxAudioQueueEpoch epoch) noexcept override {wrapped_->clear_jtty_pcm (epoch);}
++  void tx_inhibit_command (QString const& controller, quint32 ttl_ms,
++                           QString const& station) override
++  {
++    wrapped_->tx_inhibit_command (controller, ttl_ms, station);
++  }
++  void tx_inhibit_invalid (quint64 count) override {wrapped_->tx_inhibit_invalid (count);}
+ 
+ private:
+   void handle_update (TransceiverState const&, unsigned seqeunce_number);
+diff -ruN a/Transceiver/HamlibTransceiver.cpp b/Transceiver/HamlibTransceiver.cpp
+--- a/Transceiver/HamlibTransceiver.cpp	2026-09-25 02:50:25.000000000 -0400
++++ b/Transceiver/HamlibTransceiver.cpp	2026-09-27 13:13:38.201875828 -0400
+@@ -1,6 +1,11 @@
+ #include "HamlibTransceiver.hpp"
++#include "TxInhibit/TxInhibitDrop.hpp"
+ #include "TxInhibit/TxInhibitGate.hpp"
+ 
++#if defined(Q_OS_UNIX)
++#include <sys/ioctl.h>
++#endif
++
+ #include <cstring>
+ #include <cmath>
+ #include <tuple>
+@@ -27,6 +32,19 @@
+ 
+ namespace
+ {
++  // Not declared in the installed Hamlib headers.
++  extern "C" int ser_set_rts (hamlib_port_t * p, int state);
++  extern "C" int ser_set_dtr (hamlib_port_t * p, int state);
++
++  int drop_ptt_line (void * raw)
++  {
++    hamlib_port_t * port = static_cast<hamlib_port_t *> (raw);
++    if (!port || port->fd < 0) return -1;
++    if (RIG_PTT_SERIAL_RTS == port->type.ptt) return ser_set_rts (port, 0);
++    if (RIG_PTT_SERIAL_DTR == port->type.ptt) return ser_set_dtr (port, 0);
++    return -1;
++  }
++
+   // Unfortunately bandwidth is conflated  with mode, this is probably
+   // because Icom do  the same. So we have to  care about bandwidth if
+   // we want  to set  mode otherwise we  will end up  setting unwanted
+@@ -889,9 +907,27 @@
+ 
+   do_poll ();
+ 
+-  // After rig_open: optional TX Inhibit (RTS/DTR only). Same thread as CAT.
++  // After rig_open: optional TX Inhibit (RTS/DTR only). The listen socket
++  // is its own thread; the gate object stays on this thread.
+   if (use_tx_inhibit_)
+     {
++      hamlib_port_t * ptt = &m_->rig_->state.pttport;
++      unsigned bit = 0;
++#if defined(Q_OS_UNIX)
++      if (RIG_PTT_SERIAL_RTS == ptt->type.ptt) bit = TIOCM_RTS;
++      else if (RIG_PTT_SERIAL_DTR == ptt->type.ptt) bit = TIOCM_DTR;
++#else
++      if (RIG_PTT_SERIAL_RTS == ptt->type.ptt
++          || RIG_PTT_SERIAL_DTR == ptt->type.ptt) bit = 1;
++#endif
++      int fd = ptt->fd;
++      // Shared CAT/PTT port: Hamlib copies the rig fd into the PTT port
++      // at open. If that copy is still empty, the rig port fd is the line.
++      if (fd < 0 && bit != 0) fd = m_->rig_->state.rigport.fd;
++      if (fd >= 0 && bit != 0)
++        {
++          TxInhibitDrop::publish (fd, bit, &drop_ptt_line, ptt);
++        }
+       start_tx_inhibit_gate ();
+     }
+ 
+@@ -911,8 +947,6 @@
+            this, &HamlibTransceiver::apply_physical_ptt, Qt::DirectConnection);
+   connect (inhibit_gate_, &TxInhibitGate::inhibitChanged,
+            this, &Transceiver::tx_inhibit_changed);
+-  connect (inhibit_gate_, &TxInhibitGate::portBound,
+-           this, &Transceiver::tx_inhibit_port_bound);
+   // UDP bind problems are non-fatal: keep stock intent→pin path, log only.
+   connect (inhibit_gate_, &TxInhibitGate::lineError,
+            this, [this] (QString const& msg) {
+@@ -926,11 +960,25 @@
+              Q_EMIT failure (msg);
+            });
+   inhibit_gate_->start_listening ();
+-  CAT_TRACE ("TX Inhibit gate listening (pin filter on do_ptt)");
++  CAT_TRACE ("TX Inhibit gate armed (type 18 on the reporting socket)");
++}
++
++void HamlibTransceiver::tx_inhibit_command (QString const& controller, quint32 ttl_ms,
++                                            QString const& station)
++{
++  if (inhibit_gate_) inhibit_gate_->command (controller, ttl_ms, station);
++}
++
++void HamlibTransceiver::tx_inhibit_invalid (quint64 count)
++{
++  if (inhibit_gate_) inhibit_gate_->note_invalid (count);
+ }
+ 
+ void HamlibTransceiver::stop_tx_inhibit_gate ()
+ {
++  // Stop new direct clears before the listen thread is joined and the port
++  // is closed. A clear already inside ser_set_rts finishes during shutdown.
++  TxInhibitDrop::clear ();
+   if (!inhibit_gate_)
+     {
+       return;
+@@ -1419,8 +1467,12 @@
+   if (inhibit_gate_)
+     {
+       // Stock sequencing already did Fake It QSY. Intent only; gate mixes
+-      // private UDP hold and emits physicalPtt → apply_physical_ptt.
++      // the hold and emits physicalPtt → apply_physical_ptt.
++      // Drop the line before set_intent so a hold cannot lose the race
++      // with this PTT request.
++      if (!on) TxInhibitDrop::drop_direct ();
+       inhibit_gate_->set_intent (on);
++      if (!on) TxInhibitDrop::drop_direct ();
+       update_PTT (on); // software PTT state follows intent (not pin)
+       return;
+     }
+diff -ruN a/Transceiver/HamlibTransceiver.hpp b/Transceiver/HamlibTransceiver.hpp
+--- a/Transceiver/HamlibTransceiver.hpp	2026-09-25 02:50:25.000000000 -0400
++++ b/Transceiver/HamlibTransceiver.hpp	2026-09-26 23:24:57.721627358 -0400
+@@ -26,6 +26,10 @@
+                               bool enable_tx_inhibit = false, QObject * parent = nullptr);
+   ~HamlibTransceiver ();
+ 
++  void tx_inhibit_command (QString const& controller, quint32 ttl_ms,
++                           QString const& station) override;
++  void tx_inhibit_invalid (quint64 count) override;
++
+ private:
+   void load_user_settings ();
+   int do_start () override;
+@@ -49,7 +53,7 @@
+   bool do_swr_;
+   bool do_alc_;
+ 
+-  // True when Settings "Enable TX Inhibit" is on and PTT method is RTS/DTR.
++  // True when PTT method is RTS or DTR.
+   bool use_tx_inhibit_ = false;
+   TxInhibitGate * inhibit_gate_ = nullptr;
+ 
+diff -ruN a/Transceiver/HRDTransceiver.hpp b/Transceiver/HRDTransceiver.hpp
+--- a/Transceiver/HRDTransceiver.hpp	2026-09-25 02:50:25.000000000 -0400
++++ b/Transceiver/HRDTransceiver.hpp	2026-09-26 23:07:24.321502239 -0400
+@@ -49,6 +49,15 @@
+   void do_tx_frequency (Frequency, MODE, bool no_ignore) override;
+   void do_mode (MODE) override;
+   void do_ptt (bool on) override;
++  void tx_inhibit_command (QString const& controller, quint32 ttl_ms,
++                           QString const& station) override
++  {
++    if (wrapped_) wrapped_->tx_inhibit_command (controller, ttl_ms, station);
++  }
++  void tx_inhibit_invalid (quint64 count) override
++  {
++    if (wrapped_) wrapped_->tx_inhibit_invalid (count);
++  }
+ 
+   // Implement the PollingTransceiver interface.
+   void do_poll () override;
+diff -ruN a/Transceiver/OmniRigTransceiver.hpp b/Transceiver/OmniRigTransceiver.hpp
+--- a/Transceiver/OmniRigTransceiver.hpp	2026-09-25 02:50:26.000000000 -0400
++++ b/Transceiver/OmniRigTransceiver.hpp	2026-09-26 23:07:24.321502239 -0400
+@@ -42,6 +42,15 @@
+   void do_tx_frequency (Frequency, MODE, bool no_ignore) override;
+   void do_mode (MODE) override;
+   void do_ptt (bool on) override;
++  void tx_inhibit_command (QString const& controller, quint32 ttl_ms,
++                           QString const& station) override
++  {
++    if (wrapped_) wrapped_->tx_inhibit_command (controller, ttl_ms, station);
++  }
++  void tx_inhibit_invalid (quint64 count) override
++  {
++    if (wrapped_) wrapped_->tx_inhibit_invalid (count);
++  }
+ 
+ private:
+   Q_SLOT void handle_COM_exception (int,  QString, QString, QString);
+diff -ruN a/Transceiver/TCITransceiver.hpp b/Transceiver/TCITransceiver.hpp
+--- a/Transceiver/TCITransceiver.hpp	2026-09-25 02:50:26.000000000 -0400
++++ b/Transceiver/TCITransceiver.hpp	2026-09-26 23:07:24.321502239 -0400
+@@ -127,6 +127,15 @@
+   void txAudioData(quint32 len, float * data);
+   void enqueue_jtty_pcm (QByteArray const& samples, TxAudioQueueEpoch epoch,
+                          qint64 enqueueId) noexcept override;
++  void tx_inhibit_command (QString const& controller, quint32 ttl_ms,
++                           QString const& station) override
++  {
++    if (wrapped_) wrapped_->tx_inhibit_command (controller, ttl_ms, station);
++  }
++  void tx_inhibit_invalid (quint64 count) override
++  {
++    if (wrapped_) wrapped_->tx_inhibit_invalid (count);
++  }
+   void clear_jtty_pcm (TxAudioQueueEpoch epoch) noexcept override;
+ //  void setAudioSampleRate(const quint32 &sr);
+ 
+diff -ruN a/Transceiver/TransceiverFactory.hpp b/Transceiver/TransceiverFactory.hpp
+--- a/Transceiver/TransceiverFactory.hpp	2026-09-25 02:50:26.000000000 -0400
++++ b/Transceiver/TransceiverFactory.hpp	2026-09-26 23:24:57.721627358 -0400
+@@ -127,8 +127,8 @@
+                                 // value "CAT"
+     int poll_interval;          // in seconds for interfaces that
+                                 // require polling for state changes
+-    // When true and ptt_type is RTS/DTR, HamlibTransceiver installs the
+-    // TX Inhibit pin filter (UDP KEY-agent holds). Default off (stock path).
++    // True when ptt_type is RTS or DTR. HamlibTransceiver then installs
++    // the TX Inhibit pin filter. CAT and VOX leave it false.
+     bool enable_tx_inhibit {false};
+ 
+     bool operator == (ParameterPack const& rhs) const
+diff -ruN a/Transceiver/Transceiver.hpp b/Transceiver/Transceiver.hpp
+--- a/Transceiver/Transceiver.hpp	2026-09-25 02:50:26.000000000 -0400
++++ b/Transceiver/Transceiver.hpp	2026-09-26 23:07:24.321502239 -0400
+@@ -237,6 +237,16 @@
+   Q_SLOT virtual void enqueue_jtty_pcm (QByteArray const&, TxAudioQueueEpoch, qint64) noexcept {}
+   Q_SLOT virtual void clear_jtty_pcm (TxAudioQueueEpoch) noexcept {}
+ 
++  // Type 18, queued from the GUI. Decorators must forward to the wrapped rig.
++  Q_SLOT virtual void tx_inhibit_command (QString const& controller, quint32 ttl_ms,
++                                          QString const& station)
++  {
++    Q_UNUSED (controller);
++    Q_UNUSED (ttl_ms);
++    Q_UNUSED (station);
++  }
++  Q_SLOT virtual void tx_inhibit_invalid (quint64 count) { Q_UNUSED (count); }
++
+   //
+   // asynchronous status updates
+   //
+diff -ruN a/TxInhibit/TxInhibitDrop.hpp b/TxInhibit/TxInhibitDrop.hpp
+--- a/TxInhibit/TxInhibitDrop.hpp	1969-12-31 19:00:00.000000000 -0500
++++ b/TxInhibit/TxInhibitDrop.hpp	2026-09-27 13:48:09.908119826 -0400
+@@ -0,0 +1,91 @@
++#ifndef TX_INHIBIT_DROP_HPP__
++#define TX_INHIBIT_DROP_HPP__
++
++// Clear RTS or DTR without taking the Hamlib rig lock.
++// Linux: TIOCMBIC on the PTT file descriptor copied at rig open.
++// Windows: Hamlib ser_set_rts / ser_set_dtr (EscapeCommFunction).
++
++#include <atomic>
++
++#include <QtGlobal>
++
++#if defined(Q_OS_UNIX)
++#include <sys/ioctl.h>
++#endif
++
++namespace TxInhibitDrop
++{
++  typedef int (*LineDrop) (void * port);
++
++  inline std::atomic<int> & line_fd ()
++  {
++    static std::atomic<int> value (-1);
++    return value;
++  }
++
++  inline std::atomic<unsigned> & line_bit ()
++  {
++    static std::atomic<unsigned> value (0);
++    return value;
++  }
++
++  inline std::atomic<LineDrop> & line_drop ()
++  {
++    static std::atomic<LineDrop> value (static_cast<LineDrop> (0));
++    return value;
++  }
++
++  inline std::atomic<void *> & line_port ()
++  {
++    static std::atomic<void *> value (static_cast<void *> (0));
++    return value;
++  }
++
++  inline void clear ()
++  {
++    line_port ().store (static_cast<void *> (0), std::memory_order_release);
++    line_drop ().store (static_cast<LineDrop> (0), std::memory_order_release);
++    line_fd ().store (-1, std::memory_order_release);
++    line_bit ().store (0, std::memory_order_release);
++  }
++
++  // fd/bit are stored before the optional Hamlib callback.
++  inline void publish (int fd, unsigned bit, LineDrop drop, void * port)
++  {
++    if (fd < 0 || bit == 0)
++      {
++        clear ();
++        return;
++      }
++    line_bit ().store (bit, std::memory_order_release);
++    line_fd ().store (fd, std::memory_order_release);
++    line_drop ().store (drop, std::memory_order_release);
++    line_port ().store (port, std::memory_order_release);
++  }
++
++  inline void drop_direct ()
++  {
++#if defined(Q_OS_UNIX)
++    int const fd = line_fd ().load (std::memory_order_acquire);
++    unsigned bit = line_bit ().load (std::memory_order_acquire);
++    if (fd >= 0 && bit != 0)
++      {
++#if defined(TIOCMBIC)
++        ioctl (fd, TIOCMBIC, &bit);
++#else
++        unsigned lines = 0;
++        if (ioctl (fd, TIOCMGET, &lines) == 0)
++          {
++            lines &= ~bit;
++            ioctl (fd, TIOCMSET, &lines);
++          }
++#endif
++      }
++#endif
++    void * port = line_port ().load (std::memory_order_acquire);
++    LineDrop drop = line_drop ().load (std::memory_order_acquire);
++    if (port && drop) (void) drop (port);
++  }
++}
++
++#endif
+diff -ruN a/TxInhibit/TxInhibitGate.cpp b/TxInhibit/TxInhibitGate.cpp
+--- a/TxInhibit/TxInhibitGate.cpp	2026-09-25 02:50:26.000000000 -0400
++++ b/TxInhibit/TxInhibitGate.cpp	2026-09-27 13:13:16.504702253 -0400
+@@ -1,10 +1,12 @@
+ #include "TxInhibitGate.hpp"
++#include "TxInhibitDrop.hpp"
+ 
++#include <algorithm>
+ #include <exception>
+ 
+-#include <QHostAddress>
++#include <QSet>
++#include <QStringList>
+ #include <QTimer>
+-#include <QUdpSocket>
+ 
+ TxInhibitGate::TxInhibitGate (QObject * parent)
+   : QObject {parent}
+@@ -39,52 +41,16 @@
+ void TxInhibitGate::start_listening ()
+ {
+   stopped_ = false;
+-  // On bind failure ensure_udp emits lineError once; gate still applies intent
+-  // as a pin filter but never receives holds. Non-fatal for CAT/PTT.
+-  (void) ensure_udp ();
+-}
+-
+-bool TxInhibitGate::ensure_udp ()
+-{
+-  if (udp_)
+-    {
+-      return true;
+-    }
+-  if (stopped_)
+-    {
+-      return false;
+-    }
+-  udp_ = new QUdpSocket (this);
+-  // Prefer well-known port 22372 so KEY agents can use a fixed default.
+-  // ShareAddress|ReuseAddressHint lets multiple local WSJT-X stations share 22372;
+-  // which process receives a given datagram is OS-dependent — one WSJT-X station per
+-  // host (or exclusive bind) is preferred for multi-op.
+-  QHostAddress const any4 {QHostAddress::AnyIPv4};
+-  if (!udp_->bind (any4, TxInhibit::default_gate_port,
+-                   QUdpSocket::ShareAddress | QUdpSocket::ReuseAddressHint))
+-    {
+-      if (!udp_->bind (any4, quint16 (0)))
+-        {
+-          QString const err = udp_->errorString ();
+-          udp_->deleteLater ();
+-          udp_ = nullptr;
+-          Q_EMIT lineError (QStringLiteral ("TX Inhibit: UDP bind failed: %1").arg (err));
+-          return false;
+-        }
+-    }
+-  bound_port_ = udp_->localPort ();
+-  QObject::connect (udp_, &QUdpSocket::readyRead, this, &TxInhibitGate::on_udp_ready);
+-  Q_EMIT portBound (bound_port_);
+-
+   if (!timer_)
+     {
+       timer_ = new QTimer (this);
+-      // hold_timeout_ms poll; UDP hold packets are event-driven.
+       timer_->setInterval (20);
+       QObject::connect (timer_, &QTimer::timeout, this, &TxInhibitGate::tick);
+       timer_->start ();
+     }
+-  return true;
++  // Advertise Inhibited false so type 17 can start with the heartbeats.
++  last_emitted_inhibited_ = true;
++  emit_state_if_changed ();
+ }
+ 
+ void TxInhibitGate::set_intent (bool on)
+@@ -119,40 +85,120 @@
+       timer_->deleteLater ();
+       timer_ = nullptr;
+     }
+-  if (udp_)
+-    {
+-      udp_->disconnect (this);
+-      udp_->close ();
+-      udp_->deleteLater ();
+-      udp_ = nullptr;
+-      bound_port_ = 0;
+-    }
++  holds_.clear ();
++}
++
++namespace
++{
++  QString const overflow_hold_key;
++
++  QString sanitize_holder (QString const& value)
++  {
++    QString result;
++    result.reserve (std::min (value.size (), 64));
++    for (auto const character : value.left (64))
++      {
++        if (character.isPrint ()) result.append (character);
++      }
++    return result.trimmed ();
++  }
+ }
+ 
+-void TxInhibitGate::on_udp_ready ()
++void TxInhibitGate::command (QString controller, quint32 ttl_ms, QString station)
+ {
+-  if (!udp_ || stopped_)
++  if (stopped_) return;
++  auto const now = now_ms ();
++  sweep (now);
++  if (!ttl_ms)
+     {
+-      return;
++      ++release_rx_;
++      holds_.remove (controller);
+     }
+-  while (udp_->hasPendingDatagrams ())
++  else if (ttl_ms < 100 || ttl_ms > 30000)
++    {
++      ++invalid_;
++    }
++  else
+     {
+-      QByteArray data;
+-      data.resize (static_cast<int> (udp_->pendingDatagramSize ()));
+-      udp_->readDatagram (data.data (), data.size ());
+-      (void) logic_.on_datagram (data, now_ms ());
++      ++hold_rx_;
++      auto const expires_at = now + ttl_ms;
++      auto const holder = sanitize_holder (station.isEmpty () ? controller : station);
++      auto existing = holds_.find (controller);
++      if (existing != holds_.end ())
++        {
++          *existing = Hold {expires_at, holder};
++        }
++      else
++        {
++          auto const tracked = holds_.size () - (holds_.contains (overflow_hold_key) ? 1 : 0);
++          if (tracked < maximum_tracked_holds)
++            {
++              holds_.insert (controller, Hold {expires_at, holder});
++            }
++          else
++            {
++              auto overflow = holds_.find (overflow_hold_key);
++              if (overflow == holds_.end ())
++                {
++                  holds_.insert (overflow_hold_key, Hold {expires_at, {}});
++                }
++              else
++                {
++                  overflow->expires_at = std::max (overflow->expires_at, expires_at);
++                }
++            }
++        }
+     }
+   apply_line ();
+   emit_state_if_changed ();
+ }
+ 
++void TxInhibitGate::note_invalid (quint64 count)
++{
++  if (stopped_ || !count) return;
++  invalid_ += static_cast<quint32> (count);
++  emit_state_if_changed ();
++}
++
++void TxInhibitGate::sweep (qint64 now)
++{
++  for (auto it = holds_.begin (); it != holds_.end ();)
++    {
++      if (it->expires_at <= now)
++        {
++          it = holds_.erase (it);
++          ++expiries_;
++        }
++      else
++        {
++          ++it;
++        }
++    }
++}
++
++QString TxInhibitGate::holder_summary () const
++{
++  QStringList holders;
++  QSet<QString> seen;
++  for (auto it = holds_.cbegin (); it != holds_.cend (); ++it)
++    {
++      if (!it->holder.isEmpty () && !seen.contains (it->holder))
++        {
++          seen.insert (it->holder);
++          holders.append (it->holder);
++        }
++    }
++  holders.sort (Qt::CaseInsensitive);
++  return holders.join (QStringLiteral (", "));
++}
++
+ void TxInhibitGate::tick ()
+ {
+   if (stopped_)
+     {
+       return;
+     }
+-  (void) logic_.inhibited (now_ms ());
++  sweep (now_ms ());
+   apply_line ();
+   emit_state_if_changed ();
+ }
+@@ -163,8 +209,12 @@
+     {
+       return;
+     }
++  sweep (now_ms ());
+   // Sole policy: assert PTT ⇔ want_tx and not hold.
+-  bool const radiate = intent_ && !logic_.line_inhibited (now_ms ());
++  bool const radiate = intent_ && holds_.isEmpty ();
++  // While a hold is active the modem line is cleared here, not only when
++  // WS thinks it is transmitting. A stuck RTS would otherwise stay high.
++  if (!radiate && !holds_.isEmpty ()) TxInhibitDrop::drop_direct ();
+   if (radiate == last_radiate_)
+     {
+       return;
+@@ -217,15 +267,12 @@
+ 
+ void TxInhibitGate::emit_state_if_changed ()
+ {
+-  qint64 t = now_ms ();
+-  bool inh = logic_.line_inhibited (t);
+-  auto badge = logic_.badge_text (t);
++  bool const inh = !holds_.isEmpty ();
++  auto const badge = holder_summary ();
+   if (inh != last_emitted_inhibited_ || badge != last_badge_)
+     {
+       last_emitted_inhibited_ = inh;
+       last_badge_ = badge;
+-      Q_EMIT inhibitChanged (inh, badge
+-                             , logic_.hold_rx (), logic_.release_rx ()
+-                             , logic_.expiries (), logic_.invalid ());
++      Q_EMIT inhibitChanged (inh, badge, hold_rx_, release_rx_, expiries_, invalid_);
+     }
+ }
+diff -ruN a/TxInhibit/TxInhibitGate.hpp b/TxInhibit/TxInhibitGate.hpp
+--- a/TxInhibit/TxInhibitGate.hpp	2026-09-25 02:50:26.000000000 -0400
++++ b/TxInhibit/TxInhibitGate.hpp	2026-09-26 23:06:56.513235230 -0400
+@@ -10,23 +10,22 @@
+ // • Hold is private (UDP keepalives + hold_timeout_ms safety timeout).
+ //   CW anti-chatter hang lives only in the KEY agent; normal end is
+ //   release hold (ttl_ms: 0). See docs/TX_INHIBIT.md §3.
+-// • No serial I/O here. Hamlib owns CAT and RTS/DTR; this only decides
+-//   whether to assert PTT or release PTT on the pin.
++// • The UDP socket runs on its own thread and clears RTS or DTR itself when
++//   a hold arrives. This object, on the transceiver thread, still decides
++//   want_tx and asks Hamlib to update its PTT cache.
+ // • WSJT-X station = this WSJT-X station (app + PC + radio + antenna).
+ //
+-// Child of HamlibTransceiver on the transceiver thread (stock CAT order).
++// Child of HamlibTransceiver. The listen thread is not the transceiver thread.
+ //
+ // Design authority / glossary: docs/TX_INHIBIT.md
+ // SPDX-License-Identifier: GPL-3.0-or-later
+ // ---------------------------------------------------------------------------
+ 
+ #include <QElapsedTimer>
++#include <QHash>
+ #include <QObject>
+ #include <QString>
+ 
+-#include "TxInhibitLogic.hpp"
+-
+-class QUdpSocket;
+ class QTimer;
+ 
+ class TxInhibitGate
+@@ -38,12 +37,18 @@
+   explicit TxInhibitGate (QObject * parent = nullptr);
+   ~TxInhibitGate () override;
+ 
++  static int constexpr maximum_tracked_holds {64};
++
+ public slots:
+-  // Bind UDP + start hold-timeout poll timer (once on transceiver thread).
++  // Start the hold-expiry timer. Commands arrive as type 18 on the
++  // reporting UDP socket, not on a private port.
+   void start_listening ();
+ 
+-  // WSJT-X TX intent from do_ptt(on). Does not take "hold" as an argument;
+-  // hold is private. Physical line is driven via physicalPtt(radiate).
++  // Type 18. ttl 0 releases this controller. ttl 100..30000 holds.
++  void command (QString controller, quint32 ttl_ms, QString station);
++  void note_invalid (quint64 count);
++
++  // WSJT-X TX intent from do_ptt(on). Physical line is driven via physicalPtt.
+   void set_intent (bool on);
+ 
+   // Force intent off, stop UDP/timer (rig close / shutdown).
+@@ -61,10 +66,7 @@
+                        , quint32 hold_rx, quint32 release_rx
+                        , quint32 expiries, quint32 invalid);
+ 
+-  // Bound UDP port (22372 or ephemeral).
+-  void portBound (quint16 port);
+-
+-  // Non-fatal operator-visible problems (e.g. total UDP bind failure).
++  // Non-fatal operator-visible problems.
+   // Callers must not treat this as a rig CAT/PTT failure.
+   void lineError (QString const& message);
+ 
+@@ -74,12 +76,17 @@
+   void pttApplyFailed (QString const& message);
+ 
+ private slots:
+-  void on_udp_ready ();
+   void tick ();
+ 
+ private:
+-  // Returns true if UDP is listening (preferred or ephemeral port).
+-  bool ensure_udp ();
++  struct Hold
++  {
++    qint64 expires_at;
++    QString holder;
++  };
++
++  void sweep (qint64 now);
++  QString holder_summary () const;
+   void apply_line ();
+   // Emits physicalPtt with exceptions contained. The slot on the other end
+   // calls rig_set_ptt, which throws; this is reached from timer and socket
+@@ -91,15 +98,17 @@
+   // Monotonic time base for hold expiry: immune to system-clock steps, which
+   // WSJT-X hosts take routinely from time-sync tools. See now_ms().
+   QElapsedTimer uptime_;
+-  TxInhibit::GateLogic logic_;
+-  QUdpSocket * udp_ {nullptr};
++  QHash<QString, Hold> holds_;
+   QTimer * timer_ {nullptr};
+   bool intent_ {false};
+   bool last_radiate_ {false};
+   bool last_emitted_inhibited_ {false};
+   bool stopped_ {false};         // after shutdown: no further pin emits
+   QString last_badge_;
+-  quint16 bound_port_ {0};
++  quint32 hold_rx_ {0};
++  quint32 release_rx_ {0};
++  quint32 expiries_ {0};
++  quint32 invalid_ {0};
+ };
+ 
+ #endif
+diff -ruN a/widgets/mainwindow.cpp b/widgets/mainwindow.cpp
+--- a/widgets/mainwindow.cpp	2026-09-26 14:37:35.000000000 -0400
++++ b/widgets/mainwindow.cpp	2026-09-27 13:34:02.374888144 -0400
+@@ -969,6 +969,10 @@
+       }
+     });
+   connect (m_messageClient, &MessageClient::error, this, &MainWindow::networkError);
++  connect (m_messageClient, &MessageClient::tx_inhibit_command,
++           &m_config, &Configuration::tx_inhibit_command);
++  connect (m_messageClient, &MessageClient::tx_inhibit_invalid,
++           &m_config, &Configuration::tx_inhibit_invalid);
+   connect (m_messageClient, &MessageClient::free_text, [this] (QString const& text, bool send) {
+       tx_watchdog (false);
+       // send + non-empty text means set and send the free text
+@@ -4795,62 +4799,65 @@
+ //   * a one-shot status message warns when the operator has opted in but the
+ //     station is NOT reachable — the fail-open/fail-silent hole in C4. It fires
+ //     only on a change, so it cannot nag.
++void MainWindow::paint_inhibit_badge ()
++{
++  QString title = program_title ();
++  if (!m_qmapConfigName.isEmpty ())
++    {
++      title += QString (" [WS-MAP: %1]").arg (m_qmapConfigName);
++    }
++  if (!m_tx_inhibited)
++    {
++      setWindowTitle (title);
++      if (!m_transmitting)
++        {
++          tx_status_label.setStyleSheet ("QLabel{color: #000000; background-color: #00ff00}");
++          tx_status_label.setText (m_monitoring ? tr ("Receiving") : QString {});
++        }
++      return;
++    }
++  title += QStringLiteral (" — INHIBIT");
++  setWindowTitle (title);
++  if (m_transmitting)
++    {
++      tx_status_label.setStyleSheet (
++        "QLabel{color: #ffffff; background-color: #cc0000; font-weight: bold}");
++    }
++  else
++    {
++      tx_status_label.setStyleSheet (
++        "QLabel{color: #000000; background-color: #80ff80; font-weight: bold}");
++    }
++  tx_status_label.setText (tr ("INHIBIT"));
++}
++
+ void MainWindow::update_inhibit_status ()
+ {
+   if (!m_config.enable_tx_inhibit ())
+     {
+       tx_status_label.setToolTip ({});
+-      m_tx_inhibit_warned_port = 0;
+-      m_tx_inhibit_warned = false;
+       return;
+     }
+ 
+-  // Read the port from Configuration every time rather than caching it:
+-  // close_rig() zeroes it without emitting, and a stale copy would describe a
+-  // station as protected when nothing is listening.
+-  auto const port = m_config.tx_inhibit_port ();
+-
+-  if (m_tx_inhibited)
+-    {
+-      tx_status_label.setToolTip (
+-        m_tx_inhibit_holder.isEmpty ()
+-        ? tr ("TX Inhibit: a KEY agent is holding PTT off (UDP port %1).").arg (port)
+-        : tr ("TX Inhibit: held by %1 (UDP port %2).").arg (m_tx_inhibit_holder).arg (port));
+-    }
+-  else if (!port)
++  if (!m_config.accept_udp_requests ())
+     {
+       tx_status_label.setToolTip (
+-        tr ("TX Inhibit is enabled but NOT listening: no UDP port is bound.\n"
+-            "The rig may be closed, PTT method may not be RTS/DTR, or the bind failed.\n"
+-            "This station is NOT protected."));
++        tr ("PTT is RTS or DTR, so TX Inhibit is armed, but Accept UDP requests is off.\n"
++            "Type 18 commands are ignored until it is turned on."));
+     }
+-  else if (TxInhibit::default_gate_port == port)
++  else if (m_tx_inhibited)
+     {
+       tx_status_label.setToolTip (
+-        tr ("TX Inhibit: listening for KEY-agent holds on UDP port %1.").arg (port));
++        m_tx_inhibit_holder.isEmpty ()
++        ? tr ("TX is inhibited by an external interlock controller.")
++        : tr ("TX is inhibited by %1.").arg (m_tx_inhibit_holder));
+     }
+   else
+     {
+       tx_status_label.setToolTip (
+-        tr ("TX Inhibit: port %1 was busy, so an ephemeral port (%2) is in use.\n"
+-            "A KEY agent aimed at %1 will NOT reach this station.")
+-        .arg (TxInhibit::default_gate_port).arg (port));
+-    }
+-
+-  // Unreachable == enabled but not bound to the well-known port. Warn once per
+-  // transition rather than on every refresh.
+-  bool const unreachable = !port || TxInhibit::default_gate_port != port;
+-  if (unreachable && (!m_tx_inhibit_warned || m_tx_inhibit_warned_port != port))
+-    {
+-      showStatusMessage (port
+-                         ? tr ("TX Inhibit: listening on %1, not %2 — a KEY agent aimed"
+-                               " at %2 will not reach this station")
+-                           .arg (port).arg (TxInhibit::default_gate_port)
+-                         : tr ("TX Inhibit is enabled but no UDP port is bound —"
+-                               " this station is NOT protected"));
++        tr ("TX Inhibit: type 18 commands are accepted on the reporting UDP socket.\n"
++            "Inhibit status (type 17) is sent with each heartbeat."));
+     }
+-  m_tx_inhibit_warned = unreachable;
+-  m_tx_inhibit_warned_port = port;
+ }
+ 
+ void MainWindow::createStatusBar()                           //createStatusBar
+@@ -4868,10 +4875,12 @@
+              m_tx_inhibited = inhibited;
+              m_tx_inhibit_holder = inhibited ? source : QString {};
+              update_inhibit_status ();
++             paint_inhibit_badge ();
+              if (m_messageClient)
+                {
+                  m_messageClient->inhibit_status (
+-                   m_config.tx_inhibit_port (), inhibited, source,
++                   m_config.enable_tx_inhibit (),
++                   inhibited, source,
+                    hold_rx, release_rx, expiries, invalid);
+                }
+            });
+@@ -9402,6 +9411,7 @@
+     if (!m_qmapConfigName.isEmpty()) {
+       title += QString(" [WS-MAP: %1]").arg(m_qmapConfigName);
+     }
++    if (m_tx_inhibited) title += QStringLiteral (" — INHIBIT");
+     setWindowTitle (title);
+   }
+ 
+@@ -9555,6 +9565,7 @@
+     if (!m_qmapConfigName.isEmpty()) {
+       title += QString(" [WS-MAP: %1]").arg(m_qmapConfigName);
+     }
++    if (m_tx_inhibited) title += QStringLiteral (" — INHIBIT");
+     setWindowTitle (title);
+   }
+ 
+@@ -9761,10 +9772,7 @@
+       // reads "Tx: <message>" in transmit-yellow while the radio is silent.
+       // Covers Tune too, which also runs through this branch.
+       // Last, so it overrides every style/text chosen above.
+-      if (m_tx_inhibited) {
+-        tx_status_label.setStyleSheet("QLabel{color: #ffffff; background-color: #cc0000; font-weight: bold}");
+-        tx_status_label.setText (tr ("Inhibit"));
+-      }
++      if (m_tx_inhibited) paint_inhibit_badge ();
+     } else if(m_monitoring) {
+       if (!m_tx_watchdog) {
+         tx_status_label.setStyleSheet("QLabel{color: #000000; background-color: #00ff00}");
+@@ -9803,16 +9811,16 @@
+         // Receiving with a hold active: nothing is being prevented right now,
+         // so this is ambient status rather than an alarm. Staying in the green
+         // family keeps the escalation to red (transmit branch) as the signal.
+-        if (m_tx_inhibited) {
+-          tx_status_label.setStyleSheet("QLabel{color: #000000; background-color: #b3ffb3}");
+-          tx_status_label.setText (tr ("Inhibit"));
+-        }
++        if (m_tx_inhibited) paint_inhibit_badge ();
+       }
+       transmitDisplay(false);
+     } else if (!m_diskData && !m_tx_watchdog) {
+       tx_status_label.setStyleSheet("");
+       tx_status_label.setText("");
+     }
++    // A hold must stay visible when Monitor is off. Transmit keeps the red
++    // label set above; every other state uses the pale receive badge.
++    if (m_tx_inhibited) paint_inhibit_badge ();
+ 
+     QDateTime t = QDateTime::currentDateTimeUtc();
+     QString utc = t.date().toString("yyyy MMM dd") + "\n " +
+diff -ruN a/widgets/mainwindow.h b/widgets/mainwindow.h
+--- a/widgets/mainwindow.h	2026-09-25 11:54:38.000000000 -0400
++++ b/widgets/mainwindow.h	2026-09-27 13:29:55.398286097 -0400
+@@ -826,6 +826,7 @@
+   // Latest TX Inhibit state, mirrored here so guiUpdate() can report the
+   // physical PTT state rather than the sequencer's intent. See docs/TX_INHIBIT.md.
+   bool m_tx_inhibited {false};
++  void paint_inhibit_badge ();
+   QString m_tx_inhibit_holder;     // station named in the current hold, if any
+   bool m_tx_inhibit_warned {false};      // "not reachable" already reported?
+   quint16 m_tx_inhibit_warned_port {0};  // port that warning referred to

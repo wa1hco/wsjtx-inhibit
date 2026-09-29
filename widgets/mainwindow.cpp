@@ -4362,67 +4362,45 @@ bool MainWindow::eventFilter (QObject * object, QEvent * event)
 }
 
 // TX Inhibit has no status-bar widget of its own: the operator-visible signal
-// is tx_status_label turning red and reading INHIBIT (see guiUpdate), and a
-// second box merely disrupted the spacing of the whole line.
-//
-// Everything else lives here, costing no layout space:
-//   * the tooltip on tx_status_label always describes the current state,
-//     including the bound port and who is holding;
-//   * a one-shot status message warns when the operator has opted in but the
-//     station is NOT reachable (enabled, no UDP inhibit port). It fires
-//     only on a change, so it cannot nag.
+// is tx_status_label turning red and reading INHIBIT (see guiUpdate).
+// The tooltip says whether holds are accepted and who is holding.
 void MainWindow::update_inhibit_status ()
 {
   if (!m_config.enable_tx_inhibit ())
     {
       tx_status_label.setToolTip ({});
-      m_tx_inhibit_warned_port = 0;
-      m_tx_inhibit_warned = false;
-      m_tx_inhibit_announce_timer.stop ();
+      if (m_tx_inhibit_announce_timer.isActive ())
+        {
+          m_tx_inhibit_announce_timer.stop ();
+          send_inhibit_status_announce ();
+        }
       return;
     }
-
-  // Always read the UDP inhibit port from Configuration.
-  // A cached copy can disagree after bind/clear.
-  auto const port = m_config.tx_inhibit_port ();
 
   if (m_tx_inhibited)
     {
       tx_status_label.setToolTip (
         m_tx_inhibit_holder.isEmpty ()
-        ? tr ("TX Inhibit: a KEY agent is holding PTT off (UDP port %1).").arg (port)
-        : tr ("TX Inhibit: held by %1 (UDP port %2).").arg (m_tx_inhibit_holder).arg (port));
+        ? tr ("TX Inhibit: a KEY agent is holding PTT off.")
+        : tr ("TX Inhibit: held by %1.").arg (m_tx_inhibit_holder));
     }
-  else if (!port)
+  else if (!m_config.accept_udp_requests ())
     {
       tx_status_label.setToolTip (
-        tr ("TX Inhibit is enabled but NOT listening: no UDP port is bound.\n"
-            "The rig may be closed, PTT method may not be RTS/DTR, or the bind failed.\n"
-            "This station is NOT protected."));
+        tr ("TX Inhibit: PTT is RTS/DTR, but Accept UDP requests is off.\n"
+            "New holds are ignored. A hold already running keeps the pin off until it expires."));
     }
   else
     {
       tx_status_label.setToolTip (
-        tr ("TX Inhibit: listening for KEY-agent holds on UDP port %1.\n"
-            "Controllers learn this port from InhibitStatus (type 17) on the UDP Server stream.")
-        .arg (port));
+        tr ("TX Inhibit: holds are accepted on the UDP server socket.\n"
+            "Send type 18 to the address and port WSJT-X uses for Heartbeat."));
     }
 
-  // Warn once when enabled but unbound (bind failure / rig closed).
-  bool const unbound = !port;
-  if (unbound && (!m_tx_inhibit_warned || m_tx_inhibit_warned_port != port))
-    {
-      showStatusMessage (tr ("TX Inhibit is enabled but no UDP port is bound —"
-                             " this station is NOT protected"));
-    }
-  m_tx_inhibit_warned = unbound;
-  m_tx_inhibit_warned_port = port;
-
-  // Keep capability/port announcements alive while the feature is enabled so
-  // controllers that join after startup still see type 17.
   if (!m_tx_inhibit_announce_timer.isActive ())
     {
       m_tx_inhibit_announce_timer.start ();
+      send_inhibit_status_announce ();
     }
 }
 
@@ -4432,32 +4410,18 @@ void MainWindow::send_inhibit_status_announce ()
     {
       return;
     }
-  // Publish the current picture when enabled, or a final port-0 clear
-  // after disable. UDP Server may be unicast or multicast — same path as
-  // Heartbeat/Status.
-  //
-  // Never send a live type 17 with port 0. Controllers reject port 0, so an
-  // announce during Hamlib open (gate binds after rig_open) empties the
-  // KEY-agent target list. Port 0 is only the disable/clear value.
-  if (!m_config.enable_tx_inhibit ())
-    {
-      if (0 == m_config.tx_inhibit_port ())
-        {
-          m_messageClient->inhibit_status (
-            0, false, QString {},
-            m_tx_inhibit_hold_rx, m_tx_inhibit_release_rx,
-            m_tx_inhibit_expiries, m_tx_inhibit_invalid);
-        }
-      return;
-    }
-  if (0 == m_config.tx_inhibit_port ())
-    {
-      return;
-    }
+  // Supported means a hold can be applied: RTS/DTR and Accept UDP requests.
+  // Inhibited can stay true after Supported goes false, until the lease ends.
+  bool const supported = m_config.enable_tx_inhibit () && m_config.accept_udp_requests ();
+  qint64 const t_rx = m_tx_inhibit_t_rx_ns;
+  qint64 const t_pin = m_tx_inhibit_t_pin_ns;
+  m_tx_inhibit_t_rx_ns = 0;
+  m_tx_inhibit_t_pin_ns = 0;
   m_messageClient->inhibit_status (
-    m_config.tx_inhibit_port (), m_tx_inhibited, m_tx_inhibit_holder,
+    supported, m_tx_inhibited, m_tx_inhibit_holder,
     m_tx_inhibit_hold_rx, m_tx_inhibit_release_rx,
-    m_tx_inhibit_expiries, m_tx_inhibit_invalid);
+    m_tx_inhibit_expiries, m_tx_inhibit_invalid,
+    t_rx, t_pin);
 }
 
 void MainWindow::createStatusBar()                           //createStatusBar
@@ -4478,30 +4442,31 @@ void MainWindow::createStatusBar()                           //createStatusBar
   connect (&m_config, &Configuration::tx_inhibit_changed, this,
            [this] (bool inhibited, QString const& source
                    , quint32 hold_rx, quint32 release_rx
-                   , quint32 expiries, quint32 invalid) {
+                   , quint32 expiries, quint32 invalid
+                   , qint64 t_rx_ns, qint64 t_pin_ns) {
              m_tx_inhibited = inhibited;
              m_tx_inhibit_holder = inhibited ? source : QString {};
              m_tx_inhibit_hold_rx = hold_rx;
              m_tx_inhibit_release_rx = release_rx;
              m_tx_inhibit_expiries = expiries;
              m_tx_inhibit_invalid = invalid;
+             m_tx_inhibit_t_rx_ns = t_rx_ns;
+             m_tx_inhibit_t_pin_ns = t_pin_ns;
              update_inhibit_status ();
              send_inhibit_status_announce ();
            });
-  connect (&m_config, &Configuration::tx_inhibit_port_changed, this,
-           [this] (quint16) {
-             // Enable on → bind emits port only (no hold change). That used to
-             // update the tooltip and never send type 17 — late listeners saw
-             // nothing after a settings toggle. Announce immediately.
+  connect (&m_config, &Configuration::accept_udp_requests_changed, this,
+           [this] (bool) {
              update_inhibit_status ();
              send_inhibit_status_announce ();
            });
   connect (&m_config, &Configuration::tx_inhibit_error, this,
            [this] (QString const& message) {
              update_inhibit_status ();
-             showStatusMessage (message.isEmpty ()
-                               ? tr ("TX Inhibit failed (no port) — this station is NOT protected")
-                               : message);
+             if (!message.isEmpty ())
+               {
+                 showStatusMessage (message);
+               }
            });
   update_inhibit_status ();
 

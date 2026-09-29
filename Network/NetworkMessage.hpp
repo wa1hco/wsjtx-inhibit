@@ -533,30 +533,30 @@
  *
  * InhibitStatus  Out      17
  *                         Id (unique key)        utf8
- *                         Inhibit port           quint16
+ *                         Supported              bool
  *                         Inhibited              bool
  *                         Source station         utf8
  *                         Hold rx                quint32
  *                         Release rx             quint32
  *                         Expiries               quint32
  *                         Invalid                quint32
+ *                         t_rx_ns                quint64
+ *                         t_pin_ns               quint64
  *
- *      Optional telemetry when TX Inhibit is enabled (Settings → Radio).
- *      Emitted on hold-level or badge-text changes, when the inhibit
- *      listen port binds or clears, and periodically every
- *      NetworkMessage::pulse seconds while the feature remains enabled
- *      (same cadence as Heartbeat) so late joiners learn the inhibit
- *      port. Counter-only bumps wait for the next pulse or level/badge
- *      change. Travels on the configured UDP Server path (unicast or
- *      multicast).
+ *      Supported means PTT method is RTS or DTR and Accept UDP requests
+ *      is on, so a type 18 can drop the pin. Turning Accept UDP requests
+ *      off sends Supported false and ignores new commands. Leases already
+ *      running stay until they expire, so Inhibited can remain true in
+ *      that withdrawal. Emitted on hold-level or badge changes and every
+ *      NetworkMessage::pulse seconds while PTT is RTS or DTR. Travels on
+ *      the configured UDP Server path (unicast or multicast).
  *
- *      Inhibit port: OS-assigned ephemeral UDP listen port for KEY-agent
- *      holds. Zero means not listening (disable/clear only). A live
- *      announce never uses 0; controllers must ignore port 0 as a
- *      target. Inhibited: any per-controller lease active. Source
- *      station: badge text (may list multiple holders). Four quint32
- *      counters: hold packets received, explicit release hold, hold
- *      timeout expiries (incl. after a deadman), invalid datagrams.
+ *      Source station is badge text. Four quint32 counters: hold packets
+ *      received, explicit releases, expiries, invalid datagrams.
+ *      t_rx_ns is CLOCK_MONOTONIC when the type 18 was read from the
+ *      socket. t_pin_ns is CLOCK_MONOTONIC when the RTS or DTR ioctl
+ *      returned. Both are zero on the periodic repeat and on any
+ *      status that did not drop the line.
  *
  * TxInhibit      In       18
  *                         Id (target unique key) utf8
@@ -570,8 +570,14 @@
  *      Controller ID must be non-empty. Station is human badge text.
  *      Empty Id matches any instance at this UDP address/port; a
  *      non-empty Id must equal this instance's NetworkMessage Id or
- *      the datagram is ignored. Controllers learn the listen port from
- *      InhibitStatus (type 17). See docs/TX_INHIBIT.md.
+ *      the datagram is ignored.
+ *
+ *      Send commands to the source address and ephemeral source port of
+ *      ordinary WSJT-X traffic (Heartbeat, Status, Decode). A dedicated
+ *      thread reads that socket. A type 18 that creates the first lease
+ *      is applied to the PTT line without waiting for the GUI. A type 18
+ *      that only refreshes an existing lease does not take that path.
+ *      Accept UDP requests authorizes new commands. See docs/TX_INHIBIT.md.
  *
  *      Unknown types are ignored; schema number unchanged.
  */

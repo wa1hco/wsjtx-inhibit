@@ -795,6 +795,10 @@ private:
   quint32 m_tx_inhibit_release_rx {0};
   quint32 m_tx_inhibit_expiries {0};
   quint32 m_tx_inhibit_invalid {0};
+  // CLOCK_MONOTONIC stamps for the hold that just dropped the line. Cleared
+  // after the type-17 that carries them, so the heartbeat repeat sends zeros.
+  qint64 m_tx_inhibit_t_rx_ns {0};
+  qint64 m_tx_inhibit_t_pin_ns {0};
   bool m_tx_inhibit_warned {false};      // "not reachable" already reported?
   quint16 m_tx_inhibit_warned_port {0};  // port that warning referred to
   // Periodic InhibitStatus (type 17) on the UDP Server path so late joiners

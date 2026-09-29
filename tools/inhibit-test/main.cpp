@@ -28,10 +28,9 @@
 #include <QString>
 #include <QTextStream>
 #include <QDateTime>
+#include <QElapsedTimer>
 #include <QtGlobal>
 #include <QSocketNotifier>
-
-#include "TxInhibit/TxInhibitLogic.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -57,8 +56,12 @@
 
 namespace {
 
-// --port is required (from InhibitStatus / tooltip).
+// Listen on the UDP server WS sends Heartbeat and type 17 to (default 2237).
+// Type 18 goes back to the heartbeat source address and port.
 // hold_timeout_ms (wire ttl_ms) — safety on lost hold packets, not hang.
+static quint32 const kMagic = 0xadbccbda;
+static quint32 const kTypeInhibitStatus = 17;
+static quint32 const kTypeTxInhibit = 18;
 static int const kDefaultHoldTimeoutMs = 600;
 static int const kKeepaliveMs = 200;
 
@@ -74,6 +77,170 @@ static int const kContinuousMarkMs = 500;
 // Element gap upper bound while still "in character/word" (before hang EOT).
 // Letter gap = 3 dits; use up to ~5 dits as "still break-in" open.
 static double const kMaxIntraTxGapDits = 5.0;
+
+struct WsSession
+{
+  QHostAddress address;
+  quint16 port {0};
+  QString id;
+  quint32 schema {2};
+  bool have_peer {false};
+  bool have_status {false};
+  bool supported {false};
+  bool inhibited {false};
+  QString holder;
+};
+
+static QByteArray utf8_field (QByteArray const& text)
+{
+  QByteArray out;
+  out.resize (4 + text.size ());
+  uchar * p = reinterpret_cast<uchar *> (out.data ());
+  quint32 const n = static_cast<quint32> (text.size ());
+  p[0] = static_cast<uchar> ((n >> 24) & 0xff);
+  p[1] = static_cast<uchar> ((n >> 16) & 0xff);
+  p[2] = static_cast<uchar> ((n >> 8) & 0xff);
+  p[3] = static_cast<uchar> (n & 0xff);
+  if (!text.isEmpty ()) out.replace (4, text.size (), text);
+  return out;
+}
+
+static bool read_u32 (QByteArray const& buf, int& off, quint32& value)
+{
+  if (off + 4 > buf.size ()) return false;
+  uchar const * p = reinterpret_cast<uchar const *> (buf.constData () + off);
+  value = (quint32 (p[0]) << 24) | (quint32 (p[1]) << 16) | (quint32 (p[2]) << 8) | quint32 (p[3]);
+  off += 4;
+  return true;
+}
+
+static bool read_utf8 (QByteArray const& buf, int& off, QByteArray& text)
+{
+  quint32 n = 0;
+  if (!read_u32 (buf, off, n)) return false;
+  if (n == 0xffffffffu)
+    {
+      text.clear ();
+      return true;
+    }
+  if (n > 4096 || off + int (n) > buf.size ()) return false;
+  text = buf.mid (off, int (n));
+  off += int (n);
+  return true;
+}
+
+// Heartbeat is type 0, so success is a separate flag.
+static bool read_header (QByteArray const& buf, quint32& schema, quint32& type,
+                         QString& id, int& off)
+{
+  quint32 magic = 0;
+  off = 0;
+  if (!read_u32 (buf, off, magic) || magic != kMagic) return false;
+  if (!read_u32 (buf, off, schema)) return false;
+  if (!read_u32 (buf, off, type)) return false;
+  QByteArray raw_id;
+  if (!read_utf8 (buf, off, raw_id)) return false;
+  id = QString::fromUtf8 (raw_id);
+  return true;
+}
+
+static QByteArray encode_tx_inhibit (WsSession const& session, QString const& controller,
+                                     quint32 ttl, QString const& station)
+{
+  QByteArray body;
+  auto put_u32 = [&body] (quint32 v) {
+    char b[4] = {
+      char ((v >> 24) & 0xff), char ((v >> 16) & 0xff),
+      char ((v >> 8) & 0xff), char (v & 0xff)};
+    body.append (b, 4);
+  };
+  put_u32 (kMagic);
+  put_u32 (session.schema);
+  put_u32 (kTypeTxInhibit);
+  body += utf8_field (session.id.toUtf8 ());
+  body += utf8_field (controller.toUtf8 ());
+  put_u32 (ttl);
+  body += utf8_field (station.toUtf8 ());
+  return body;
+}
+
+static bool parse_inhibit_status (QByteArray const& buf, int off, WsSession& session)
+{
+  if (off + 2 > buf.size ()) return false;
+  session.supported = buf.at (off) != 0;
+  session.inhibited = buf.at (off + 1) != 0;
+  off += 2;
+  QByteArray holder;
+  if (!read_utf8 (buf, off, holder)) return false;
+  session.holder = QString::fromUtf8 (holder);
+  session.have_status = true;
+  return true;
+}
+
+static void note_datagram (QByteArray const& buf, QHostAddress const& from, quint16 from_port,
+                           WsSession& session, QString const& want_id)
+{
+  quint32 schema = 0;
+  quint32 type = 0;
+  QString id;
+  int off = 0;
+  if (!read_header (buf, schema, type, id, off)) return;
+  if (!want_id.isEmpty () && id != want_id) return;
+  bool const first = !session.have_peer;
+  bool const changed = !session.have_peer || session.port != from_port
+                       || session.address != from || session.id != id;
+  if (type == kTypeInhibitStatus)
+    {
+      WsSession next = session;
+      if (!parse_inhibit_status (buf, off, next)) return;
+      bool const status_changed = !session.have_status
+                                  || session.supported != next.supported
+                                  || session.inhibited != next.inhibited
+                                  || session.holder != next.holder;
+      session.supported = next.supported;
+      session.inhibited = next.inhibited;
+      session.holder = next.holder;
+      session.have_status = true;
+      if (!session.have_peer)
+        {
+          session.address = from;
+          session.port = from_port;
+          session.id = id;
+          session.schema = schema ? schema : session.schema;
+          session.have_peer = true;
+        }
+      if (status_changed)
+        {
+          QTextStream out (stdout);
+          out << QDateTime::currentDateTime ().toString (QStringLiteral ("hh:mm:ss.zzz"))
+              << "  type17 id=" << id
+              << " supported=" << (session.supported ? "yes" : "no")
+              << " inhibited=" << (session.inhibited ? "yes" : "no")
+              << " holder=" << (session.holder.isEmpty () ? QStringLiteral ("-") : session.holder)
+              << '\n';
+          out.flush ();
+        }
+      return;
+    }
+  // Heartbeat is message type 0. Any other outbound message also tells us
+  // the reply address, but Heartbeat is the one that carries the schema.
+  if (!session.have_peer || (type == 0 && changed) || first)
+    {
+      session.address = from;
+      session.port = from_port;
+      session.id = id;
+      if (schema) session.schema = schema;
+      session.have_peer = true;
+      if (type == 0)
+        {
+          QTextStream out (stdout);
+          out << QDateTime::currentDateTime ().toString (QStringLiteral ("hh:mm:ss.zzz"))
+              << "  heartbeat id=" << id << " schema=" << session.schema
+              << " from " << from.toString () << ':' << from_port << '\n';
+          out.flush ();
+        }
+    }
+}
 
 
 
@@ -682,20 +849,23 @@ int main (int argc, char * argv[])
   QCommandLineParser parser;
   parser.setApplicationDescription (
       QStringLiteral (
-          "KEY-agent stand-in (docs/TX_INHIBIT.md s3): Hold sender + KEYing monitor.\n"
-          "KEY key = left quote / grave ` (not Space - typing won't false-trigger).\n"
+          "KEY-agent stand-in. Listens for Heartbeat and type 17, sends type 18\n"
+          "back to that source. Grave ` is the KEY (not Space).\n"
           "Break-in CW: hang = 1.5x word gap; continuous KEY: hang 0.\n"
-          "Default: KEY only from *this terminal* (other windows ignored).\n"
-          "Use --global-keys for system-wide KEY (true agent bench)."));
+          "Default: KEY only from *this terminal*. --global-keys for any window."));
   parser.addHelpOption ();
   parser.addVersionOption ();
   QCommandLineOption hostOpt {QStringList () << "H" << "host",
-                              QStringLiteral ("WSJT-X station host (default 127.0.0.1)"),
+                              QStringLiteral ("Address to bind. WS's UDP server setting (default 127.0.0.1)"),
                               QStringLiteral ("host"),
                               QStringLiteral ("127.0.0.1")};
   QCommandLineOption portOpt {QStringList () << "p" << "port",
-                              QStringLiteral ("Inhibit UDP port from InhibitStatus / tooltip (required)"),
-                              QStringLiteral ("port")};
+                              QStringLiteral ("UDP server port WS sends Heartbeat and type 17 to (default 2237)"),
+                              QStringLiteral ("port"),
+                              QStringLiteral ("2237")};
+  QCommandLineOption idOpt {QStringList () << "id",
+                            QStringLiteral ("Only this WS instance id (default: first heartbeat)"),
+                            QStringLiteral ("id")};
   QCommandLineOption controllerOpt {
     QStringList () << "controller-id",
     QStringLiteral ("Lease Controller ID (default TEST-KEY)"),
@@ -720,6 +890,7 @@ int main (int argc, char * argv[])
     QStringLiteral ("Log every keepalive (default: HOLD, KEY events, RELEASE only).")};
   parser.addOption (hostOpt);
   parser.addOption (portOpt);
+  parser.addOption (idOpt);
   parser.addOption (controllerOpt);
   parser.addOption (stationOpt);
   parser.addOption (ttlOpt);
@@ -729,13 +900,8 @@ int main (int argc, char * argv[])
   parser.process (app);
 
   QString const host = parser.value (hostOpt);
-  if (!parser.isSet (portOpt))
-    {
-      QTextStream err (stderr);
-      err << "inhibit-test: --port is required (value from InhibitStatus / tooltip)\n";
-      return 2;
-    }
   quint16 const port = static_cast<quint16> (parser.value (portOpt).toUInt ());
+  QString const want_id = parser.value (idOpt);
   if (port == 0)
     {
       QTextStream err (stderr);
@@ -827,6 +993,52 @@ int main (int argc, char * argv[])
 #endif
 
   QUdpSocket sock;
+  QHostAddress const listen_addr {host};
+  if (!sock.bind (listen_addr, port, QUdpSocket::ShareAddress | QUdpSocket::ReuseAddressHint))
+    {
+      QTextStream err (stderr);
+      err << "inhibit-test: cannot bind " << host << ':' << port
+          << " (" << sock.errorString () << ")\n"
+          << "  That port is where WS sends Heartbeat and type 17.\n";
+      return 1;
+    }
+  WsSession session;
+  {
+    QTextStream out (stdout);
+    out << "listening " << host << ':' << port
+        << " for Heartbeat and type 17 (20 s)\n";
+    out.flush ();
+    QElapsedTimer wait;
+    wait.start ();
+    while (!session.have_peer && wait.elapsed () < 20000)
+      {
+        if (!sock.waitForReadyRead (500)) continue;
+        while (sock.hasPendingDatagrams ())
+          {
+            QByteArray datagram;
+            datagram.resize (int (sock.pendingDatagramSize ()));
+            QHostAddress from;
+            quint16 from_port = 0;
+            if (sock.readDatagram (datagram.data (), datagram.size (), &from, &from_port) < 0)
+              continue;
+            note_datagram (datagram, from, from_port, session, want_id);
+          }
+      }
+  }
+  if (!session.have_peer)
+    {
+      QTextStream err (stderr);
+      err << "inhibit-test: no Heartbeat on " << host << ':' << port << '\n'
+          << "  Set WS UDP server to that address and port, and leave this tool bound there.\n";
+      return 1;
+    }
+  if (session.have_status && !session.supported)
+    {
+      QTextStream err (stderr);
+      err << "inhibit-test: type 17 says not supported"
+          << " (PTT must be RTS or DTR, and Accept UDP requests must be on)\n";
+    }
+
   qint64 seq = 1;
   KeyingMonitor keying;   // KEYing monitor SM
   int holds_sent = 0;
@@ -861,10 +1073,10 @@ int main (int argc, char * argv[])
       {
         return; // END_HOLD already cleared hold_active
       }
-    QByteArray payload = TxInhibit::build_datagram (
-        controller_id, static_cast<quint32> (ttl), station);
+    QByteArray payload = encode_tx_inhibit (session, controller_id,
+                                            static_cast<quint32> (ttl), station);
     ++seq;
-    qint64 n = sock.writeDatagram (payload, QHostAddress (host), port);
+    qint64 n = sock.writeDatagram (payload, session.address, session.port);
     QTextStream out (stdout);
     char const * tag = ttl == 0 ? "RELEASE" : (is_keepalive ? "KEEPALIVE" : "HOLD");
     if (ttl == 0)
@@ -884,7 +1096,8 @@ int main (int argc, char * argv[])
         out << QDateTime::currentDateTime ().toString (QStringLiteral ("hh:mm:ss.zzz"))
             << "  " << tag
             << "  ttl_ms=" << ttl
-            << "  -> " << host << ':' << port
+            << "  -> " << session.address.toString () << ':' << session.port
+            << "  id=" << session.id
             << "  (holds=" << holds_sent
             << " ka=" << keepalives_sent
             << " rel=" << releases_sent << ")";
@@ -936,7 +1149,9 @@ int main (int argc, char * argv[])
 
   // Banner uses ASCII only so logs stay readable on non-UTF-8 terminals.
   QTextStream out (stdout);
-  out << "inhibit-test (KEY agent) -> " << host << ':' << port << '\n'
+  out << "inhibit-test (type 18) -> " << session.address.toString ()
+      << ':' << session.port << "  id=" << session.id
+      << "  schema=" << session.schema << '\n'
       << "  ` (grave) = KEY level: hold to assert, release to open  - not Space\n"
       << "  ~ (shift+grave) = LATCH on; press ` or ~ again to release\n"
       << "  q or Esc  = release hold and quit\n"
@@ -969,6 +1184,16 @@ int main (int argc, char * argv[])
   QTimer poll;
   poll.setInterval (poll_ms);
   QObject::connect (&poll, &QTimer::timeout, &app, [&] () {
+      while (sock.hasPendingDatagrams ())
+        {
+          QByteArray datagram;
+          datagram.resize (int (sock.pendingDatagramSize ()));
+          QHostAddress from;
+          quint16 from_port = 0;
+          if (sock.readDatagram (datagram.data (), datagram.size (), &from, &from_port) < 0)
+            continue;
+          note_datagram (datagram, from, from_port, session, want_id);
+        }
       qint64 t = now_ms ();
 
       bool want_quit = false;
