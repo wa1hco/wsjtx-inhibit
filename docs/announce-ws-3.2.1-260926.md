@@ -27,37 +27,33 @@ WS 3.2.1 260926 already has TX Inhibit. It listens for a JSON hold on its own UD
 
 This note is an upgrade against that version. It follows some really good improvement to inhibit design that David Christle put in WSJT-X 3.2, and it adds the two changes from me that greatly improve the inhibit timing. 
 
-## What changed
+## What changed with inhibit messages
 
-The Enable TX Inhibit checkbox is gone. Inhibit is automatically armed when the PTT method is RTS or DTR, eliminating the "enable" checkbox. Accept UDP requests still has to be on before a new type 18 is accepted. Turning that off does not cancel a hold that is already running. The hold keeps the pin off until its TTL.
+The Enable TX Inhibit checkbox is gone. Inhibit is automatically armed when the PTT method is RTS or DTR, eliminating the "enable" checkbox. Accept UDP requests still has to be on before inhibit is accepted. Turning that off does not cancel a hold that is already running. The hold keeps the pin off until its TTL.
 
-Commands are message type 18, not JSON. They use the same UDP socket already used for Heartbeat, Status, and Decode. WS-suite sends to the UDP server address in Settings, and the controller sends type 18 back to the source address and port of that traffic, with the same Id and schema. There is no separate inhibit port.
+Inhibit command arrives as message type 18, not JSON. Inhibit uses the same UDP socket already used for other UDP commands. WS-suite sends a type 17 inhibit announcement to the UDP server address in Settings, and the controller sends type 18 back to the source address and port of that traffic, with the same Id and schema. There is no separate inhibit port.
 
 Message Type 17 is the inhibit status. The fields are Supported, Inhibited, the station text, and the four counters. Supported means RTS or DTR for PTT and Accept UDP requests. Type 17 goes out when the state changes and again after each Heartbeat. One unsupported snapshot is sent when Accept UDP requests is turned off.
 
 Holds are per controller and OR-combined. Up to 64 controllers are tracked. Any further controller extends one aggregate hold. A TTL of 0 releases that controller. A TTL from 100 to 30000 ms creates or refreshes the hold.
 
-The status box says INHIBIT while a hold is active. In receive the background is a light green with "Inhibit". In transmit it is white on red "Inhibit".
+The status box says INHIBIT while a hold is active. In receive, the background is a light green with "Inhibit". In transmit it is white on red "Inhibit".
 
 ## Why the pin path changed
 
-The requirement is for fast response to the WSJT-X to SSB handoff. From the signal that sees the SSB transmitter KEY, through building the packet, across the switched Gigabit Ethernet, and through the inhibit time inside WS, the sum has to stay under 30 ms every time. That is what keeps the transmitter transfer relay from being hot-switched. WSJT-X RF is gone before the relay moves.
+The requirement is for fast response to the WSJT-X to SSB handoff. From the SSB transmitter KEY, reading that signal in software, through sending the packet, across the switched Gigabit Ethernet, and through the inhibit time inside WS, the sum has to stay under 30 ms every time. That is what keeps the transmitter transfer relay from being hot-switched. WSJT-X RF is gone before the relay moves.
 
 There is no measurement that can ensure "every time" across two PCs, two operating systems, and a network. The software goal is a large margin under 30 ms. The hardware design has to tolerate a small number of hot switches.
 
-WSJT-X 3.2-rc1 reads a type 18 datagram on the GUI thread. Stock WS suite 3.2.1 reads the JSON hold on the transceiver thread, the same thread that runs CAT. The GUI thread adds about 2 ms at the median and about 6 ms at the 99th, with a worst measured time of 16 ms. A thread which runs separate from the GUI loop brings that read to about 0.2 ms at the median and about 3 ms at the worst sample.
+WSJT-X 3.2-rc1 reads a type 18 datagram on the GUI thread. WS suite 3.2.1 currently reads inhibit as a JSON datagram on its own thread. The GUI thread adds about 2 ms at the median and about 6 ms at the 99th, with a worst measured time of 16 ms. A thread which runs separate from the GUI loop brings the same delay to about 0.2 ms at the median and about 3 ms at the peak.
 
-David Christle's point is to use the same UDP socket for Inhibit and that's a good idea. My inhibit patch initially chose a different socket to avoid an unknown GUI loop delay. That introduced UI changes and network complexity. The GUI delay is better than I expected, but the peak is still too much.
+David Christle's point is to use the same UDP socket for Inhibit and that's a good idea. My inhibit patch initially chose to use a different socket with its own thread to avoid an unknown GUI loop delay. But that introduced UI changes and network complexity. The GUI delay turned out better than I feared, but still adds too much peak latency to be comfortable.
 
-The solution is to use the common UDP socket for inhibit, and to read it on its own thread. That thread handles a type 18 hold immediately and passes every other datagram to the GUI.
+The solution is to use the common UDP socket for inhibit, but to add a UDP message preprocessing thread to read the inhibit datagram (type 18 message) as fast as possible and act on it immediately. Any other datagram types are passed to the GUI. This keeps the UI and network consistent and keeps the low latency of a dedicated thread.
 
-The Hamlib thread is the expensive one. There is one rig mutex, and the transceiver thread is the thread that holds it during a CAT command. rig_set_ptt() takes that same mutex, so it waits out whatever CAT command is already running.
+After the inhibit datagram read, stock code calls rig_set_ptt(). That takes the rig lock and waits for whatever CAT command is already running. With Fake It, that command is a burst of split and frequency exchanges on the same thread, on the order of 80 to 95 ms. At 115200 baud, for a run of 422 inhibits an IC-7300 gave a 99th percentile of 76 ms from the socket read to RTS, and six holds were over 30 ms. Lowering the CAT baud rate slows an ordinary CI-V poll. It is not what produced that tail.
 
-On a run where the socket was already on its own thread and the RTS ioctl still ran later on the Hamlib thread (383 transmit holds, CAT 19200), the UDP read was 0.19 ms at the median and 0.27 ms at the 99th, with a worst sample of 2.9 ms. From that read until RTS, on the Hamlib thread, the 99th was 7.2 ms and the maximum was 18 ms. When that same UDP thread also clears RTS, without the rig mutex, socket-read-to-RTS on 2,393 transmit holds at 115200 baud was 0.44 ms at the 99th and 2.7 ms at the maximum.
-
-With Fake It in progress the Hamlib thread is worse. The command already holding the mutex is a burst of split and frequency exchanges, about 80 to 95 ms, measured at 115200 baud. A lower baud slows an ordinary CI-V poll. It is not what produced the long tail. At 115200, 422 transmit holds on an IC-7300 gave a 99th percentile of 76 ms from the socket read to RTS, and six holds were over 30 ms. The short 19200 run only caught the tail of the same burst, so its maximum was 24.7 ms.
-
-The upgrade clears RTS or DTR on the UDP thread, before the datagram is queued. It does not take the rig lock. On Linux this is the modem-line ioctl (TIOCMBIC). On Windows, Hamlib turns the same call, ser_set_rts() or ser_set_dtr(), into EscapeCommFunction() with CLRRTS or CLRDTR. While the hold lasts, the same clear is repeated so a later PTT request cannot leave the line high. rig_set_ptt() still runs afterward, only to update Hamlib's saved PTT state. After ser_set_rts(), rig_set_ptt() sleeps 50 ms. The pin has already dropped. That sleep is not part of the inhibit time, but it does hold the rig lock.
+This upgrade reads the UDP socket on its own thread. When the datagram is a type 18 hold, that thread clears RTS or DTR before the datagram is queued to the rest of the program. It does not take the rig PTT lock. On Linux this is the modem-line ioctl (TIOCMBIC). On Windows, Hamlib turns the same call, ser_set_rts() or ser_set_dtr(), into EscapeCommFunction() with CLRRTS or CLRDTR. While the hold lasts, the same clear is repeated so a later PTT request cannot leave the line high. rig_set_ptt() still runs afterward, only to update Hamlib's saved PTT state. After ser_set_rts(), rig_set_ptt() sleeps 50 ms. The pin has already dropped. That sleep is not part of the inhibit time, but it does hold the rig lock.
 
 ## What was measured
 
