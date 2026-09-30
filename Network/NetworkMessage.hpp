@@ -550,6 +550,8 @@
  *                         Release rx             quint32
  *                         Expiries               quint32
  *                         Invalid                quint32
+ *                         t_rx_ns                quint64
+ *                         t_pin_ns               quint64
  *
  *      Supported means the active transceiver uses DTR or RTS PTT and Accept
  *      UDP requests is enabled, so the instance can apply inhibit commands.
@@ -559,7 +561,10 @@
  *      Inhibited means at least one hold is active and may remain true in a
  *      withdrawal until existing leases expire. Source station summarizes
  *      active holders. Counters are cumulative for the current transceiver
- *      lifetime.
+ *      lifetime. t_rx_ns is CLOCK_MONOTONIC at the type 18 socket read.
+ *      t_pin_ns is CLOCK_MONOTONIC when the RTS or DTR drop ioctl returns.
+ *      Both are zero on a heartbeat and on any status that did not drop a
+ *      pin that was high. Readers that stop after Invalid ignore the pair.
  *
  * TxInhibit      In       18
  *                         Id (target unique key) utf8

@@ -157,6 +157,12 @@ target_include_directories (test_tx_inhibit_transceiver PRIVATE ${CMAKE_BINARY_D
 target_link_libraries (test_tx_inhibit_transceiver Boost::log Qt5::Test Qt5::Network Qt5::Widgets)
 add_test (NAME test_tx_inhibit_transceiver COMMAND test_tx_inhibit_transceiver)
 
+add_executable (test_tx_inhibit_thread_priority
+  test_tx_inhibit_thread_priority.cpp
+)
+target_link_libraries (test_tx_inhibit_thread_priority Qt5::Test)
+add_test (NAME test_tx_inhibit_thread_priority COMMAND test_tx_inhibit_thread_priority)
+
 add_executable (test_hamlib_mode
   test_hamlib_mode.cpp
 )
