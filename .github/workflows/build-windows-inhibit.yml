@@ -1,0 +1,20 @@
+# The main CI Windows job runs only for a full dispatch or a full-ci label.
+# This branch needs an installer, so a push here builds Windows by itself.
+name: Windows installer for inhibit branch
+
+on:
+  push:
+    branches: [inhibit-on-3.2-rc1]
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    uses: ./.github/workflows/build-windows.yml
+    with:
+      version: "3.2.0-inhibit"
+      hamlib_branch: "4.7.2"
+      release_channel: "DEVEL"
+      save_ccache: false
+      recache: false

@@ -247,6 +247,12 @@ add_executable (test_radio_mode_policy test_radio_mode_policy.cpp)
 target_link_libraries (test_radio_mode_policy wsjt_qt Qt5::Test)
 add_test (NAME test_radio_mode_policy COMMAND test_radio_mode_policy)
 
+add_executable (test_tx_inhibit_thread_priority
+  test_tx_inhibit_thread_priority.cpp
+)
+target_link_libraries (test_tx_inhibit_thread_priority Qt5::Test)
+add_test (NAME test_tx_inhibit_thread_priority COMMAND test_tx_inhibit_thread_priority)
+
 add_executable (test_hamlib_mode
   test_hamlib_mode.cpp
 )
