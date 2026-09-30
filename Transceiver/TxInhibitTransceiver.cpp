@@ -7,6 +7,7 @@
 #include <QStringList>
 #include <QTimer>
 
+#include "TxInhibit/TxInhibitDrop.hpp"
 #include "moc_TxInhibitTransceiver.cpp"
 
 namespace
@@ -171,6 +172,7 @@ void TxInhibitTransceiver::expire_holds ()
         }
     }
 
+  if (was_inhibited && holds_.isEmpty ()) TxInhibitDrop::request_release ();
   if (was_inhibited != !holds_.isEmpty ()) apply_requested_state ();
   if (expired || was_inhibited != !holds_.isEmpty ()
       || previous_holder != holder_summary ())
@@ -238,6 +240,7 @@ void TxInhibitTransceiver::tx_inhibit_command (QString controller, quint32 ttl_m
         }
     }
 
+  if (was_inhibited && holds_.isEmpty ()) TxInhibitDrop::request_release ();
   if (was_inhibited != !holds_.isEmpty ()) apply_requested_state ();
   emit_status ();
   schedule_expiry ();

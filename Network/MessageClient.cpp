@@ -17,6 +17,8 @@
 #include <QtEndian>
 
 #include "NetworkMessage.hpp"
+#include "UdpDispatch.hpp"
+#include "TxInhibit/TxInhibitDrop.hpp"
 #include "qt_helpers.hpp"
 #include "pimpl_impl.hpp"
 
@@ -58,7 +60,7 @@ namespace
 }
 
 class MessageClient::impl
-  : public QUdpSocket
+  : public QObject
 {
   Q_OBJECT;
 
@@ -83,7 +85,13 @@ public:
     replay_timer_->setSingleShot (true);
     replay_timer_->setTimerType (Qt::PreciseTimer);
     connect (replay_timer_, &QTimer::timeout, this, &impl::drain_replay);
-    connect (this, &QIODevice::readyRead, this, &impl::pending_datagrams);
+    connect (&dispatch_, &UdpDispatch::gui_datagram, this, [this] (QByteArray const& data, quint16) {
+      parse_message (data);
+    });
+    connect (&dispatch_, &UdpDispatch::io_error, this, [this] (QString const& message) {
+      Q_EMIT self_->error (message);
+    });
+    dispatch_.set_id (id_);
     inhibit_invalid_timer_.setParent (this);
     inhibit_invalid_timer_.setSingleShot (true);
     connect (&inhibit_invalid_timer_, &QTimer::timeout, this, [this] {
@@ -155,7 +163,6 @@ public:
   void parse_message (QByteArray const&);
   bool parse_tx_inhibit (QByteArray const&);
   void invalid_inhibit ();
-  void pending_datagrams ();
   void heartbeat ();
   void closedown ();
   bool inhibit_available () const;
@@ -164,7 +171,7 @@ public:
                               QString const& source_station,
                               quint32 hold_rx, quint32 release_rx,
                               quint32 expiries, quint32 invalid);
-  void send_inhibit_status (bool supported);
+  void send_inhibit_status (bool supported, qint64 t_rx_ns = 0, qint64 t_pin_ns = 0);
   bool begin_replay ();
   void end_replay ();
   void cancel_replay ();
@@ -212,6 +219,7 @@ public:
   QQueue<DecodeIdentity> decode_history_;
   QByteArray last_message_;
   InhibitStatusSnapshot inhibit_status_;
+  UdpDispatch dispatch_;
 };
 
 #include "MessageClient.moc"
@@ -291,25 +299,18 @@ void MessageClient::impl::start ()
     }
 
   TRACE_UDP ("Trying server:" << server_.toString ());
-  QHostAddress interface_addr {IPv6Protocol == server_.protocol () ? QHostAddress::AnyIPv6 : QHostAddress::AnyIPv4};
+  QHostAddress interface_addr {QAbstractSocket::IPv6Protocol == server_.protocol () ? QHostAddress::AnyIPv6 : QHostAddress::AnyIPv4};
 
-  if (state () != BoundState || localAddress () != interface_addr)
+  if (dispatch_.is_unconnected () || dispatch_.local_address () != interface_addr.toString ())
     {
-      if (UnconnectedState != state () || state ())
-        {
-          close ();
-        }
-      // bind to an ephemeral port on the selected interface and set
-      // up for sending datagrams
-      if (!bind (interface_addr))
+      dispatch_.close_socket ();
+      // Bind to an ephemeral port on the selected interface.
+      if (!dispatch_.bind (interface_addr))
         {
           return;
         }
-      // qDebug () << "Bound to UDP port:" << localPort () << "on:" << localAddress ();
-
-      // set multicast TTL to limit scope when sending to multicast
-      // group addresses
-      setSocketOption (MulticastTtlOption, TTL_);
+      // Set multicast TTL to limit scope when sending to a group address.
+      dispatch_.set_ttl (TTL_);
     }
 
   // send initial heartbeat which allows schema negotiation
@@ -320,24 +321,6 @@ void MessageClient::impl::start ()
     {
       send_message (pending_messages_.dequeue (), true, false);
     }
-}
-
-void MessageClient::impl::pending_datagrams ()
-{
-  int budget {64};
-  while (budget-- && hasPendingDatagrams ())
-    {
-      QByteArray datagram;
-      datagram.resize (pendingDatagramSize ());
-      QHostAddress sender_address;
-      port_type sender_port;
-      if (0 <= readDatagram (datagram.data (), datagram.size (), &sender_address, &sender_port))
-        {
-          TRACE_UDP ("message received from:" << sender_address << "port:" << sender_port);
-          parse_message (datagram);
-        }
-    }
-  if (hasPendingDatagrams ()) QTimer::singleShot (0, this, &impl::pending_datagrams);
 }
 
 void MessageClient::impl::invalid_inhibit ()
@@ -669,6 +652,7 @@ void MessageClient::impl::set_enabled (bool enabled)
 
   auto const was_available = inhibit_available ();
   enabled_ = enabled;
+  dispatch_.set_commands_enabled (enabled_);
   if (inhibit_available ())
     {
       send_inhibit_status (true);
@@ -684,13 +668,21 @@ void MessageClient::impl::update_inhibit_status (
   quint32 hold_rx, quint32 release_rx, quint32 expiries, quint32 invalid)
 {
   auto const was_available = inhibit_available ();
+  qint64 t_rx_ns = 0;
+  qint64 t_pin_ns = 0;
+  // The pin pair belongs to the edge that reports a new hold. A refresh
+  // and a heartbeat send zeros.
+  if (inhibited && !inhibit_status_.inhibited)
+    {
+      TxInhibitDrop::take_pin_stamps (t_rx_ns, t_pin_ns);
+    }
   inhibit_status_ = {
     true, supported, inhibited, source_station,
     hold_rx, release_rx, expiries, invalid
   };
   if (inhibit_available ())
     {
-      send_inhibit_status (true);
+      send_inhibit_status (true, t_rx_ns, t_pin_ns);
     }
   else if (was_available)
     {
@@ -698,7 +690,7 @@ void MessageClient::impl::update_inhibit_status (
     }
 }
 
-void MessageClient::impl::send_inhibit_status (bool supported)
+void MessageClient::impl::send_inhibit_status (bool supported, qint64 t_rx_ns, qint64 t_pin_ns)
 {
   if (!inhibit_status_.valid || !server_port_ || server_.isNull ()) return;
 
@@ -708,7 +700,8 @@ void MessageClient::impl::send_inhibit_status (bool supported)
   out << supported << inhibit_status_.inhibited
       << inhibit_status_.source_station.toUtf8 ()
       << inhibit_status_.hold_rx << inhibit_status_.release_rx
-      << inhibit_status_.expiries << inhibit_status_.invalid;
+      << inhibit_status_.expiries << inhibit_status_.invalid
+      << static_cast<quint64> (t_rx_ns) << static_cast<quint64> (t_pin_ns);
   TRACE_UDP ("supported:" << supported
              << "inhibited:" << inhibit_status_.inhibited
              << "source:" << inhibit_status_.source_station);
@@ -792,8 +785,8 @@ void MessageClient::impl::drain_replay ()
                 {
                   return;
                 }
-              setMulticastInterface (network_interfaces_[next_interface]);
-              writeDatagram (contents, server_, server_port_);
+              dispatch_.send_one (contents, server_, server_port_,
+                                  network_interfaces_[next_interface].name ());
               if (generation != replay_generation_ || ReplayState::Draining != replay_state_)
                 {
                   return;
@@ -813,7 +806,7 @@ void MessageClient::impl::drain_replay ()
             {
               return;
             }
-          writeDatagram (contents, server_, server_port_);
+          dispatch_.send_one (contents, server_, server_port_, {});
           if (generation != replay_generation_ || ReplayState::Draining != replay_state_)
             {
               return;
@@ -873,13 +866,12 @@ void MessageClient::impl::send_message_immediately (QByteArray const& message)
     {
       for (auto const& net_if : network_interfaces_)
         {
-          setMulticastInterface (net_if);
-          writeDatagram (message, server_, server_port_);
+          dispatch_.send_one (message, server_, server_port_, net_if.name ());
         }
     }
   else
     {
-      writeDatagram (message, server_, server_port_);
+      dispatch_.send_one (message, server_, server_port_, {});
     }
   last_message_ = message;
 }
@@ -916,24 +908,6 @@ MessageClient::MessageClient (QString const& id, QString const& version, QString
   : QObject {self}
   , m_ {id, version, revision, server_port, TTL, this}
 {
-  connect (&*m_
-#if QT_VERSION < QT_VERSION_CHECK(5, 15, 0)
-           , static_cast<void (impl::*) (impl::SocketError)> (&impl::error), [this] (impl::SocketError e)
-#else
-           , &impl::errorOccurred, [this] (impl::SocketError e)
-#endif
-                                   {
-#if defined (Q_OS_WIN)
-                                     if (e != impl::NetworkError // take this out when Qt 5.5 stops doing this spuriously
-                                         && e != impl::ConnectionRefusedError) // not interested in this with UDP socket
-                                       {
-#else
-                                       {
-                                         Q_UNUSED (e);
-#endif
-                                         Q_EMIT error (m_->errorString ());
-                                       }
-                                       });
   m_->set_server (server_name, network_interface_names);
 }
 
@@ -967,7 +941,7 @@ void MessageClient::set_server_port (port_type server_port)
 void MessageClient::set_TTL (int TTL)
 {
   m_->TTL_ = TTL;
-  m_->setSocketOption (QAbstractSocket::MulticastTtlOption, m_->TTL_);
+  m_->dispatch_.set_ttl (m_->TTL_);
 }
 
 void MessageClient::enable (bool flag)
