@@ -14,12 +14,27 @@
 #include <QJsonValue>
 #include <QDebug>
 #include <hamlib/rig.h>
-#ifndef HAMLIB_PTTPORT
-#include <hamlib/port.h>
-#endif
-#ifndef HAMLIB_STATE
+// Hamlib 4.6+ splits these out. Hamlib 4.5 keeps state and ports on RIG.
+#if !defined(HAMLIB_STATE) && __has_include(<hamlib/rig_state.h>)
 #include <hamlib/rig_state.h>
 #endif
+#ifndef HAMLIB_STATE
+#define HAMLIB_STATE(rig) (&(rig)->state)
+#endif
+#if !defined(HAMLIB_PTTPORT) && __has_include(<hamlib/port.h>)
+#include <hamlib/port.h>
+#endif
+#ifndef HAMLIB_PTTPORT
+#define HAMLIB_PTTPORT(rig) (&(rig)->state.pttport)
+#endif
+#ifndef HAMLIB_RIGPORT
+#define HAMLIB_RIGPORT(rig) (&(rig)->state.rigport)
+#endif
+#if defined(Q_OS_UNIX)
+#include <sys/ioctl.h>
+#include <unistd.h>
+#endif
+#include "TxInhibit/TxInhibitDrop.hpp"
 #include "HamlibVfoRoleState.hpp"
 #include "pimpl_impl.hpp"
 #include "moc_HamlibTransceiver.cpp"
@@ -252,6 +267,10 @@ public:
   bool do_pwr_;
   bool do_pwr2_;
   bool do_swr_;
+  // Separate PTT port: the CAT open leaves RTS and DTR high. Drop a
+  // line here unless Settings forces that line high.
+  bool release_cat_rts_ {true};
+  bool release_cat_dtr_ {true};
 
   static int debug_callback (enum rig_debug_level_e level, rig_ptr_t arg, char const * format, va_list ap);
 };
@@ -415,6 +434,7 @@ HamlibTransceiver::HamlibTransceiver (logger_type * logger,
           m_->set_conf ("ptt_type", "RTS");
         }
       m_->set_conf ("ptt_share", "1");
+      direct_ptt_ = true;
     }
 
   // do this late to allow any configuration option to be overriden
@@ -530,7 +550,11 @@ HamlibTransceiver::HamlibTransceiver (logger_type * logger,
           m_->set_conf ("ptt_type", "RTS");
         }
       m_->set_conf ("ptt_share", "1");
+      direct_ptt_ = true;
     }
+
+  m_->release_cat_rts_ = !(params.force_rts && params.rts_high);
+  m_->release_cat_dtr_ = !(params.force_dtr && params.dtr_high);
 
   // Make Icom CAT split commands less glitchy
   m_->set_conf ("no_xchg", "1");
@@ -604,6 +628,47 @@ int HamlibTransceiver::do_start ()
     }
 
   m_->error_check (rig_open (m_->rig_.data ()), tr ("opening connection to rig"));
+
+#if defined(Q_OS_UNIX)
+  if (direct_ptt_)
+    {
+      auto * ptt = HAMLIB_PTTPORT (m_->rig_.data ());
+      auto * cat = HAMLIB_RIGPORT (m_->rig_.data ());
+      unsigned bit = 0;
+      if (ptt && RIG_PTT_SERIAL_RTS == ptt->type.ptt) bit = TIOCM_RTS;
+      else if (ptt && RIG_PTT_SERIAL_DTR == ptt->type.ptt) bit = TIOCM_DTR;
+      if (bit != 0 && ptt && cat)
+        {
+          bool const separate = ptt->pathname[0] != '\0'
+                                && strcmp (ptt->pathname, cat->pathname) != 0;
+          if (!separate)
+            {
+              int fd = ptt->fd >= 0 ? ptt->fd : cat->fd;
+              if (fd >= 0) TxInhibitDrop::publish (fd, bit, false);
+            }
+          else
+            {
+              // CAT is not the PTT port. Opening it asserts RTS and DTR.
+              // An Icom USB SEND line then holds the rig in transmit.
+              unsigned drop = 0;
+              if (m_->release_cat_rts_) drop |= TIOCM_RTS;
+              if (m_->release_cat_dtr_) drop |= TIOCM_DTR;
+              if (drop != 0 && cat->fd >= 0) ioctl (cat->fd, TIOCMBIC, &drop);
+              // Hamlib may still hold the PTT device from rig_open, with
+              // both lines high. Close it. The inhibit thread opens it
+              // only while the pin is on.
+              if (ptt->fd >= 0 && ptt->fd != cat->fd)
+                {
+                  unsigned const both = TIOCM_RTS | TIOCM_DTR;
+                  ioctl (ptt->fd, TIOCMBIC, &both);
+                  ::close (ptt->fd);
+                  ptt->fd = -1;
+                }
+              TxInhibitDrop::publish_separate (ptt->pathname, bit);
+            }
+        }
+    }
+#endif
 
   // reset dynamic state
   m_->one_VFO_ = false;
@@ -841,6 +906,9 @@ int HamlibTransceiver::do_start ()
 
 void HamlibTransceiver::do_stop ()
 {
+#if defined(Q_OS_UNIX)
+  if (direct_ptt_) TxInhibitDrop::shutdown ();
+#endif
   if (m_->is_dummy_ && !m_->ptt_only_)
     {
       rig_get_freq (m_->rig_.data (), RIG_VFO_CURR, &impl::dummy_frequency_);
@@ -1193,6 +1261,10 @@ void HamlibTransceiver::do_poll ()
         }
     }
 
+#if defined(Q_OS_UNIX)
+  // The inhibit thread owns the modem bits. rig_get_ptt can rewrite them.
+  if (!direct_ptt_)
+#endif
   if (ptt_port_configured (m_->rig_.data ()) && rig_get_function_ptr (m_->model_, RIG_FUNCTION_GET_PTT))
   {
     ptt_t p;
@@ -1261,6 +1333,17 @@ void HamlibTransceiver::do_poll ()
 void HamlibTransceiver::do_ptt (bool on)
 {
     CAT_TRACE ("PTT: " << on << " " << state () << " reversed=" << m_->vfo_roles_.reversed ());
+#if defined(Q_OS_UNIX)
+  if (direct_ptt_)
+    {
+      // Store intent. The inhibit thread writes the pin.
+      // rig_set_ptt() is not called, so it cannot race that write.
+      if (ptt_port_configured (m_->rig_.data ())) ptt_on_ = on;
+      update_PTT (on);
+      TxInhibitDrop::set_ptt_intent (on);
+      return;
+    }
+#endif
   if (on)
     {
        if (ptt_port_configured (m_->rig_.data ()))

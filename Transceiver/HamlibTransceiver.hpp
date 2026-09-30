@@ -36,6 +36,8 @@ private:
   void do_poll () override;
 
   bool ptt_on_ = false;
+  // RTS or DTR. On Unix the inhibit thread is the only writer of that pin.
+  bool direct_ptt_ = false;
   bool do_pwr_ = false;
   bool do_pwr2_= false;
   bool do_swr_ = false;
