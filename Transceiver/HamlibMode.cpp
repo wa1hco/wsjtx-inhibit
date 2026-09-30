@@ -36,15 +36,27 @@ namespace HamlibMode
         return Transceiver::FSK_R;
 
       case RIG_MODE_PKTLSB:
+#ifdef RIG_MODE_LSBD1
       case RIG_MODE_LSBD1:
+#endif
+#ifdef RIG_MODE_LSBD2
       case RIG_MODE_LSBD2:
+#endif
+#ifdef RIG_MODE_LSBD3
       case RIG_MODE_LSBD3:
+#endif
         return Transceiver::DIG_L;
 
       case RIG_MODE_PKTUSB:
+#ifdef RIG_MODE_USBD1
       case RIG_MODE_USBD1:
+#endif
+#ifdef RIG_MODE_USBD2
       case RIG_MODE_USBD2:
+#endif
+#ifdef RIG_MODE_USBD3
       case RIG_MODE_USBD3:
+#endif
         return Transceiver::DIG_U;
 
       case RIG_MODE_FM:
@@ -88,14 +100,52 @@ namespace HamlibMode
 
     if (RIG_MODE_PKTUSB == requested)
       {
-        return RIG_MODE_USBD1 == current || RIG_MODE_USBD2 == current
-          || RIG_MODE_USBD3 == current;
+#if defined(RIG_MODE_USBD1) || defined(RIG_MODE_USBD2) || defined(RIG_MODE_USBD3)
+        return
+#  ifdef RIG_MODE_USBD1
+          RIG_MODE_USBD1 == current
+#  endif
+#  if defined(RIG_MODE_USBD2)
+#    ifdef RIG_MODE_USBD1
+          ||
+#    endif
+          RIG_MODE_USBD2 == current
+#  endif
+#  if defined(RIG_MODE_USBD3)
+#    if defined(RIG_MODE_USBD1) || defined(RIG_MODE_USBD2)
+          ||
+#    endif
+          RIG_MODE_USBD3 == current
+#  endif
+          ;
+#else
+        return false;
+#endif
       }
 
     if (RIG_MODE_PKTLSB == requested)
       {
-        return RIG_MODE_LSBD1 == current || RIG_MODE_LSBD2 == current
-          || RIG_MODE_LSBD3 == current;
+#if defined(RIG_MODE_LSBD1) || defined(RIG_MODE_LSBD2) || defined(RIG_MODE_LSBD3)
+        return
+#  ifdef RIG_MODE_LSBD1
+          RIG_MODE_LSBD1 == current
+#  endif
+#  if defined(RIG_MODE_LSBD2)
+#    ifdef RIG_MODE_LSBD1
+          ||
+#    endif
+          RIG_MODE_LSBD2 == current
+#  endif
+#  if defined(RIG_MODE_LSBD3)
+#    if defined(RIG_MODE_LSBD1) || defined(RIG_MODE_LSBD2)
+          ||
+#    endif
+          RIG_MODE_LSBD3 == current
+#  endif
+          ;
+#else
+        return false;
+#endif
       }
 
     return false;
