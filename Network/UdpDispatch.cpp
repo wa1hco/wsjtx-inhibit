@@ -8,6 +8,7 @@
 #include "NetworkMessage.hpp"
 #include "TxInhibit/TxInhibitDrop.hpp"
 #include "TxInhibit/TxInhibitThreadPriority.hpp"
+#include "moc_UdpDispatch.cpp"
 
 UdpDispatchWorker::UdpDispatchWorker (QObject * parent)
   : QObject {parent}
