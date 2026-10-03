@@ -655,8 +655,8 @@ int HamlibTransceiver::do_start ()
               if (m_->release_cat_dtr_) drop |= TIOCM_DTR;
               if (drop != 0 && cat->fd >= 0) ioctl (cat->fd, TIOCMBIC, &drop);
               // Hamlib may still hold the PTT device from rig_open, with
-              // both lines high. Close it. The inhibit thread opens it
-              // only while the pin is on.
+              // both lines high. Close it. publish_separate opens it for
+              // as long as this port stays selected.
               if (ptt->fd >= 0 && ptt->fd != cat->fd)
                 {
                   unsigned const both = TIOCM_RTS | TIOCM_DTR;
