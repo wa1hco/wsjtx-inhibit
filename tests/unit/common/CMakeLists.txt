@@ -163,6 +163,15 @@ add_executable (test_tx_inhibit_thread_priority
 target_link_libraries (test_tx_inhibit_thread_priority Qt5::Test)
 add_test (NAME test_tx_inhibit_thread_priority COMMAND test_tx_inhibit_thread_priority)
 
+add_executable (test_pin_combiner
+  test_pin_combiner.cpp
+)
+target_link_libraries (test_pin_combiner Qt5::Test)
+if (UNIX AND NOT APPLE)
+  target_link_libraries (test_pin_combiner util)
+endif ()
+add_test (NAME test_pin_combiner COMMAND test_pin_combiner)
+
 add_executable (test_hamlib_mode
   test_hamlib_mode.cpp
 )
