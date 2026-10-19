@@ -91,6 +91,10 @@ concurrency:
 
 jobs:
   detect:
+    # Monday and monthly crons run on the default branch. The warmers pull
+    # WSJTX org CI images and would email a failure from this fork. Skip
+    # everywhere except the upstream repos that publish those images.
+    if: github.repository == 'WSJTX/wsjtx' || github.repository == 'WSJTX/wsjtx-internal'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
