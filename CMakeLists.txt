@@ -1104,6 +1104,18 @@ else ()
 endif ()
 target_link_libraries (wsjtx Qt5::SerialPort Qt5::Network wsjt_cxx wsjt_qt wsjt_qtmm ${FFTW3_LIBRARIES} ${LIBM_LIBRARIES})
 
+# TX Inhibit KEY agents. Type 18 goes to the Heartbeat source port with that Id.
+add_executable (inhibit-test tools/inhibit-test/main.cpp Network/NetworkMessage.cpp)
+target_include_directories (inhibit-test PRIVATE ${CMAKE_SOURCE_DIR})
+target_link_libraries (inhibit-test Qt5::Core Qt5::Network)
+if (WIN32)
+  set_target_properties (inhibit-test PROPERTIES WIN32_EXECUTABLE OFF)
+endif ()
+add_subdirectory (tools/inhibit-agent)
+install (TARGETS inhibit-test
+  RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT runtime
+  )
+
 if (WSJT_ENABLE_TSAN)
   target_compile_definitions (wsjtx PRIVATE WSJT_TSAN_TEST_PROFILE)
 endif ()

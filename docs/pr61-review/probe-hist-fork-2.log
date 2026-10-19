@@ -1,0 +1,141 @@
+listening as UDP Server on 127.0.0.1:2237
+sweep: 480s  ttl=100 ms  interval=150 ms  (~6 holds/s, 100 per 15s period)
+Samples the whole FT8 cycle. Enable Tx to include mid-TX bins. Ctrl-C to stop.
+Heartbeat id='WSJT-X' schema=2 from 127.0.0.1:58729 (waiting for type-17 inhibit port)
+  n=   1  last=39886.4us  idle=0 decode=1 tx=0  left=469s
+  n=  25  last=469.7us  idle=24 decode=1 tx=0  left=466s
+  n=  50  last=10629.6us  idle=49 decode=1 tx=0  left=462s
+  n=  75  last=589.0us  idle=74 decode=1 tx=0  left=458s
+  n= 100  last=190.5us  idle=93 decode=7 tx=0  left=454s
+  n= 125  last=207.4us  idle=118 decode=7 tx=0  left=450s
+  n= 150  last=540.6us  idle=143 decode=7 tx=0  left=446s
+  n= 175  last=38591.0us  idle=168 decode=7 tx=0  left=442s
+  n= 200  last=1192.5us  idle=188 decode=12 tx=0  left=439s
+  n= 225  last=3303.4us  idle=213 decode=12 tx=0  left=435s
+  n= 250  last=605.5us  idle=238 decode=12 tx=0  left=431s
+  n= 275  last=188.0us  idle=261 decode=14 tx=0  left=427s
+  n= 300  last=221.8us  idle=283 decode=17 tx=0  left=423s
+  n= 325  last=433.9us  idle=308 decode=17 tx=0  left=419s
+  n= 350  last=595.3us  idle=333 decode=17 tx=0  left=415s
+  n= 375  last=7313.0us  idle=356 decode=19 tx=0  left=411s
+  n= 400  last=334.4us  idle=379 decode=21 tx=0  left=408s
+  n= 425  last=634.4us  idle=404 decode=21 tx=0  left=404s
+  n= 450  last=245.3us  idle=429 decode=21 tx=0  left=400s
+  n= 475  last=6040.6us  idle=453 decode=22 tx=0  left=396s
+  n= 500  last=582.4us  idle=474 decode=26 tx=0  left=392s
+  n= 525  last=597.3us  idle=499 decode=26 tx=0  left=388s
+  n= 550  last=260.5us  idle=524 decode=26 tx=0  left=384s
+  n= 575  last=531.8us  idle=547 decode=28 tx=0  left=380s
+  n= 600  last=224.4us  idle=571 decode=29 tx=0  left=377s
+  n= 625  last=316.1us  idle=596 decode=29 tx=0  left=373s
+  n= 650  last=554.4us  idle=621 decode=29 tx=0  left=369s
+  n= 675  last=633.5us  idle=644 decode=31 tx=0  left=365s
+  n= 700  last=554.8us  idle=668 decode=32 tx=0  left=361s
+  n= 725  last=222.8us  idle=693 decode=32 tx=0  left=357s
+  n= 750  last=246.6us  idle=718 decode=32 tx=0  left=353s
+  n= 775  last=209.3us  idle=739 decode=36 tx=0  left=349s
+  n= 800  last=50820.7us  idle=741 decode=36 tx=22  left=345s
+  n= 825  last=51713.7us  idle=741 decode=36 tx=47  left=342s
+  n= 850  last=51854.7us  idle=741 decode=36 tx=72  left=338s
+  n= 875  last=211.1us  idle=750 decode=36 tx=89  left=334s
+  n= 900  last=4103.8us  idle=775 decode=36 tx=89  left=330s
+  n= 925  last=317.5us  idle=800 decode=36 tx=89  left=326s
+  n= 950  last=679.8us  idle=825 decode=36 tx=89  left=322s
+  n= 975  last=51601.8us  idle=841 decode=41 tx=92  left=318s
+  n=1000  last=51505.6us  idle=841 decode=41 tx=117  left=315s
+  n=1025  last=52440.3us  idle=841 decode=41 tx=142  left=311s
+  n=1050  last=51687.1us  idle=841 decode=41 tx=167  left=307s
+  n=1075  last=639.7us  idle=857 decode=41 tx=177  left=303s
+  n=1100  last=250.7us  idle=882 decode=41 tx=177  left=299s
+  n=1125  last=218.7us  idle=907 decode=41 tx=177  left=295s
+  n=1150  last=243.7us  idle=929 decode=44 tx=177  left=291s
+  n=1175  last=51905.4us  idle=941 decode=47 tx=186  left=287s
+  n=1200  last=52060.2us  idle=941 decode=47 tx=211  left=284s
+  n=1225  last=52029.6us  idle=941 decode=47 tx=236  left=280s
+  n=1250  last=51872.4us  idle=941 decode=47 tx=261  left=276s
+  n=1275  last=319.1us  idle=962 decode=47 tx=266  left=272s
+  n=1300  last=222.5us  idle=987 decode=47 tx=266  left=268s
+  n=1325  last=275.4us  idle=1012 decode=47 tx=266  left=264s
+  n=1350  last=258.5us  idle=1034 decode=50 tx=266  left=260s
+  n=1375  last=51091.4us  idle=1041 decode=52 tx=281  left=257s
+  n=1400  last=51908.3us  idle=1041 decode=52 tx=306  left=253s
+  n=1425  last=50838.3us  idle=1041 decode=52 tx=331  left=249s
+  n=1450  last=1402.5us  idle=1043 decode=52 tx=355  left=245s
+  n=1475  last=557.8us  idle=1068 decode=52 tx=355  left=241s
+  n=1500  last=570.4us  idle=1093 decode=52 tx=355  left=237s
+  n=1525  last=546.5us  idle=1118 decode=52 tx=355  left=233s
+  n=1550  last=248.9us  idle=1139 decode=56 tx=355  left=230s
+  n=1575  last=51724.5us  idle=1141 decode=57 tx=376  left=226s
+  n=1600  last=50585.9us  idle=1141 decode=57 tx=401  left=222s
+  n=1625  last=51834.0us  idle=1141 decode=57 tx=426  left=218s
+  n=1650  last=579.1us  idle=1150 decode=57 tx=443  left=214s
+  n=1675  last=582.2us  idle=1175 decode=57 tx=443  left=210s
+  n=1700  last=521.9us  idle=1200 decode=57 tx=443  left=206s
+  n=1725  last=610.3us  idle=1225 decode=57 tx=443  left=203s
+  n=1750  last=50868.7us  idle=1244 decode=61 tx=444  left=199s
+  n=1775  last=51633.2us  idle=1244 decode=61 tx=469  left=195s
+  n=1800  last=50488.9us  idle=1244 decode=61 tx=494  left=191s
+  n=1825  last=51771.8us  idle=1244 decode=61 tx=519  left=187s
+  n=1850  last=192.3us  idle=1258 decode=61 tx=531  left=183s
+  n=1875  last=519.7us  idle=1283 decode=61 tx=531  left=179s
+  n=1900  last=604.0us  idle=1308 decode=61 tx=531  left=175s
+  n=1925  last=393.6us  idle=1331 decode=63 tx=531  left=172s
+  n=1950  last=52072.5us  idle=1345 decode=65 tx=539  left=168s
+  n=1975  last=52299.4us  idle=1345 decode=65 tx=564  left=164s
+  n=2000  last=51176.4us  idle=1345 decode=65 tx=589  left=160s
+  n=2025  last=51113.8us  idle=1345 decode=65 tx=614  left=156s
+  n=2050  last=569.0us  idle=1365 decode=65 tx=620  left=152s
+  n=2075  last=282.4us  idle=1390 decode=65 tx=620  left=148s
+  n=2100  last=217.0us  idle=1415 decode=65 tx=620  left=145s
+  n=2125  last=532.4us  idle=1438 decode=67 tx=620  left=141s
+  n=2150  last=51624.0us  idle=1446 decode=69 tx=634  left=137s
+  n=2175  last=51488.6us  idle=1446 decode=69 tx=659  left=133s
+  n=2200  last=51740.4us  idle=1446 decode=69 tx=684  left=129s
+  n=2225  last=51514.8us  idle=1446 decode=69 tx=709  left=125s
+  n=2250  last=302.1us  idle=1472 decode=69 tx=709  left=121s
+  n=2275  last=218.5us  idle=1497 decode=69 tx=709  left=117s
+  n=2300  last=260.8us  idle=1522 decode=69 tx=709  left=114s
+  n=2325  last=408.1us  idle=1543 decode=73 tx=709  left=110s
+  n=2350  last=63992.7us  idle=1547 decode=73 tx=729  left=106s
+  n=2375  last=51450.9us  idle=1547 decode=73 tx=754  left=102s
+  n=2400  last=51821.1us  idle=1547 decode=73 tx=779  left=98s
+  n=2425  last=539.6us  idle=1554 decode=73 tx=798  left=94s
+  n=2450  last=535.0us  idle=1579 decode=73 tx=798  left=90s
+  n=2475  last=221.0us  idle=1604 decode=73 tx=798  left=87s
+  n=2500  last=629.1us  idle=1629 decode=73 tx=798  left=83s
+  n=2525  last=50969.5us  idle=1648 decode=77 tx=799  left=79s
+  n=2550  last=50887.1us  idle=1648 decode=77 tx=824  left=75s
+  n=2575  last=51409.9us  idle=1648 decode=77 tx=849  left=71s
+  n=2600  last=51756.5us  idle=1648 decode=77 tx=874  left=67s
+  n=2625  last=199.4us  idle=1662 decode=77 tx=886  left=63s
+  n=2650  last=1140.4us  idle=1687 decode=77 tx=886  left=59s
+  n=2675  last=589.0us  idle=1712 decode=77 tx=886  left=56s
+  n=2700  last=218.6us  idle=1735 decode=79 tx=886  left=52s
+  n=2725  last=52261.2us  idle=1750 decode=81 tx=893  left=48s
+  n=2750  last=51896.6us  idle=1750 decode=81 tx=918  left=44s
+  n=2775  last=51507.6us  idle=1750 decode=81 tx=943  left=40s
+  n=2800  last=50816.0us  idle=1750 decode=81 tx=968  left=36s
+  n=2825  last=230.4us  idle=1769 decode=81 tx=975  left=32s
+  n=2850  last=208.3us  idle=1794 decode=81 tx=975  left=29s
+  n=2875  last=599.8us  idle=1819 decode=81 tx=975  left=25s
+  n=2900  last=338.8us  idle=1842 decode=83 tx=975  left=21s
+  n=2925  last=50964.0us  idle=1852 decode=84 tx=988  left=17s
+  n=2950  last=50775.0us  idle=1852 decode=84 tx=1013  left=13s
+  n=2975  last=51473.3us  idle=1852 decode=84 tx=1038  left=9s
+  n=3000  last=51707.0us  idle=1852 decode=84 tx=1063  left=5s
+  n=3025  last=19049.7us  idle=1878 decode=84 tx=1063  left=1s
+
+Latency hold send → type-17 Inhibited / Status unkey
+  decode type-17               n=  84  min=     144  p50=     221  p95=    3334  max=   39886 us
+  decode RTS fall              n=0
+  decode unkey                 n=0
+  tx type-17                   n=1063  min=   50463  p50=   51705  p95=   57450  max=  136658 us
+  tx RTS fall                  n=0
+  tx unkey                     n=  12  min=  128747  p50=  159352  p95=  171527  max=  173781 us
+  idle type-17                 n=1887  min=     149  p50=     539  p95=    6746  max=  148254 us
+  idle RTS fall                n=0
+  idle unkey                   n=0
+  manual type-17               n=0
+  manual RTS fall              n=0
+  manual unkey                 n=0
+wrote /home/jeff/ham/wsjtx-32rc1-latency/inhibit-latency-hist-fork-2.csv  n=3034
