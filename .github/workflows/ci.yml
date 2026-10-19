@@ -1,5 +1,9 @@
 name: CI
 
+# Do not add main. This workflow resolves GHCR images owned by WSJTX
+# (.github/scripts/resolve-linux-ci-image-tag.py hardcodes OWNER = "WSJTX")
+# and fails on wa1hco/wsjtx-inhibit. Windows installers for main are
+# build-windows-inhibit.yml.
 on:
   push:
     branches: [develop, "release/**"]
