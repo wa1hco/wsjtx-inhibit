@@ -228,6 +228,14 @@ if (UNIX AND NOT APPLE)
 endif ()
 add_test (NAME test_pin_combiner COMMAND test_pin_combiner)
 
+add_executable (test_keying_monitor
+  ${CMAKE_SOURCE_DIR}/tools/inhibit-agent/test_keying_monitor.cpp
+)
+target_include_directories (test_keying_monitor PRIVATE
+  ${CMAKE_SOURCE_DIR}/tools/inhibit-agent)
+target_link_libraries (test_keying_monitor Qt5::Core)
+add_test (NAME test_keying_monitor COMMAND test_keying_monitor)
+
 add_executable (test_hamlib_mode
   test_hamlib_mode.cpp
 )
