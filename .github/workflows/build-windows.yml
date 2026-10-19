@@ -142,12 +142,17 @@ jobs:
             mingw-w64-x86_64-qt5-websockets
             mingw-w64-x86_64-qt5-activeqt
             mingw-w64-x86_64-fftw
-            mingw-w64-x86_64-libusb
             mingw-w64-x86_64-portaudio
             mingw-w64-x86_64-pkg-config
             mingw-w64-x86_64-nsis
             mingw-w64-x86_64-ruby
             autoconf automake libtool
+
+      # mingw-w64-x86_64-libusb was removed from the MINGW64 repo. Build
+      # 1.0.30 (the last version that repo shipped) into /mingw64 so
+      # Hamlib's pkg-config lookup still finds libusb-1.0.
+      - name: Build libusb
+        run: .github/scripts/build-libusb-windows.sh 1.0.30 /mingw64
 
       # asciidoctor is a Ruby gem (no native MSYS2 package) — needed by
       # doc/CMakeLists.txt to build the WSJT-X user guide HTML referenced
