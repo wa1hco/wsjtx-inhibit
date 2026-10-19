@@ -1,0 +1,57 @@
+Subject: PR #61 update — TX Inhibit arming failure is visible in Settings
+
+PR: https://github.com/WSJTX/wsjtx/pull/61
+Commit: 6d29adc14 (wa1hco/wsjtx tx-inhibit)
+
+Hello,
+
+This push adds operator-visible feedback when TX Inhibit fails to arm.
+
+What changed
+
+  Settings checkbox label
+    Unchecked: Enable TX Inhibit
+    Checked and listening: TX Inhibit enabled
+    Checked and bind failed: TX Inhibit failed (no port)
+
+  Status message
+    Bind / port discovery failure now reaches the UI (was CAT_TRACE only).
+
+  Port-0 path (unchanged algorithm; clearer docs)
+    After bind(0), if localPort() is 0, read getsockname once.
+    If still 0, arming fails. No portBound(0). Live type 17 never uses port 0.
+
+  PTT Port tooltip
+    If the device is missing from the list, type the full path
+    (for example a udev symlink).
+
+  Test hook
+    WSJTX_TX_INHIBIT_FORCE_BIND_FAIL=1 forces arming failure for tests.
+
+Terms
+
+  UDP inhibit endpoint = host:<udp-port> for type-18 holds
+  PTT serial device    = Settings -> Radio -> Port for RTS/DTR
+
+Wire authority remains docs/TX_INHIBIT.md in this PR.
+
+Not in this push
+
+  Improved-list upgrade patch (separate Improved 3.2.0 track)
+  Fork-only packaging (wsjtx-inhibit CPack name)
+  inhibit-sim dummy PTT port (left on the fork for now)
+
+Verification here
+
+  test_tx_inhibit_logic: 18/18
+  test_tx_inhibit_gate: 10/10 (includes forceBindFailEmitsLineErrorOnly)
+  wsjtx Release build on Linux: OK
+
+Manual check
+
+  WSJTX_TX_INHIBIT_FORCE_BIND_FAIL=1 ./wsjtx
+  Enable TX Inhibit with RTS/DTR and a real PTT Port, apply.
+  Expect checkbox "TX Inhibit failed (no port)" and a status message.
+
+73,
+Jeff, WA1HCO
