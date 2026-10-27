@@ -1,17 +1,23 @@
 # Builds a Windows installer for the inhibit line on main
-# (v3.3.0-beta2 plus the sole-writer path).
+# (v3.3.0-beta4 plus the sole-writer path).
 #
 # inhibit-on-3.2-rc1 is not built: that branch is the older 3.2.0-rc1 port,
 # and this version label would misname its installer.
 #
 # release_channel is omitted. build-windows.yml workflow_call does not accept
 # it (passing it fails the call), and an empty channel follows
-# release-state.txt (3.3.0 BETA 2). The version input is only the installer
+# release-state.txt (3.3.0 BETA 4). The version input is only the installer
 # and artifact label; CMake's project version stays numeric.
+#
+# pull_request builds a PR into main. The workflow file on that PR supplies
+# the trigger, so the check runs before main moves. push stays limited to main.
 name: Windows installer for inhibit main
 
 on:
   push:
+    branches:
+      - main
+  pull_request:
     branches:
       - main
 
@@ -22,7 +28,7 @@ jobs:
   windows:
     uses: ./.github/workflows/build-windows.yml
     with:
-      version: "3.3.0-beta2-inhibit"
+      version: "3.3.0-beta4-inhibit"
       hamlib_branch: "4.7.2"
       save_ccache: false
       recache: false
