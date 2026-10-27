@@ -9,14 +9,19 @@
 # release-state.txt (3.3.0 BETA 4). The version input is only the installer
 # and artifact label; CMake's project version stays numeric.
 #
-# pull_request builds a PR into main. The workflow file on that PR supplies
-# the trigger, so the check runs before main moves. push stays limited to main.
+# pull_request is listed for pulls into main. GitHub decides that event from
+# the workflow on the default branch, which does not have it yet, so this
+# pull request would not start a run from pull_request alone. The rebase
+# branch is listed under push so the verification push starts the installer
+# build. Drop that branch entry only after main already carries pull_request;
+# the commit that drops it does not re-run.
 name: Windows installer for inhibit main
 
 on:
   push:
     branches:
       - main
+      - rebase-v3.3.0-beta4
   pull_request:
     branches:
       - main
