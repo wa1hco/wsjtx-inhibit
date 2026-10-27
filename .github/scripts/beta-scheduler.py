@@ -47,6 +47,8 @@ IMAGE_PACKAGES = (
     image_tags.ARM64_PACKAGE,
     image_tags.ARMHF_CROSS_PACKAGE,
     image_tags.ARMHF_PACKAGE,
+    image_tags.ARMHF_TRIXIE_CROSS_PACKAGE,
+    image_tags.ARMHF_TRIXIE_PACKAGE,
 )
 CI = "ci.yml"
 CANDIDATE = "release-tag-helper.yml"
@@ -77,10 +79,11 @@ class Stop(Exception):
 
 
 class Spent(Exception):
-    """The candidate failed after its build tag was pushed; build tags never move, so the number is used up."""
+    """The candidate or the public build failed after its tag was pushed; tags never move, so the number is used up."""
 
-    def __init__(self, reason: str, link: str | None = None) -> None:
+    def __init__(self, stage: str, reason: str, link: str | None = None) -> None:
         super().__init__(reason)
+        self.stage = stage
         self.link = link
 
 
@@ -137,7 +140,12 @@ def git_identity(name: str, email: str) -> dict[str, str]:
 
 def lock_recipes(lock: bytes | None) -> dict[str, str] | None:
     try:
-        selected = json.loads(lock)["images"]
+        parsed = json.loads(lock)
+        if not isinstance(parsed, dict) or parsed.get("schema") != 2:
+            return None
+        selected = parsed["images"]
+        if set(selected) != set(images.IMAGES):
+            return None
         return {key: selected[key]["recipe_sha256"] for key in images.IMAGES}
     except (TypeError, ValueError, KeyError):
         return None
@@ -160,6 +168,7 @@ class Scheduler:
         self.bot_login = bot_login
         self.bot_email = bot_email
         self.notes = [] if notes is None else notes
+        self.notices: list[tuple[str, str, str | None]] = []
         self.recipe_cache: dict[str, dict[str, str] | None] = {}
 
     def beta_line(self) -> Line:
@@ -205,7 +214,12 @@ class Scheduler:
         if not isinstance(outcome, Spent):
             raise outcome
         self.notes.append(str(outcome))
-        return self.advance(line, spent=outcome)
+        result = self.advance(line, spent=outcome)
+        if outcome.stage == "publication":
+            # The continuation never sees the public repository's runs, so this spend alerts by itself.
+            self.notices.append((outcome.stage, f"{outcome} {result} Do not re-run its public build: it would publish "
+                                                f"{line.prerelease()} after the line has moved on.", outcome.link))
+        return result
 
     def retry(self, line: Line) -> str:
         version = line.prerelease()
@@ -275,7 +289,8 @@ class Scheduler:
         # A run reports only its latest attempt, so a later failed re-run can hide a promoted candidate.
         promoted = newest([run for run in stages["promotion"] if run.get("conclusion") == "success"])
         if candidate is None and promoted is None:
-            return Spent(f"The candidate run for `{candidate_tag(version)}` concluded {failed.get('conclusion')} after "
+            return Spent("candidate",
+                         f"The candidate run for `{candidate_tag(version)}` concluded {failed.get('conclusion')} after "
                          f"the tag was pushed. Build tags never move, so {version} is spent and the next cut is "
                          f"BETA {line.number + 1}.", failed.get("html_url"))
         promotion = promoted or newest(stages["promotion"])
@@ -291,8 +306,9 @@ class Scheduler:
             return Stop("publication", f"`{public_tag}` was promoted, but no public release run started for it.",
                         promotion.get("html_url"))
         if publication.get("conclusion") != "success":
-            return Stop("publication", f"The public release run for `{public_tag}` concluded "
-                                       f"{publication.get('conclusion')}.", publication.get("html_url"))
+            return Spent("publication", f"The public release run for `{public_tag}` concluded "
+                                        f"{publication.get('conclusion')}. Tags never move, so {version} is spent and "
+                                        f"the next cut is BETA {line.number + 1}.", publication.get("html_url"))
         return Stop("publication", f"The public release run for `{public_tag}` succeeded, but the release is not "
                                    "published.", publication.get("html_url"))
 
@@ -303,8 +319,13 @@ class Scheduler:
             raise Stop("develop", "No commit on develop has a successful push CI run.")
         if self.repository.is_ancestor(target, line.tip):
             if spent is not None:
-                raise Stop("candidate", f"{spent} develop has no newer green commit to cut "
-                                        f"{line.prerelease(number)} from; land the fix on develop.", spent.link)
+                action = "; land the fix on develop."
+                if spent.stage == "publication":
+                    action = (f". Until a cut moves on, a re-run of the public build that succeeds still publishes "
+                              f"{line.prerelease()}: re-run the public build if its failure was transient, otherwise "
+                              "land the fix on develop.")
+                raise Stop(spent.stage, f"{spent} develop has no newer green commit to cut "
+                                        f"{line.prerelease(number)} from{action}", spent.link)
             raise Skip(f"develop has not moved: its newest green commit {target} is already in {line.branch}.")
         self.check_fixes_on_develop(line)
         lock, lock_note = self.lock_for(line, target)
@@ -339,6 +360,9 @@ class Scheduler:
         wanted = self.recipes(target)
         if wanted is None:
             raise RuntimeError(f"develop commit {target} is missing from the checkout")
+        if set(wanted) != set(images.IMAGES):
+            raise Skip(f"Newest green develop commit {target} predates dual-distro ARMHF images; "
+                       "wait for CI to pass on a commit with Bookworm and Trixie support.")
         current = self.repository.read(line.tip, LOCK_FILE)
         if current is not None and lock_recipes(current) == wanted:
             self.notes.append(f"Linux image lock: kept; develop's recipe fingerprints match {line.branch}'s lock.")
@@ -351,7 +375,13 @@ class Scheduler:
     def published_generations(self) -> dict[int, str]:
         shared: set[str] | None = None
         for package in IMAGE_PACKAGES:
-            tags = {tag for version in self.packages.list_versions(image_tags.OWNER, package)
+            try:
+                versions = self.packages.list_versions(image_tags.OWNER, package)
+            except RuntimeError as error:
+                if isinstance(error.__cause__, urllib.error.HTTPError) and error.__cause__.code == 404:
+                    return {}
+                raise
+            tags = {tag for version in versions
                     for tag in version.tags if GENERATION_TAG.fullmatch(tag)}
             shared = tags if shared is None else shared & tags
         generations: dict[int, str] = {}
@@ -385,7 +415,7 @@ class Scheduler:
                 return job.get("conclusion") != "skipped"
             if name == IMAGE_REFRESH_JOB:
                 return job.get("status") != "completed"
-        # The run has not yet decided whether it builds the four normal images.
+        # The run has not yet decided whether it builds the normal images.
         return True
 
     def prepared_lock(self, generation: str, wanted: dict[str, str]) -> tuple[bytes, dict]:
@@ -575,10 +605,13 @@ class Repository:
         archive = self.git("archive", "--format=tar", commit, ".github").stdout
         with tempfile.TemporaryDirectory() as directory:
             subprocess.run(["tar", "-x", "-f", "-", "-C", directory], input=archive, check=True, capture_output=True)
+            profiles = images.IMAGES
+            if not (Path(directory) / ".github/images/linux-ci/Dockerfile.armhf-cross-trixie").exists():
+                profiles = {key: spec for key, spec in profiles.items() if not key.startswith("armhf_trixie")}
             return {
                 key: subprocess.run(["bash", ".github/scripts/linux-ci-image-fingerprint.sh", profile], cwd=directory,
                                     check=True, capture_output=True, text=True).stdout.strip()
-                for key, (_package, profile, *_rest) in images.IMAGES.items()
+                for key, (_package, profile, *_rest) in profiles.items()
             }
 
     def start_merge(self, tip: str, commit: str, name: str, email: str) -> tuple[Path, list[str]]:
@@ -773,9 +806,11 @@ def main(argv: list[str] | None = None) -> int:
         alerts.post(args.stage, args.reason)
         return 0
     notes: list[str] = []
+    schedulers = []
 
     def step() -> str:
         scheduler = build_scheduler(args.command, env, notes)
+        schedulers.append(scheduler)
         if args.command == "cut":
             return scheduler.cut()
         event = json.loads(Path(env["GITHUB_EVENT_PATH"]).read_text(encoding="utf-8"))
@@ -786,8 +821,20 @@ def main(argv: list[str] | None = None) -> int:
     if env.get("GITHUB_STEP_SUMMARY"):
         with open(env["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as stream:
             stream.write(summary)
-    if alert:
-        alerts.post(*alert)
+    posts = [notice for scheduler in schedulers for notice in scheduler.notices] + ([alert] if alert else [])
+    try:
+        for post in posts:
+            alerts.post(*post)
+    except Exception as error:  # The step's own result stands; keep what could not be posted in the summary.
+        traceback.print_exc()
+        unposted = "".join(f"- Not posted to the tracking issue ({stage}): {reason} {link or ''}\n"
+                           for stage, reason, link in posts) + f"- Posting failed: {error}\n"
+        print(unposted)
+        if env.get("GITHUB_STEP_SUMMARY"):
+            with open(env["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as stream:
+                stream.write(unposted)
+        return 1
+    if posts:
         if env.get("GITHUB_OUTPUT"):
             with open(env["GITHUB_OUTPUT"], "a", encoding="utf-8") as stream:
                 stream.write("alerted=true\n")

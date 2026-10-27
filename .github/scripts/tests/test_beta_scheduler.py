@@ -50,7 +50,7 @@ OLD_CONTRACT = b"version=3.2.0\nchannel=RC\nrc=1\nrevision=$Format:%H$\nwindows_
 
 
 def lock(recipes=RECIPES, generation="validated-build-20260929-600-1"):
-    return (json.dumps({"schema": 1, "generation": generation, "images": {
+    return (json.dumps({"schema": 2, "generation": generation, "images": {
         key: {"reference": f"{beta.images.PUBLIC}/{spec[0]}@sha256:{'a' * 64}", "recipe_sha256": recipes[key]}
         for key, spec in beta.images.IMAGES.items()
     }}, indent=2) + "\n").encode()
@@ -446,6 +446,8 @@ class UnpublishedBetaTest(SchedulerTestCase):
         self.assertTrue(self.repo.committed[2].startswith("Cut 3.3.0-beta3 from develop\n\n"))
         self.assertEqual(self.repo.pushed, [(CUT, LINE)])
         self.assertTrue(any("3.3.0-beta2 is spent" in note for note in scheduler.notes))
+        # The continuation alerts on a failed candidate run at the tip, so this spend posts no notice of its own.
+        self.assertEqual(scheduler.notices, [])
 
     def test_spent_number_without_newer_green_develop_alerts_with_the_failed_run(self):
         failed = candidate(conclusion="failure")
@@ -455,6 +457,48 @@ class UnpublishedBetaTest(SchedulerTestCase):
         self.assertEqual((stop.stage, stop.link), ("candidate", failed["html_url"]))
         self.assertIn("3.3.0-beta2 is spent", str(stop))
         self.assertIn("3.3.0-beta3", str(stop))
+        self.assertIn("land the fix on develop", str(stop))
+        self.assertNotIn("re-run the public build", str(stop))
+        self.assertNothingDone()
+
+    def test_failed_public_build_spends_the_number_and_cuts_the_next_from_green_develop(self):
+        for conclusion in ("failure", "cancelled", "timed_out"):
+            with self.subTest(conclusion=conclusion):
+                self.setUp()
+                self.internal.add(self.ci, self.candidate, self.promotion)
+                failed = run(beta.PUBLICATION, branch="v3.3.0-beta2", conclusion=conclusion)
+                self.public.add(failed)
+                scheduler = beta.Scheduler(self.repo, self.internal, self.public, self.packages,
+                                           bot_login=BOT, bot_email=BOT_EMAIL)
+                result = scheduler.cut()
+                self.assertEqual(self.repo.merge, (TIP, GREEN))
+                self.assertEqual(self.repo.written[STATE], beta.render_state("3.3.0", 3).encode())
+                self.assertEqual(self.repo.pushed, [(CUT, LINE)])
+                self.assertTrue(any("3.3.0-beta2 is spent" in note for note in scheduler.notes))
+                # The public repository's run is invisible to the continuation, so the spend itself alerts.
+                self.assertEqual(len(scheduler.notices), 1)
+                stage, reason, link = scheduler.notices[0]
+                self.assertEqual((stage, link), ("publication", failed["html_url"]))
+                self.assertIn("3.3.0-beta2 is spent", reason)
+                self.assertIn(result, reason)
+                self.assertIn("Do not re-run its public build", reason)
+
+    def test_failed_public_build_without_newer_green_develop_alerts_at_publication(self):
+        failed = run(beta.PUBLICATION, branch="v3.3.0-beta2", conclusion="failure")
+        self.internal.add(self.ci, self.candidate, self.promotion)
+        self.public.add(failed)
+        self.repo.ancestors.add((GREEN, TIP))
+        scheduler = beta.Scheduler(self.repo, self.internal, self.public, self.packages,
+                                   bot_login=BOT, bot_email=BOT_EMAIL)
+        with self.assertRaises(beta.Stop) as raised:
+            scheduler.cut()
+        stop = raised.exception
+        self.assertEqual((stop.stage, stop.link), ("publication", failed["html_url"]))
+        self.assertIn("3.3.0-beta2 is spent", str(stop))
+        self.assertIn("3.3.0-beta3", str(stop))
+        self.assertIn("re-run the public build", str(stop))
+        # The stop's own alert reports it; a notice as well would post twice.
+        self.assertEqual(scheduler.notices, [])
         self.assertNothingDone()
 
     def test_a_successful_candidate_at_the_tag_outweighs_a_newer_failed_duplicate(self):
@@ -464,12 +508,11 @@ class UnpublishedBetaTest(SchedulerTestCase):
         self.assertEqual((stop.stage, stop.link), ("promotion", self.candidate["html_url"]))
         self.assertNothingDone()
 
-    def test_a_promoted_beta_is_never_spent_even_if_its_candidate_run_now_reads_failed(self):
-        failed_publication = run(beta.PUBLICATION, branch="v3.3.0-beta2", conclusion="failure")
+    def test_a_promoted_beta_is_not_spent_by_a_candidate_run_that_now_reads_failed(self):
         self.internal.add(self.ci, candidate(conclusion="failure"), self.promotion)
-        self.public.add(failed_publication)
+        self.public.add(self.publication)
         stop = self.stop()
-        self.assertEqual((stop.stage, stop.link), ("publication", failed_publication["html_url"]))
+        self.assertEqual((stop.stage, stop.link), ("publication", self.publication["html_url"]))
         self.assertNothingDone()
 
     def test_candidate_and_promotion_runs_of_other_commits_do_not_count(self):
@@ -495,14 +538,12 @@ class UnpublishedBetaTest(SchedulerTestCase):
 
     def test_unpublished_beta_alerts_at_its_first_missing_or_failed_stage(self):
         failed_promotion = run(beta.PROMOTION, event="workflow_dispatch", conclusion="failure")
-        failed_publication = run(beta.PUBLICATION, branch="v3.3.0-beta2", conclusion="failure")
         promoted = (self.ci, self.candidate, self.promotion)
         for internal, public, stage, link in (
             ((self.ci,), (), "candidate", None),
             ((self.ci, self.candidate), (), "promotion", self.candidate["html_url"]),
             ((self.ci, self.candidate, failed_promotion), (), "promotion", failed_promotion["html_url"]),
             (promoted, (), "publication", self.promotion["html_url"]),
-            (promoted, (failed_publication,), "publication", failed_publication["html_url"]),
             (promoted, (self.publication,), "publication", self.publication["html_url"]),
         ):
             with self.subTest(stage=stage, link=link):
@@ -614,6 +655,20 @@ class ImageLockTest(SchedulerTestCase):
         self.assertNotIn(beta.WARMER, self.internal.queries)
         self.assertNotIn(beta.PREPARATION, self.internal.queries)
 
+    def test_green_commit_before_dual_distro_support_defers_without_mutation(self):
+        self.repo.recipes[GREEN] = {key: value for key, value in RECIPES.items()
+                                    if not key.startswith("armhf_trixie")}
+        with self.assertRaisesRegex(beta.Skip, "predates dual-distro ARMHF"):
+            self.cut()
+        self.assertEqual(self.packages.calls, [])
+        self.assertEqual(self.internal.dispatches, [])
+        self.assertEqual(self.repo.pushed, [])
+
+    def test_schema_one_lock_is_not_reused_for_dual_distro_source(self):
+        old = json.loads(lock())
+        old["schema"] = 1
+        self.assertIsNone(beta.lock_recipes(json.dumps(old).encode()))
+
     def test_recipe_drift_prepares_the_newest_generation_built_for_those_recipes(self):
         self.publish_generation(702, "a2" * 20, DRIFTED, created="2026-10-01T00:00:00Z")
         newest = self.publish_generation(703, "a3" * 20, DRIFTED, created="2026-10-03T00:00:00Z")
@@ -721,6 +776,26 @@ class ImageLockTest(SchedulerTestCase):
         with self.assertRaisesRegex(beta.Skip, "Prepare Release Dependencies"):
             self.cut()
         self.assertNothingDone()
+
+    def test_a_spend_at_publication_is_noticed_once_by_the_cut_that_commits_the_prepared_lock(self):
+        self.public.published.clear()
+        failed = run(beta.PUBLICATION, branch="v3.3.0-beta2", conclusion="failure")
+        self.internal.add(run(beta.CI, sha=TIP), candidate(), run(beta.PROMOTION, event="workflow_dispatch"))
+        self.public.add(failed)
+        generation = self.publish_generation(711, "b9" * 20, DRIFTED)
+        first = beta.Scheduler(self.repo, self.internal, self.public, self.packages, bot_login=BOT,
+                               bot_email=BOT_EMAIL)
+        with self.assertRaisesRegex(beta.Skip, "Dispatched Prepare Release Dependencies"):
+            first.cut()
+        self.assertEqual(first.notices, [])
+        prepared = preparation(generation, created="2026-10-06T08:00:00Z")
+        self.internal.add(prepared)
+        self.internal.artifacts[prepared["id"]] = lock(DRIFTED, generation)
+        second = beta.Scheduler(self.repo, self.internal, self.public, self.packages, bot_login=BOT,
+                                bot_email=BOT_EMAIL)
+        second.cut()
+        self.assertEqual([(stage, link) for stage, _, link in second.notices], [("publication", failed["html_url"])])
+        self.assertEqual(self.repo.pushed, [(CUT, LINE)])
 
     def test_recipe_drift_commits_the_prepared_lock_in_the_cut(self):
         generation = self.publish_generation(709, "b7" * 20, DRIFTED)
@@ -988,14 +1063,15 @@ class EntryPointTest(unittest.TestCase):
         self.assertEqual((proceed.bot_login, proceed.bot_email), (BOT, None))
         self.assertEqual(cut.public.repository, beta.PUBLIC_REPOSITORY)
 
-    def main(self, outcome):
+    def main(self, outcome, notices=()):
         posted = []
         with tempfile.TemporaryDirectory() as directory:
             output, summary = Path(directory, "output"), Path(directory, "summary")
             output.touch()
             env = {**self.ENV, "GITHUB_OUTPUT": str(output), "GITHUB_STEP_SUMMARY": str(summary)}
+            scheduler = SimpleNamespace(cut=outcome, notices=list(notices))
             with patch.dict(os.environ, env), \
-                    patch.object(beta, "build_scheduler", lambda command, environ, notes: SimpleNamespace(cut=outcome)), \
+                    patch.object(beta, "build_scheduler", lambda command, environ, notes: scheduler), \
                     patch.object(beta.Alerts, "post", lambda alerts, *alert: posted.append(alert)), \
                     patch("sys.stdout", io.StringIO()):
                 status = beta.main(["cut"])
@@ -1009,6 +1085,32 @@ class EntryPointTest(unittest.TestCase):
         self.assertEqual(posted, [("candidate", "The candidate failed.", "https://example.invalid/runs/2")])
         self.assertEqual(output, "alerted=true\n")
         self.assertIn("The candidate failed.", summary)
+
+    def test_a_number_spent_at_publication_is_posted_while_the_cut_succeeds(self):
+        notice = ("publication", "3.3.0-beta2 is spent. Pushed c to release/3.3.", "https://example.invalid/runs/3")
+        status, posted, output, summary = self.main(lambda: "Pushed c to release/3.3.", [notice])
+        self.assertEqual((status, posted, output), (0, [notice], "alerted=true\n"))
+        self.assertIn("Pushed c to release/3.3.", summary)
+
+    def test_a_notice_that_cannot_be_posted_fails_the_job_and_leaves_it_in_the_summary(self):
+        notice = ("publication", "3.3.0-beta2 is spent.", "https://example.invalid/runs/3")
+        scheduler = SimpleNamespace(cut=lambda: "Pushed c to release/3.3.", notices=[notice])
+
+        def unreachable(alerts, *alert):
+            raise OSError("HTTP 502")
+        with tempfile.TemporaryDirectory() as directory:
+            output, summary = Path(directory, "output"), Path(directory, "summary")
+            output.touch()
+            env = {**self.ENV, "GITHUB_OUTPUT": str(output), "GITHUB_STEP_SUMMARY": str(summary)}
+            with patch.dict(os.environ, env), \
+                    patch.object(beta, "build_scheduler", lambda command, environ, notes: scheduler), \
+                    patch.object(beta.Alerts, "post", unreachable), \
+                    patch("sys.stdout", io.StringIO()), patch("sys.stderr", io.StringIO()):
+                status = beta.main(["cut"])
+            self.assertEqual((status, output.read_text()), (1, ""))
+            self.assertIn("Pushed c to release/3.3.", summary.read_text())
+            self.assertIn("3.3.0-beta2 is spent.", summary.read_text())
+            self.assertIn("HTTP 502", summary.read_text())
 
     def test_a_skip_posts_nothing(self):
         def skip():
@@ -1279,7 +1381,7 @@ class RepositoryTest(unittest.TestCase):
 
     def test_lock_validation_runs_the_merged_trees_validator(self):
         shutil.copytree(ROOT / ".github", self.work / ".github")
-        (self.work / LOCK).write_text('{"schema": 2}\n')
+        (self.work / LOCK).write_text('{"schema": 3}\n')
         self.commit("add the pipeline")
         with self.assertRaisesRegex(RuntimeError, "Unsupported Linux image selection schema"):
             self.repository.validate_lock(self.work)

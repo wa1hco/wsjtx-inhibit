@@ -1,11 +1,16 @@
 ! Streaming control-frame parser.
 !
 ! Parses control JSON frames received on stdin via the streaming
-! framing. Two frame types are recognized today:
+! framing. These frame types are recognized:
 !
 !   {"t":"configure","mode":"FT8","depth":3,"rxfreq":1500,
 !                    "mycall":"KJ5HST","mygrid":"EM18","trperiod":15}
 !   {"t":"halt"}
+!   {"t":"discontinuity"}   the next audio sample does not follow the last
+!                           one; lib/streaming_io.f90 states what it ends.
+!   {"t":"pack",...}, {"t":"render",...}   JTTY encode requests, read by
+!                           parse_encode_request and parse_render_request;
+!                           lib/streaming_jtty.f90 states them.
 !
 ! Hand-rolled flat-JSON parser. Callers should treat unknown "t" values
 ! as forward-compat extensions (mirrors the consumer-ignores-unknown
@@ -13,10 +18,17 @@
 !
 ! Restrictions (deliberate scope):
 !   - Flat objects only; no nested objects, no arrays.
-!   - Numeric values must be plain decimal (no scientific notation).
-!   - String values must NOT contain escape sequences. Callsigns, grids,
-!     and mode names are alphanumeric ASCII per WSJT-X conventions, so
-!     this is a safe simplification today; it can be extended if needed.
+!   - Numeric values must be plain decimal (no scientific notation),
+!     except where a key's rule says otherwise (render's freq is a JSON
+!     number). Configure's integer keys must be plain JSON integers: a
+!     fraction, an exponent or another form is not reported as an error,
+!     and is ignored or misread.
+!   - String values are JSON strings: \" \\ \/ \b \f \n \r \t and \uXXXX
+!     (a surrogate pair for a character above U+FFFF) decode to UTF-8. A
+!     string with a malformed escape, a lone surrogate or no closing quote
+!     is unreadable: a configure key is left unset (not a type error; an
+!     unreadable "mode" is unknown_mode), and an unreadable "t" is a parse
+!     error.
 
 module streaming_control
   use, intrinsic :: iso_fortran_env, only: error_unit
@@ -28,6 +40,12 @@ module streaming_control
   integer, parameter, public :: CTRL_CONFIGURE = 1
   integer, parameter, public :: CTRL_HALT      = 2
   integer, parameter, public :: CTRL_PARSE_ERR = 3
+  integer, parameter, public :: CTRL_DISCONTINUITY = 4
+  integer, parameter, public :: CTRL_PACK      = 5
+  integer, parameter, public :: CTRL_RENDER    = 6
+  ! JTTY is selected by name only: no jt9 mode number, so valid_mode_int_
+  ! rejects it and "mode":<int> cannot select it.
+  integer, parameter, public :: MODE_JTTY = 1000
   ! downsam9 expands npts8 by 8 before filling its NFFT1 input buffer.
   integer, parameter, public :: NPTS_C0_ARRAY_MIN = 1
   integer, parameter, public :: NPTS_C0_ARRAY_MAX = 81648
@@ -50,6 +68,17 @@ module streaming_control
      character(len=12)      :: mycall       = ' '
      logical                :: mygrid_set   = .false.
      character(len=6)       :: mygrid       = ' '
+     ! The same two values for the transmitter, which sends them whole
+     ! (mycall and mygrid keep the decoder's widths). *_tx_long: the value
+     ! is longer than 64 characters, so no transmission may use it.
+     ! *_unreadable: the key is a string that does not decode, which leaves
+     ! the key unset but must stop the transmitter using the earlier value.
+     character(len=64)      :: mycall_tx      = ' '
+     logical                :: mycall_tx_long = .false.
+     logical                :: mycall_unreadable = .false.
+     character(len=64)      :: mygrid_tx      = ' '
+     logical                :: mygrid_tx_long = .false.
+     logical                :: mygrid_unreadable = .false.
      ! Decode-bandwidth fields. Without these, the streaming
      ! default ntol=20 confines decoding to ±20 Hz around audio offset 0,
      ! missing the entire FT8 200-3000 Hz passband. Apply BEFORE the per-mode
@@ -111,14 +140,16 @@ module streaming_control
      ! robust_mode/nagain_flag/clear_average are BOOLEANS -> logical(c_bool)
      ! nrobust/nagain/nclearave (reuse the Phase 4 get_bool_/accept_bool path).
      ! tx_mode is an enum (JT9->9 / JT65->65, or a raw int) -> ntxmode, mirroring
-     ! the "mode" parse. OBSERVABILITY (read-site map): on the
-     ! jt9 --stream FT8/JT9 fixtures kin_samples(kin)+nzhsym_per_period(nzhsym)
-     ! are OVERWRITTEN every period by the streaming period-prep block
-     ! (streaming_io.f90 ~:331/:339); dttol/minw/minsync/n2pass/nrobust/nclearave
-     ! are JT4/JT65/Q65-only; emedelay is forced to 0 by apply_per_mode_policy on
-     ! a mode-setting frame; ntxmode is read only in mode 65+9 — so 10 of 12 are
-     ! inert here (parse-unit + no-regression guard them). Only npts_c0_array(npts8)
-     ! and nagain_flag(nagain) reach the FT8/JT9 decoders.
+     ! the "mode" parse. The stream host sets kin and nzhsym before each decode
+     ! (streaming_io.f90), so kin_samples/nzhsym_per_period do not reach the
+     ! decoder. The host sets emedelay as the GUI does (2.5 with
+     ! decode_after_eme_delay, else 0): 0 at start, and again when a frame sets
+     ! the mode, the TR period or that key, unless the frame gives
+     ! eme_delay_seconds. min_width is JT4's; min_sync JT4's, JT65's and
+     ! JT65+JT9's; n_2pass JT65's and JT65+JT9's; clear_average JT4's, JT65's,
+     ! JT65+JT9's and Q65's; robust_mode, tx_mode and npts_c0_array reach only
+     ! JT65+JT9; no decoder reads dt_tolerance_seconds. nagain_flag asks once to
+     ! decode the last period again (streaming_io.f90).
      logical                :: dt_tolerance_seconds_set = .false.
      real(8)                :: dt_tolerance_seconds     = 0.d0
      logical                :: eme_delay_seconds_set    = .false.
@@ -143,22 +174,19 @@ module streaming_control
      integer                :: tx_mode                  = 0
      logical                :: clear_average_set        = .false.
      logical                :: clear_average            = .false.
+     ! The GUI's "Decode after EME delay" (later stop points, 2.5 s EME delay)
+     ! and its live-audio/WAV-file distinction; the stream host keeps both.
+     logical                :: decode_after_eme_delay_set = .false.
+     logical                :: decode_after_eme_delay     = .false.
+     logical                :: live_audio_set           = .false.
+     logical                :: live_audio               = .false.
      ! Phase 6 (RFC v1 §2): FT8/FT4 specifics cluster — 19 bools + 5 ints, flat
-     ! 1:1 onto params_block. OBSERVABILITY (read-site map + binary
-     ! probe): 21 of 24 are INERT on the jt9 --stream FT8/JT9 fixtures — most are
-     ! read ONLY inside the multithreaded-FT8 block (guard
-     ! if(params%lmultift8 .and. nmode==8), decoder.f90:192), which streaming
-     ! forces off (lmultift8=.false. constructed at jt9.f90:316); jt65_ap_on is
-     ! JT65-only; superfox_mode/even_sequence are superfox-path-only;
-     ! ft8_decoder_start is non-stream (WAV/shmem) path; hint_mode is never read. Only
-     ! ft8_ap_on/ap_cq_only/ap_width_hz reach the single-pass FT8 decoder
-     ! (decoder.f90:1141-1146, the lmultift8=.false. branch). ap_width_hz stores
-     ! the RAW int (decode halves it at lib/ft8var/ft8bvar.f90:1040; §3 napwid
-     ! note) — do NOT pre-scale. nagain_filter/stop_hint/hint_mode map to logical(c_bool)
-     ! nagainfil/nstophint/nhint despite the n-prefix. Bools reuse the Phase 4/5
-     ! get_bool_/accept_bool path; the 5 ints use get_int_. multithreaded_ft8 is
-     ! PARSED faithfully but APPLY ignores a non-false value (a true re-enables the
-     ! broken multithread branch -> 0 decodes; see streaming_apply.f90).
+     ! 1:1 onto params_block; apply_configure_fields (streaming_apply.f90) says
+     ! which decoder reads each. The parse checks types only; the stream
+     ! declines a configure the decoder would refuse (streaming_io.f90).
+     ! nagain_filter/stop_hint/hint_mode map to
+     ! logical(c_bool) nagainfil/nstophint/nhint despite the n-prefix. Bools
+     ! reuse the Phase 4/5 get_bool_/accept_bool path; the 5 ints use get_int_.
      logical                :: multithreaded_ft8_set     = .false.
      logical                :: multithreaded_ft8         = .false.
      logical                :: ft8_cycles_set            = .false.
@@ -208,39 +236,19 @@ module streaming_control
      logical                :: hint_mode_set             = .false.
      logical                :: hint_mode                 = .false.
      ! Phase 7 (RFC v1 §2): diagnostic / sequencing fields — 2 bools + 4 ints,
-     ! flat 1:1 onto params_block. OBSERVABILITY (read-site map):
-     ! ALL 6 are INERT on the jt9 --stream FT8/JT9 fixtures. Five are read ONLY
-     ! inside the multithreaded-FT8 block (guard
-     ! if(params%lmultift8 .and. nmode==8), decoder.f90:192..1148, which streaming
-     ! forces off via lmultift8=.false.): currently_txing (ltxing, decoder.f90:228),
-     ! mode_changed (lmodechanged, :193), sec_band_changed (nsecbandchanged,
-     ! :208), delay_units (ndelay, :201/:1077), last_tx_seconds_ago (nlasttx,
-     ! :337, consumed only by the multithread FT8-variant decoder ft8bvar/ft8svar).
-     ! qso_progress_state (nQSOProgress) DOES reach the single-pass FT8 decoder
-     ! (decoder.f90:1141) but only steers AP decoding passes; the FT8 fixture has
-     ! no AP-only decodes, so an IN-RANGE value is empirically inert (probed:
-     ! qso=5 gives a byte-identical 21-decode set). It is the one Phase 7 key the
-     ! apply GUARDS (streaming_apply.f90): an OUT-OF-range value (<0 or >5) is a raw
-     ! index into nappasses(0:5)/naptypes(0:5,4) at ft8b.f90:274/299 -> a decoder
-     ! crash, so the apply ignores it (valid [0,5] pass through; see the apply
-     ! comment). Parse stays a plain get_int_ (no parse-time range check -- v1 does
-     ! type validation only, not range validation). No decode-output gate is
-     ! possible for the inert in-range values -> parse-unit + apply-routing-unit +
-     ! no-regression are the coverage (like Phase 4); the out-of-range guard is
-     ! covered by a survival fixture + an apply-routing assert. The 4 ints use
-     ! get_int_; the 2 bools (currently_txing/mode_changed, logical(c_bool) in
-     ! jt9com.f90) reuse the get_bool_/accept_bool path.
+     ! flat 1:1 onto params_block; apply_configure_fields (streaming_apply.f90)
+     ! says which decoder reads each. The parse checks types only; the stream
+     ! declines a configure the decoder would refuse (streaming_io.f90). The 4
+     ! ints use get_int_; the 2 bools (currently_txing/mode_changed,
+     ! logical(c_bool) in jt9com.f90) reuse the get_bool_/accept_bool path.
      !
      ! OMITTED Phase 7 wire keys (intentionally NOT exposed in v1):
-     !   utc_list / utc_list_0..9 / nlist_count — map to listutc, which is read
-     !     ONLY by the JT4 averaging path (decoder.f90:1310, the nmode==4 block) and
-     !     has no writer in the decode core — dead for the FT8/JT9/FT4/Q65 stream
-     !     paths. Exposing it would be a no-op there.
-     !   datetime — read into a dead local at decoder.f90:99 (assigned, never used);
-     !     no decode effect. Only date->yymmdd carries time (Phase 8, §6.1).
-     !   from_wav_file (ndiskdat) / new_data_flag (newdat) — receiver-managed
-     !     invariants (§6.1/§9): the receiver hard-sets both, and a producer
-     !     override would break the one-shot decode contract. Not producer-settable.
+     !   utc_list / utc_list_0..9 / nlist_count — map to listutc/nlist, which
+     !     no decoder reads.
+     !   datetime — the decoder copies it into a local it never uses; only
+     !     date->yymmdd carries time (Phase 8, §6.1).
+     !   from_wav_file (ndiskdat) / new_data_flag (newdat) — receiver-managed:
+     !     the receiver sets newdat per pass, and ndiskdat from live_audio.
      logical                :: last_tx_seconds_ago_set   = .false.
      integer                :: last_tx_seconds_ago       = 0
      logical                :: currently_txing_set       = .false.
@@ -265,7 +273,7 @@ module streaming_control
      ! bad mode name — type validation only, §4.1). TWO keys carry a PARSE-TIME
      ! VALUE check that emits configure_type_error (the schema's first value-domain
      ! errors, both RFC-mandated): n_trials NOT in {10^N, 3*10^N} (§6.6 — else a
-     ! bad nranera silently corrupts ntrials at decoder.f90:143-145) and date with
+     ! bad nranera silently corrupts ntrials at decoder.f90:100-102) and date with
      ! year >= 2100 (§6.4 — the 2000+offset YYMMDD encoding caps at 2099).
      !
      ! PRECEDENCE (§4.1): utc is a SECOND route to nutc alongside the legacy int
@@ -274,31 +282,8 @@ module streaming_control
      ! frame carries both (richer ISO form). Order-independent at apply (the apply
      ! sequence encodes precedence, not the parse order).
      !
-     ! OBSERVABILITY (read-site map + binary probe): utc->nutc
-     ! round-trips through the decode "time" field (DECODE-OBSERVABLE via the
-     ! nutc round-trip fixtures). The other four are INERT on the FT8/JT9 stream
-     ! fixtures:
-     !   - candthin_threshold->ncandthin / dt_center_seconds->ndtcenter are read
-     !     ONLY by the multithread FT8-variant decoder my_ft8var%decodevar (all such
-     !     calls — first at decoder.f90:348 — scale /100 into the variant's sync
-     !     thresholds at lib/ft8var/sync8var.f90:17-18), and EVERY my_ft8var%decodevar
-     !     call lives inside the if(lmultift8 .and. nmode==8) block (opens
-     !     decoder.f90:192, else-arm at :1140) which streaming forces off — same class
-     !     as the Phase 6/7 multithread keys. The single-pass FT8 decoder
-     !     (my_ft8%decode, :1141) is NOT passed them. Probed inert: ncandthin
-     !     scaled to 5.0 and ndtcenter to a 2.0 s shift each gave the byte-identical
-     !     21-decode FT8 set.
-     !   - n_trials->nranera->ntrials reaches only the JT65 deep-search decoder
-     !     (ntrials computed at decoder.f90:143-145, consumed at :1338/:1365), unused
-     !     on FT8/JT9.
-     !   - date->yymmdd's only param read site is decoder.f90:182 (guarded by
-     !     if(ncontest==7 .and. b_superfox .and. b_even_seq) -> superfox-only),
-     !     decoded into yr/mo/day at lib/superfox/sfrx_sub.f90:21,25-27.
-     ! None is an array index (array-bound check: nranera<=18 keeps the
-     ! decode-site 10**(nranera/2) within int32 for any parseable valid n_trials;
-     ! ncandthin/ndtcenter become real thresholds), so no out-of-range apply guard is
-     ! needed (unlike qso_progress_state). The four inert keys are guarded by
-     ! parse-unit + apply-routing-unit + no-regression (like Phase 4/6/7).
+     ! apply_configure_fields (streaming_apply.f90) says which decoder reads
+     ! each. None is an array index.
      ! candthin_threshold/dt_center_seconds are real(8) members scaled at apply
      ! (§4 — declare real(8), nint(wire*100), do NOT pre-store as int).
      logical                :: utc_set                   = .false.
@@ -371,8 +356,32 @@ module streaming_control
      character(len=8)   :: got      = ' '   ! "string"/"number"/"bool"/"null"
   end type control_type_error
 
+  ! An encode request. id_ok is .false. unless "id" is an integer
+  ! from -2147483648 to 2147483647. problem is '' for a well-formed request,
+  ! else why it is not, with the key at fault in problem_key ('' for none).
+  ! serial and report have no default: *_given says whether the request
+  ! carries them.
+  type, public :: encode_request
+     logical :: id_ok        = .false.
+     integer :: id           = 0
+     logical :: is_template  = .false.
+     character(len=:), allocatable :: text      ! text or template, UTF-8
+     logical :: final        = .true.
+     integer :: profile      = 0                ! none 0, field_day 1, rtty 2
+     character(len=:), allocatable :: his_call, exchange
+     logical :: serial_given = .false.
+     integer :: serial       = 0
+     logical :: report_given = .false.
+     integer :: report       = 0
+     real(8) :: freq         = 0.d0             ! render only
+     integer :: rate         = 0                ! render only
+     character(len=:), allocatable :: problem, problem_key
+  end type encode_request
+
   public :: parse_control_frame
   public :: mode_string_to_int
+  public :: parse_encode_request
+  public :: parse_render_request
 
 contains
 
@@ -394,6 +403,7 @@ contains
 
     character(len=64)  :: t_value
     character(len=128) :: str_val
+    character(len=8)   :: category
     integer            :: int_val, mode_value_start, mode_buffer_length
     real(8)            :: real_val
     logical            :: lval
@@ -416,6 +426,21 @@ contains
        return
     end if
 
+    if (trim(t_value) .eq. 'discontinuity') then
+       action = CTRL_DISCONTINUITY
+       return
+    end if
+
+    if (trim(t_value) .eq. 'pack') then
+       action = CTRL_PACK
+       return
+    end if
+
+    if (trim(t_value) .eq. 'render') then
+       action = CTRL_RENDER
+       return
+    end if
+
     if (trim(t_value) .ne. 'configure') then
        action = CTRL_UNKNOWN   ! forward-compat: ignore unknown "t"
        return
@@ -429,6 +454,7 @@ contains
        call get_string_(buf, '"mode"', str_val, ok)
        if (ok) then
           int_val = mode_string_to_int(trim(str_val))
+          if (upper_(trim(str_val)) .eq. 'JTTY') int_val = MODE_JTTY
           if (int_val .ge. 0) then
              cfg%mode_set = .true.
              cfg%mode     = int_val
@@ -500,6 +526,10 @@ contains
        if (ok) then
           cfg%mycall_set = .true.
           cfg%mycall     = str_val(:min(len(str_val), 12))
+          call station_value_(buf, '"mycall"', cfg%mycall_tx, cfg%mycall_tx_long)
+       else
+          call value_category_(buf, '"mycall"', category)
+          cfg%mycall_unreadable = trim(category) .eq. 'string'
        end if
     end if
 
@@ -509,6 +539,10 @@ contains
        if (ok) then
           cfg%mygrid_set = .true.
           cfg%mygrid     = str_val(:min(len(str_val), 6))
+          call station_value_(buf, '"mygrid"', cfg%mygrid_tx, cfg%mygrid_tx_long)
+       else
+          call value_category_(buf, '"mygrid"', category)
+          cfg%mygrid_unreadable = trim(category) .eq. 'string'
        end if
     end if
 
@@ -752,6 +786,26 @@ contains
        if (ok) then
           cfg%clear_average_set = .true.
           cfg%clear_average     = lval
+       end if
+    end if
+
+    call check_type_(buf, '"decode_after_eme_delay"', 'decode_after_eme_delay', 'bool', &
+         .false., .false., terr, proceed, accept_bool=.true.)
+    if (proceed) then
+       call get_bool_(buf, '"decode_after_eme_delay"', lval, ok)
+       if (ok) then
+          cfg%decode_after_eme_delay_set = .true.
+          cfg%decode_after_eme_delay     = lval
+       end if
+    end if
+
+    call check_type_(buf, '"live_audio"', 'live_audio', 'bool',                  &
+         .false., .false., terr, proceed, accept_bool=.true.)
+    if (proceed) then
+       call get_bool_(buf, '"live_audio"', lval, ok)
+       if (ok) then
+          cfg%live_audio_set = .true.
+          cfg%live_audio     = lval
        end if
     end if
 
@@ -1022,8 +1076,8 @@ contains
 
     ! ===== Phase 7: diagnostic / sequencing fields (RFC v1 §2) =============
     ! 2 bools + 4 ints, flat 1:1. Bools reuse the get_bool_/accept_bool path;
-    ! ints use get_int_. All inert on the stream path (multithread-block-only /
-    ! AP-only) — see the configure_fields Phase 7 comment for read sites + OMITs.
+    ! ints use get_int_. The configure_fields Phase 7 comment lists the keys
+    ! left off the wire.
     call check_type_(buf, '"last_tx_seconds_ago"', 'last_tx_seconds_ago',      &
          'int', .false., .true., terr, proceed)
     if (proceed) then
@@ -1128,7 +1182,7 @@ contains
     ! n_trials: plain int on the wire -> encoded nranera (§6.6). The value MUST be
     ! one of {10^N, 3*10^N}; anything else is a configure_type_error (§6.6 — a
     ! non-conforming value would integer-divide into a silently-wrong ntrials at
-    ! decoder.f90:143-145). The check is a VALUE check (the JSON type is int), so it
+    ! decoder.f90:100-102). The check is a VALUE check (the JSON type is int), so it
     ! runs AFTER the int parse and reuses the same configure_type_error envelope.
     call check_type_(buf, '"n_trials"', 'n_trials', 'int', .false., .true., terr, proceed)
     if (proceed) then
@@ -1328,8 +1382,9 @@ contains
     character(len=*), intent(in)  :: buf, key
     character(len=*), intent(out) :: val
     logical,          intent(out) :: ok
-    integer :: vstart, vend, blen
+    integer :: vstart, blen
     logical :: found
+    character(len=:), allocatable :: decoded
 
     val = ' '
     ok  = .false.
@@ -1337,12 +1392,119 @@ contains
     if (.not. found) return
     if (vstart .gt. blen) return
     if (buf(vstart:vstart) .ne. '"') return
-    vstart = vstart + 1
-    vend = index(buf(vstart:blen), '"')
-    if (vend .le. 0) return
-    val = buf(vstart : vstart + vend - 2)
-    ok  = .true.
+    call json_string_(buf(vstart + 1:blen), decoded, ok)
+    if (ok) val = decoded
   end subroutine get_string_
+
+  ! The JSON string whose body starts at s(1:1), up to its closing quote,
+  ! decoded to UTF-8. ok=.false. on a malformed escape, a lone surrogate or
+  ! no closing quote. A string without a backslash is returned as it stands.
+  subroutine json_string_(s, val, ok)
+    character(len=*),              intent(in)  :: s
+    character(len=:), allocatable, intent(out) :: val
+    logical,                       intent(out) :: ok
+    character(len=:), allocatable :: out
+    integer :: i, n, code, low
+    ! UTF-16 surrogates: a high one (U+D800-DBFF) must be followed by a low one.
+    integer, parameter :: HIGH_FIRST = int(z'D800'), HIGH_LAST = int(z'DBFF')
+    integer, parameter :: LOW_FIRST  = int(z'DC00'), LOW_LAST  = int(z'DFFF')
+
+    ok = .false.
+    val = ''
+    ! No escape decodes to more bytes than it spells.
+    allocate(character(len=len(s)) :: out)
+    n = 0
+    i = 1
+    do while (i .le. len(s))
+       select case (s(i:i))
+       case ('"')
+          val = out(1:n)
+          ok  = .true.
+          return
+       case ('\')
+          if (i .eq. len(s)) return
+          i = i + 1
+          select case (s(i:i))
+          case ('"', '\', '/')
+             n = n + 1; out(n:n) = s(i:i)
+          case ('b')
+             n = n + 1; out(n:n) = achar(8)
+          case ('f')
+             n = n + 1; out(n:n) = achar(12)
+          case ('n')
+             n = n + 1; out(n:n) = achar(10)
+          case ('r')
+             n = n + 1; out(n:n) = achar(13)
+          case ('t')
+             n = n + 1; out(n:n) = achar(9)
+          case ('u')
+             if (.not. hex4_(s, i + 1, code)) return
+             i = i + 4
+             if (code .ge. LOW_FIRST .and. code .le. LOW_LAST) return
+             if (code .ge. HIGH_FIRST .and. code .le. HIGH_LAST) then
+                if (i + 2 .gt. len(s)) return
+                if (s(i + 1:i + 2) .ne. '\u') return
+                if (.not. hex4_(s, i + 3, low)) return
+                if (low .lt. LOW_FIRST .or. low .gt. LOW_LAST) return
+                code = 65536 + (code - HIGH_FIRST) * 1024 + (low - LOW_FIRST)
+                i = i + 6
+             end if
+             call put_utf8_(code, out, n)
+          case default
+             return
+          end select
+       case default
+          n = n + 1; out(n:n) = s(i:i)
+       end select
+       i = i + 1
+    end do
+  end subroutine json_string_
+
+  ! The four hex digits s(at:at+3) as code; .false. unless all four are.
+  logical function hex4_(s, at, code)
+    character(len=*), intent(in)  :: s
+    integer,          intent(in)  :: at
+    integer,          intent(out) :: code
+    integer :: k, d
+
+    hex4_ = .false.
+    code  = 0
+    if (at + 3 .gt. len(s)) return
+    do k = at, at + 3
+       d = index('0123456789abcdef', s(k:k))
+       if (d .eq. 0) d = index('0123456789ABCDEF', s(k:k))
+       if (d .eq. 0) return
+       code = 16 * code + d - 1
+    end do
+    hex4_ = .true.
+  end function hex4_
+
+  ! Append code point code to out(1:n) as UTF-8.
+  subroutine put_utf8_(code, out, n)
+    integer,          intent(in)    :: code
+    character(len=*), intent(inout) :: out
+    integer,          intent(inout) :: n
+
+    if (code .lt. 128) then
+       out(n + 1:n + 1) = char(code)
+       n = n + 1
+    else if (code .lt. 2048) then
+       out(n + 1:n + 1) = char(192 + code / 64)
+       out(n + 2:n + 2) = char(128 + iand(code, 63))
+       n = n + 2
+    else if (code .lt. 65536) then
+       out(n + 1:n + 1) = char(224 + code / 4096)
+       out(n + 2:n + 2) = char(128 + iand(code / 64, 63))
+       out(n + 3:n + 3) = char(128 + iand(code, 63))
+       n = n + 3
+    else
+       out(n + 1:n + 1) = char(240 + code / 262144)
+       out(n + 2:n + 2) = char(128 + iand(code / 4096, 63))
+       out(n + 3:n + 3) = char(128 + iand(code / 64, 63))
+       out(n + 4:n + 4) = char(128 + iand(code, 63))
+       n = n + 4
+    end if
+  end subroutine put_utf8_
 
   ! Find an integer value in a flat JSON: looks for `key:NNN`, value is
   ! decimal integer with optional sign. ok=.false. on miss or non-int.
@@ -1487,19 +1649,20 @@ contains
   end subroutine parse_iso_date_
 
   ! Encode a desired trial count n_trials into the legacy nranera index (§6.6):
-  !   nranera even -> ntrials = 10**(nranera/2)    (decoder.f90:143)
-  !   nranera odd  -> ntrials = 3*10**(nranera/2)  (decoder.f90:144)
+  !   nranera even -> ntrials = 10**(nranera/2)    (decoder.f90:100)
+  !   nranera odd  -> ntrials = 3*10**(nranera/2)  (decoder.f90:101)
   ! so n_trials must be 10^k or 3*10^k. ok=.false. for any other value (the caller
   ! then emits configure_type_error). Strip trailing factors of 10; the residual
   ! must be 1 (pure power of 10 -> nranera=2k) or 3 (3x -> nranera=2k+1). This is
   ! functionally equivalent to the RFC §6.6 reference algorithm (a log10-based form;
   ! same {10^N,3*10^N} acceptance set and same mapping), which likewise returns
   ! nranera=0 for n_trials=1; note
-  ! decoder.f90:145 then special-cases nranera=0 -> ntrials=0 (a legacy-encoding
+  ! decoder.f90:102 then special-cases nranera=0 -> ntrials=0 (a legacy-encoding
   ! quirk a producer hits only by sending the degenerate n_trials=1 — documented,
   ! not "fixed", per the wire-parity scope guardrail). nranera stays <= 18 for any
   ! n_trials that fits int32 (10^9), so the decode-site 10**(nranera/2) cannot
-  ! overflow (read-site bound check — no out-of-range guard needed).
+  ! overflow. A configure with nranera above 12 (10^6 trials), which the
+  ! engine refuses for JT65, is declined where JT65 runs.
   subroutine ntrials_to_nranera_(n_trials, nranera, ok)
     integer, intent(in)  :: n_trials
     integer, intent(out) :: nranera
@@ -1764,6 +1927,327 @@ contains
     proceed = .false.
     call set_type_error_(terr, keyname, expected, cat)
   end subroutine check_type_
+
+  ! ===== encode requests =================================================
+
+  ! Read a pack request. Unknown keys are ignored.
+  subroutine parse_encode_request(buf, req)
+    character(len=*),     intent(in)  :: buf
+    type(encode_request), intent(out) :: req
+    character(len=:), allocatable :: text, template, word
+    character(len=8) :: cat
+    logical :: has_text, has_template, present, ok
+
+    req%text = ''
+    req%his_call = ''
+    req%exchange = ''
+    req%problem = ''
+    req%problem_key = ''
+
+    ! The key locator would read a key of a nested object as the request's, so
+    ! the id is read with every nested object and array blanked.
+    call request_int_(top_level_(buf), '"id"', req%id, present, req%id_ok)
+    req%id_ok = present .and. req%id_ok
+    if (.not. req%id_ok) return
+
+    if (nested_(buf)) then
+       call refuse_('', 'a request is a flat JSON object')
+       return
+    end if
+
+    call request_string_(buf, '"text"', text, has_text, ok)
+    if (.not. ok) then
+       call refuse_('text', 'text must be a JSON string')
+       return
+    end if
+    call request_string_(buf, '"template"', template, has_template, ok)
+    if (.not. ok) then
+       call refuse_('template', 'template must be a JSON string')
+       return
+    end if
+    if (has_text .and. has_template) then
+       call refuse_('template', 'a request has text or template, not both')
+       return
+    end if
+    if (.not. (has_text .or. has_template)) then
+       call refuse_('text', 'a request needs text or template')
+       return
+    end if
+    req%is_template = has_template
+    if (has_template) then
+       req%text = template
+    else
+       req%text = text
+    end if
+
+    call value_category_(buf, '"final"', cat)
+    if (trim(cat) .eq. 'bool') then
+       call get_bool_(buf, '"final"', req%final, ok)
+    else if (trim(cat) .ne. 'absent') then
+       call refuse_('final', 'final must be true or false')
+       return
+    end if
+
+    call request_string_(buf, '"profile"', word, present, ok)
+    if (present) then
+       ok = ok .and. (word .eq. 'none' .or. word .eq. 'field_day' .or. word .eq. 'rtty')
+       ok = ok .and. len(word) .eq. len_trim(word)
+       if (.not. ok) then
+          call refuse_('profile', 'profile must be none, field_day or rtty')
+          return
+       end if
+       if (word .eq. 'field_day') req%profile = 1
+       if (word .eq. 'rtty') req%profile = 2
+    end if
+
+    call request_string_(buf, '"his_call"', req%his_call, present, ok)
+    if (.not. ok) then
+       call refuse_('his_call', 'his_call must be a JSON string')
+       return
+    end if
+    call request_string_(buf, '"exchange"', req%exchange, present, ok)
+    if (.not. ok) then
+       call refuse_('exchange', 'exchange must be a JSON string')
+       return
+    end if
+
+    call request_int_(buf, '"serial"', req%serial, req%serial_given, ok)
+    if (.not. ok) then
+       call refuse_('serial', 'serial must be an integer from -2147483648 to 2147483647')
+       return
+    end if
+    call request_int_(buf, '"report"', req%report, req%report_given, ok)
+    if (.not. ok) then
+       call refuse_('report', 'report must be an integer from -2147483648 to 2147483647')
+       return
+    end if
+
+  contains
+
+    subroutine refuse_(key, detail)
+      character(len=*), intent(in) :: key, detail
+      req%problem_key = key
+      req%problem = detail
+    end subroutine refuse_
+
+  end subroutine parse_encode_request
+
+  ! Read a render request: a pack request's keys, then freq and rate.
+  subroutine parse_render_request(buf, req)
+    character(len=*),     intent(in)  :: buf
+    type(encode_request), intent(out) :: req
+    character(len=8) :: cat
+    integer :: vstart, blen
+    logical :: present, ok
+
+    call parse_encode_request(buf, req)
+    if (.not. req%id_ok .or. len(req%problem) .gt. 0) return
+    call request_int_(buf, '"rate"', req%rate, present, ok)
+    if (.not. (present .and. ok .and. (req%rate .eq. 12000 .or. req%rate .eq. 48000))) then
+       req%problem_key = 'rate'
+       req%problem = 'rate must be 12000 or 48000'
+       return
+    end if
+    call value_category_(buf, '"freq"', cat)
+    ok = trim(cat) .eq. 'number'
+    if (ok) then
+       call find_key_(buf, '"freq"', vstart, blen, present)
+       ok = json_number_(buf(vstart:blen), .true.)
+    end if
+    if (ok) call get_real_(buf, '"freq"', req%freq, ok)
+    ! Written so that a NaN fails it.
+    if (.not. (ok .and. req%freq .ge. 200.d0 .and. req%freq .le. 5000.d0)) then
+       req%problem_key = 'freq'
+       req%problem = 'freq must be a number of Hz from 200 to 5000'
+    end if
+  end subroutine parse_render_request
+
+  ! The string value of key. present is .false. when the key is absent; ok
+  ! is .false. when it is present but not a JSON string that decodes.
+  subroutine request_string_(buf, key, val, present, ok)
+    character(len=*),              intent(in)  :: buf, key
+    character(len=:), allocatable, intent(out) :: val
+    logical,                       intent(out) :: present, ok
+    character(len=8) :: cat
+    integer :: vstart, blen
+
+    val = ''
+    call value_category_(buf, key, cat)
+    present = trim(cat) .ne. 'absent'
+    ok = .not. present
+    if (trim(cat) .ne. 'string') return
+    call find_key_(buf, key, vstart, blen, present)
+    call json_string_(buf(vstart + 1:blen), val, ok)
+  end subroutine request_string_
+
+  ! The transmitter's copy of the configure string value of key, which
+  ! decodes: the whole string less ASCII white space at either end. long is
+  ! .true. when it has more characters than val has bytes.
+  subroutine station_value_(buf, key, val, long)
+    character(len=*), intent(in)  :: buf, key
+    character(len=*), intent(out) :: val
+    logical,          intent(out) :: long
+    character(len=*), parameter :: WHITE = ' ' // achar(9) // achar(10) //   &
+         achar(11) // achar(12) // achar(13)
+    character(len=:), allocatable :: s
+    logical :: present, ok
+    integer :: first, last, i
+
+    call request_string_(buf, key, s, present, ok)
+    val = ' '
+    long = .false.
+    first = verify(s, WHITE)
+    if (first .eq. 0) return
+    last = verify(s, WHITE, back=.true.)
+    val = s(first:min(last, first + len(val) - 1))
+    ! A UTF-8 continuation byte, 10xxxxxx, is part of the character before it.
+    long = count([(iand(ichar(s(i:i)), 192) .ne. 128, i = first, last)]) .gt. len(val)
+  end subroutine station_value_
+
+  ! The integer value of key: a JSON integer that get_int_ reads. present is
+  ! .false. when the key is absent; ok is .false. when it is present but no
+  ! such integer.
+  subroutine request_int_(buf, key, val, present, ok)
+    character(len=*), intent(in)  :: buf, key
+    integer,          intent(out) :: val
+    logical,          intent(out) :: present, ok
+    character(len=8) :: cat
+    integer :: vstart, blen
+    logical :: found
+
+    val = 0
+    call value_category_(buf, key, cat)
+    present = trim(cat) .ne. 'absent'
+    ok = .not. present
+    if (trim(cat) .ne. 'number') return
+    call find_key_(buf, key, vstart, blen, found)
+    ok = json_number_(buf(vstart:blen), .false.)
+    if (ok) call get_int_(buf, key, val, ok)
+  end subroutine request_int_
+
+  ! Whether s starts with a JSON number, -?(0|[1-9][0-9]*), followed when
+  ! fraction is .true. by (\.[0-9]+)?([eE][+-]?[0-9]+)?, ending at ',', '}',
+  ! white space or the end of s. get_int_ and get_real_ read more: their
+  ! list-directed reads take '/', repeat counts and forms like '+5', '05' and
+  ! '1500.'.
+  logical function json_number_(s, fraction)
+    character(len=*), intent(in) :: s
+    logical,          intent(in) :: fraction
+    integer :: i, start
+
+    json_number_ = .false.
+    i = 1
+    if (i .le. len(s)) then
+       if (s(i:i) .eq. '-') i = i + 1
+    end if
+    start = i
+    if (.not. digits_(i)) return
+    if (s(start:start) .eq. '0' .and. i - start .gt. 1) return
+    if (fraction .and. i .le. len(s)) then
+       if (s(i:i) .eq. '.') then
+          i = i + 1
+          if (.not. digits_(i)) return
+       end if
+    end if
+    if (fraction .and. i .le. len(s)) then
+       if (s(i:i) .eq. 'e' .or. s(i:i) .eq. 'E') then
+          i = i + 1
+          if (i .le. len(s)) then
+             if (s(i:i) .eq. '+' .or. s(i:i) .eq. '-') i = i + 1
+          end if
+          if (.not. digits_(i)) return
+       end if
+    end if
+    if (i .le. len(s)) then
+       if (index(',}', s(i:i)) .eq. 0 .and. iachar(s(i:i)) .gt. 32) return
+    end if
+    json_number_ = .true.
+
+  contains
+
+    ! Skip the digits of s from i; .false. when there are none.
+    logical function digits_(i)
+      integer, intent(inout) :: i
+      integer :: first
+      first = i
+      do while (i .le. len(s))
+         if (index('0123456789', s(i:i)) .eq. 0) exit
+         i = i + 1
+      end do
+      digits_ = i .gt. first
+    end function digits_
+
+  end function json_number_
+
+  ! Whether buf holds an array, or an object besides the outermost one,
+  ! outside its strings.
+  logical function nested_(buf)
+    character(len=*), intent(in) :: buf
+    integer :: i, objects
+    logical :: in_string
+
+    nested_ = .false.
+    objects = 0
+    in_string = .false.
+    i = 1
+    do while (i .le. len(buf))
+       if (in_string) then
+          if (buf(i:i) .eq. '\') then
+             i = i + 1
+          else if (buf(i:i) .eq. '"') then
+             in_string = .false.
+          end if
+       else if (buf(i:i) .eq. '"') then
+          in_string = .true.
+       else if (buf(i:i) .eq. '[') then
+          nested_ = .true.
+          return
+       else if (buf(i:i) .eq. '{') then
+          objects = objects + 1
+          if (objects .gt. 1) then
+             nested_ = .true.
+             return
+          end if
+       end if
+       i = i + 1
+    end do
+  end function nested_
+
+  ! buf with every character of a nested object or array blanked, strings
+  ! inside them included, so that only the outermost object's keys remain.
+  function top_level_(buf) result(top)
+    character(len=*), intent(in) :: buf
+    character(len=len(buf)) :: top
+    integer :: i, depth
+    logical :: in_string, escaped
+    character :: c
+
+    top = buf
+    depth = 0
+    in_string = .false.
+    escaped = .false.
+    do i = 1, len(buf)
+       c = buf(i:i)
+       if (in_string) then
+          if (escaped) then
+             escaped = .false.
+          else if (c .eq. '\') then
+             escaped = .true.
+          else if (c .eq. '"') then
+             in_string = .false.
+          end if
+       else if (c .eq. '"') then
+          in_string = .true.
+       else if (c .eq. '{' .or. c .eq. '[') then
+          depth = depth + 1
+       else if (c .eq. '}' .or. c .eq. ']') then
+          if (depth .ge. 2) top(i:i) = ' '
+          depth = max(depth - 1, 0)
+          cycle
+       end if
+       if (depth .ge. 2) top(i:i) = ' '
+    end do
+  end function top_level_
 
   ! Record the FIRST per-key type error of a frame (subsequent ones are ignored;
   ! the whole frame is declined regardless).
