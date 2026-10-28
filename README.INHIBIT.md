@@ -1,9 +1,9 @@
 # wsjtx-inhibit — WSJT-X with low-latency TX Inhibit
 
 **Repository:** https://github.com/wa1hco/wsjtx-inhibit  
-**This branch:** official [WSJT-X v3.3.0-beta2](https://github.com/WSJTX/wsjtx/releases/tag/v3.3.0-beta2) plus the sole-writer TX Inhibit path.
+**This branch:** official [WSJT-X v3.3.0-beta5](https://github.com/WSJTX/wsjtx/releases/tag/v3.3.0-beta5) plus the sole-writer TX Inhibit path.
 
-WSJT-X v3.3.0-beta2 already implements type 17 / type 18 TX Inhibit. This branch adds the low-latency pin path: the UDP dispatch thread is the only Unix writer of RTS/DTR, and type 17 carries `t_rx_ns` / `t_pin_ns`. A **KEY agent** tells co-band stations to inhibit transmit without aborting the FT8 sequence (Halt Tx ends the QSO; TX Inhibit only holds the PTT pin).
+WSJT-X v3.3.0-beta5 already implements type 17 / type 18 TX Inhibit. This branch adds the low-latency pin path: the UDP dispatch thread is the only Unix writer of RTS/DTR, and type 17 carries `t_rx_ns` / `t_pin_ns`. A **KEY agent** tells co-band stations to inhibit transmit without aborting the FT8 sequence (Halt Tx ends the QSO; TX Inhibit only holds the PTT pin).
 
 Arming is upstream’s rule, not a separate checkbox: PTT method RTS or DTR, and Accept UDP requests on. Point the KEY agent at the Heartbeat source `host:port` and that message’s Id (`WSJT-X` for the default instance). `inhibit-test` and `tools/send_inhibit_hold.py` learn both from the UDP server stream. `inhibit-agent` takes `--addr host:port` and `--id`.
 
