@@ -6,7 +6,7 @@
 
 **KEY agent** is the role. This program is the standalone KEY agent: the operator
 supplies the serial port, the Heartbeat source `host:port`, and the WSJT-X Id
-(`--id`, default `WSJT-X`). An empty target Id is ignored by v3.3.0-beta4.
+(`--id`, default `WSJT-X`). An empty target Id is ignored by v3.3.0-beta5.
 The WIMS tree’s KEY agent is **`wims-key-agent`** (destinations from WIMS discovery).
 
 ---

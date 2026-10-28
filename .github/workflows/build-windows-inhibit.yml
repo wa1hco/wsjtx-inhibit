@@ -1,27 +1,27 @@
 # Builds a Windows installer for the inhibit line on main
-# (v3.3.0-beta4 plus the sole-writer path).
+# (v3.3.0-beta5 plus the sole-writer path).
 #
 # inhibit-on-3.2-rc1 is not built: that branch is the older 3.2.0-rc1 port,
 # and this version label would misname its installer.
 #
 # release_channel is omitted. build-windows.yml workflow_call does not accept
 # it (passing it fails the call), and an empty channel follows
-# release-state.txt (3.3.0 BETA 4). The version input is only the installer
+# release-state.txt (3.3.0 BETA 5). The version input is only the installer
 # and artifact label; CMake's project version stays numeric.
 #
 # pull_request is listed for pulls into main. GitHub decides that event from
-# the workflow on the default branch, which does not have it yet, so this
-# pull request would not start a run from pull_request alone. The rebase
-# branch is listed under push so the verification push starts the installer
-# build. Drop that branch entry only after main already carries pull_request;
-# the commit that drops it does not re-run.
+# the workflow on the default branch. main already carries pull_request, so a
+# pull request into main can start a run. The rebase branch is also listed
+# under push so the verification push starts the installer build on this
+# branch. Drop that branch entry only after this line is on main; the commit
+# that drops it does not re-run.
 name: Windows installer for inhibit main
 
 on:
   push:
     branches:
       - main
-      - rebase-v3.3.0-beta4
+      - rebase-v3.3.0-beta5
   pull_request:
     branches:
       - main
@@ -33,7 +33,7 @@ jobs:
   windows:
     uses: ./.github/workflows/build-windows.yml
     with:
-      version: "3.3.0-beta4-inhibit"
+      version: "3.3.0-beta5-inhibit"
       hamlib_branch: "4.7.2"
       save_ccache: false
       recache: false
