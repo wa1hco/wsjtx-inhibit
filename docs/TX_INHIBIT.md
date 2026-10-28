@@ -1,6 +1,6 @@
 # TX Inhibit and KEY agent
 
-**Rebased onto official WSJT-X v3.3.0-beta2.** This tree is that tag plus the
+**Rebased onto official WSJT-X v3.3.0-beta5.** This tree is that tag plus the
 sole-writer pin path (UDP dispatch thread clears RTS/DTR). Upstream already
 ships type 17 InhibitStatus and type 18 per-controller leases. On this branch:
 
