@@ -34,6 +34,8 @@ private:
   void do_tune (bool) override;
 
   void do_poll () override;
+  bool frequency_readback_expected (RigFrequency::Path, Frequency) const override;
+  bool mode_readback_expected () const override;
 
   bool ptt_on_ = false;
   // RTS or DTR. On Unix the inhibit thread is the only writer of that pin.
