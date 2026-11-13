@@ -1,6 +1,7 @@
 import importlib.util
 import json
 import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -100,6 +101,27 @@ class InhibitReleaseIdentityTest(unittest.TestCase):
         self.assertIn("wsjtx-3.3.0-beta6-inhibit-win64.exe", notes)
         self.assertIn("wsjtx-3.3.0-beta6-inhibit-linux-x86_64.deb", notes)
         self.assertIn("WSJT-X", notes)
+
+    def test_requested_root_supplies_the_marker(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            cmake_dir = root / "CMake" / "Modules"
+            cmake_dir.mkdir(parents=True)
+            (cmake_dir / "inhibit-identity.cmake").write_text(
+                'set (WSJT_INHIBIT_VERSION_SUFFIX "-forktest")\n',
+                encoding="utf-8",
+            )
+            (root / "release-state.txt").write_text(
+                (ROOT / "release-state.txt").read_text(encoding="utf-8"),
+                encoding="utf-8",
+            )
+            info = identity.load_identity(root)
+            state = identity._release_policy().read_state(root)
+            expected = identity.identity_from_state(state, "-forktest")
+            self.assertEqual(info["label"], expected["label"])
+            self.assertEqual(info["tag"], expected["tag"])
+            self.assertEqual(info["suffix"], "-forktest")
+            self.assertNotEqual(info["suffix"], identity.read_suffix())
 
     def test_cli_github_output(self):
         completed = subprocess.run(

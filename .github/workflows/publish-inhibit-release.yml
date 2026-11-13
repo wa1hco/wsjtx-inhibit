@@ -153,6 +153,9 @@ jobs:
       )
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    concurrency:
+      group: inhibit-release-publish
+      cancel-in-progress: false
     permissions:
       contents: write
       actions: read
