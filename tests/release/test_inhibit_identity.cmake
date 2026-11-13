@@ -1,0 +1,41 @@
+cmake_minimum_required (VERSION 3.12)
+
+if (NOT SOURCE_DIR OR NOT TEST_BINARY_DIR)
+  message (FATAL_ERROR "SOURCE_DIR and TEST_BINARY_DIR are required")
+endif ()
+
+include ("${SOURCE_DIR}/CMake/Modules/set_build_type.cmake")
+include ("${SOURCE_DIR}/CMake/Modules/inhibit-identity.cmake")
+set (PROJECT_NAME wsjtx)
+set (PROJECT_VERSION_MAJOR 3)
+set (PROJECT_VERSION_MINOR 3)
+set (PROJECT_VERSION_PATCH 0)
+
+function (assert_equal actual expected description)
+  if (NOT "${actual}" STREQUAL "${expected}")
+    message (FATAL_ERROR "${description}: expected '${expected}', got '${actual}'")
+  endif ()
+endfunction ()
+
+assert_equal ("${WSJT_INHIBIT_VERSION_SUFFIX}" "-inhibit" "inhibit suffix")
+
+function (expect_inhibit channel prerelease revision package_revision)
+  set (WSJT_RELEASE_CHANNEL "${channel}" CACHE STRING "" FORCE)
+  set (WSJT_PRERELEASE_NUMBER "${prerelease}" CACHE STRING "" FORCE)
+  set_build_type ()
+  wsjt_apply_inhibit_version_suffix ()
+  assert_equal ("${BUILD_TYPE_REVISION}" "${revision}" "${channel} ${prerelease} version")
+  assert_equal ("${BUILD_TYPE_PACKAGE_REVISION}" "${package_revision}" "${channel} ${prerelease} package")
+  set (shown "3.3.0${BUILD_TYPE_REVISION}")
+  if (NOT shown MATCHES "-inhibit$")
+    message (FATAL_ERROR "Shown version '${shown}' does not end with -inhibit")
+  endif ()
+endfunction ()
+
+expect_inhibit (BETA 6 "-beta6-inhibit" "~beta6-inhibit")
+expect_inhibit (BETA 10 "-beta10-inhibit" "~beta10-inhibit")
+expect_inhibit (RC 1 "-rc1-inhibit" "~rc1-inhibit")
+expect_inhibit (GA "" "-inhibit" "-inhibit")
+expect_inhibit (DEVEL "" "-devel-inhibit" "-devel-inhibit")
+
+message (STATUS "Inhibit identity suffixes match release-state channels")

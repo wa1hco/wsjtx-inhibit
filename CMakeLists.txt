@@ -143,10 +143,13 @@ message (STATUS "Building for for: ${CMAKE_SYSTEM_NAME}-${PROJECT_ARCHITECTURE}"
 message (STATUS "******************************************************")
 
 include (set_build_type)
+include (inhibit-identity)
 wsjt_set_release_channel_cache ("${WSJT_SOURCE_RELEASE_CHANNEL}" "${WSJT_SOURCE_PRERELEASE_NUMBER}")
 set_build_type ()
+wsjt_apply_inhibit_version_suffix ()
 set (wsjtx_VERSION "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}.${PROJECT_VERSION_PATCH}${BUILD_TYPE_REVISION}")
 set (wsjtx_PACKAGE_VERSION "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}.${PROJECT_VERSION_PATCH}${BUILD_TYPE_PACKAGE_REVISION}")
+message (STATUS "Inhibit release version: ${wsjtx_VERSION}")
 
 #
 # project information
