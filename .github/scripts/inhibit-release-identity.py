@@ -36,8 +36,11 @@ def _release_policy():
     return module
 
 
-def read_suffix(cmake_text: str | None = None) -> str:
-    text = IDENTITY_CMAKE.read_text(encoding="utf-8") if cmake_text is None else cmake_text
+def read_suffix(cmake_text: str | None = None, root: Path | None = None) -> str:
+    if cmake_text is None:
+        text = ((root or ROOT) / "CMake" / "Modules" / "inhibit-identity.cmake").read_text(encoding="utf-8")
+    else:
+        text = cmake_text
     found = [
         match.group(1)
         for line in text.splitlines()
@@ -86,7 +89,7 @@ def identity_from_state(state: dict[str, str], suffix: str | None = None) -> dic
 
 def load_identity(root: Path = ROOT) -> dict[str, str]:
     state = _release_policy().read_state(root)
-    return identity_from_state(state, read_suffix())
+    return identity_from_state(state, read_suffix(root=root))
 
 
 def version_key(label: str, suffix: str) -> tuple[int, ...]:

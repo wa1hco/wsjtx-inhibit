@@ -48,6 +48,9 @@ prerelease="$(python3 -c 'import json,sys; print("true" if json.load(sys.stdin)[
 
 move_tag_if_needed() {
   local current_type current_sha
+  if ! gh api "repos/${repo}/git/ref/tags/${tag}" >/dev/null 2>&1; then
+    return 0
+  fi
   current_type="$(gh api "repos/${repo}/git/ref/tags/${tag}" --jq '.object.type')"
   current_sha="$(gh api "repos/${repo}/git/ref/tags/${tag}" --jq '.object.sha')"
   if [ "$current_type" = "tag" ]; then
@@ -58,33 +61,108 @@ move_tag_if_needed() {
   fi
   echo "Retargeting ${tag} from ${current_sha} to ${sha}"
   if [ "$current_type" = "commit" ]; then
-    gh api --method PATCH "repos/${repo}/git/refs/tags/${tag}" -f sha="$sha" >/dev/null
+    # force is required when the new commit is not a descendant of the tag.
+    gh api --method PATCH "repos/${repo}/git/refs/tags/${tag}" -f sha="$sha" -F force=true >/dev/null
   else
     gh api --method DELETE "repos/${repo}/git/refs/tags/${tag}" >/dev/null
     gh api --method POST "repos/${repo}/git/refs" -f ref="refs/tags/${tag}" -f sha="$sha" >/dev/null
   fi
 }
 
-if gh api "repos/${repo}/git/ref/tags/${tag}" >/dev/null 2>&1; then
-  move_tag_if_needed
-fi
+asset_size() {
+  wc -c < "$1" | tr -d ' '
+}
+
+asset_size_on_release() {
+  gh release view "$tag" --repo "$repo" --json assets \
+    --jq ".assets[] | select(.name==\"$1\") | .size"
+}
+
+delete_asset_if_present() {
+  local name="$1" size
+  size="$(asset_size_on_release "$name" || true)"
+  if [ -n "$size" ]; then
+    gh release delete-asset "$tag" "$name" --repo "$repo" --yes
+  fi
+}
+
+upload_and_verify() {
+  local file="$1" name size actual
+  name="$(basename "$file")"
+  size="$(asset_size "$file")"
+  delete_asset_if_present "$name"
+  gh release upload "$tag" --repo "$repo" "$file"
+  actual="$(asset_size_on_release "$name")"
+  if [ "$actual" != "$size" ]; then
+    echo "Uploaded ${name} is ${actual:-missing} bytes, expected ${size}" >&2
+    return 1
+  fi
+}
+
+restore_previous_assets() {
+  local backed
+  shopt -s nullglob
+  for backed in "$backup_dir"/*; do
+    echo "Restoring previous asset $(basename "$backed")" >&2
+    delete_asset_if_present "$(basename "$backed")"
+    gh release upload "$tag" --repo "$repo" "$backed"
+  done
+  shopt -u nullglob
+}
+
+win_name="$(basename "$windows")"
+deb_name="$(basename "$linux")"
+backup_dir="$(mktemp -d)"
+stage_dir="$(mktemp -d)"
+trap 'rm -rf "$notes" "$backup_dir" "$stage_dir"' EXIT
 
 if gh release view "$tag" --repo "$repo" >/dev/null 2>&1; then
-  gh release edit "$tag" --repo "$repo" \
-    --title "$title" \
-    --notes-file "$notes" \
-    --latest="$make_latest" \
-    --prerelease="$prerelease"
+  # Keep a local copy until the replacement names are verified. Staging
+  # uploads use different names, so a failed upload does not remove these.
+  gh release download "$tag" --repo "$repo" --pattern "$win_name" --dir "$backup_dir" --clobber || true
+  gh release download "$tag" --repo "$repo" --pattern "$deb_name" --dir "$backup_dir" --clobber || true
 else
   gh release create "$tag" --repo "$repo" \
+    --draft \
     --target "$sha" \
     --title "$title" \
-    --notes-file "$notes" \
-    --latest="$make_latest" \
-    --prerelease="$prerelease"
+    --notes-file "$notes"
 fi
 
-gh release upload "$tag" --repo "$repo" --clobber "$windows" "$linux"
+cp "$windows" "$stage_dir/${win_name}.incoming"
+cp "$linux" "$stage_dir/${deb_name}.incoming"
+if ! upload_and_verify "$stage_dir/${win_name}.incoming" \
+  || ! upload_and_verify "$stage_dir/${deb_name}.incoming"; then
+  delete_asset_if_present "${win_name}.incoming" || true
+  delete_asset_if_present "${deb_name}.incoming" || true
+  draft="$(gh release view "$tag" --repo "$repo" --json isDraft --jq '.isDraft')"
+  if [ "$draft" = "true" ] && [ -z "$(asset_size_on_release "$win_name" || true)" ]; then
+    gh release delete "$tag" --repo "$repo" --yes --cleanup-tag
+  else
+    echo "Staging upload failed; published assets were left in place" >&2
+  fi
+  exit 1
+fi
+
+if ! upload_and_verify "$windows" || ! upload_and_verify "$linux"; then
+  echo "Replacement upload failed; restoring the previous assets" >&2
+  delete_asset_if_present "$win_name" || true
+  delete_asset_if_present "$deb_name" || true
+  restore_previous_assets
+  exit 1
+fi
+
+delete_asset_if_present "${win_name}.incoming" || true
+delete_asset_if_present "${deb_name}.incoming" || true
+
+# The tag and Latest flag move only after both download names are verified.
+move_tag_if_needed
+gh release edit "$tag" --repo "$repo" \
+  --draft=false \
+  --title "$title" \
+  --notes-file "$notes" \
+  --latest="$make_latest" \
+  --prerelease="$prerelease"
 
 mapfile -t demote < <(python3 -c 'import json,sys; [print(tag) for tag in json.load(sys.stdin)["demote"]]' <<<"$plan")
 for old_tag in "${demote[@]+"${demote[@]}"}"; do
