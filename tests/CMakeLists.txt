@@ -58,6 +58,13 @@ add_test (
     -P ${CMAKE_SOURCE_DIR}/tests/release/test_build_type.cmake)
 
 add_test (
+  NAME test_inhibit_identity
+  COMMAND ${CMAKE_COMMAND}
+    -D SOURCE_DIR=${CMAKE_SOURCE_DIR}
+    -D TEST_BINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}/inhibit-identity
+    -P ${CMAKE_SOURCE_DIR}/tests/release/test_inhibit_identity.cmake)
+
+add_test (
   NAME test_nsis_launcher_config
   COMMAND ${CMAKE_COMMAND}
     -D SOURCE_DIR=${CMAKE_SOURCE_DIR}

@@ -1,7 +1,7 @@
 # wsjtx-inhibit — WSJT-X with low-latency TX Inhibit
 
 **Repository:** https://github.com/wa1hco/wsjtx-inhibit  
-**This branch:** official [WSJT-X v3.3.0-beta6](https://github.com/WSJTX/wsjtx/releases/tag/v3.3.0-beta6) plus the sole-writer TX Inhibit path.
+**This branch:** official [WSJT-X v3.3.0-beta6](https://github.com/WSJTX/wsjtx/releases/tag/v3.3.0-beta6) plus the sole-writer TX Inhibit path. The program reports `3.3.0-beta6-inhibit` (window title, Help → About, and `wsjtx_app_version -v`). That string is `release-state.txt` plus the suffix in `CMake/Modules/inhibit-identity.cmake`, so the next upstream beta updates it when `release-state.txt` changes.
 
 WSJT-X v3.3.0-beta6 already implements type 17 / type 18 TX Inhibit. This branch adds the low-latency pin path: the UDP dispatch thread is the only Unix writer of RTS/DTR, and type 17 carries `t_rx_ns` / `t_pin_ns`. A **KEY agent** tells co-band stations to inhibit transmit without aborting the FT8 sequence (Halt Tx ends the QSO; TX Inhibit only holds the PTT pin).
 
