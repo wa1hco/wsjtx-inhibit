@@ -1,0 +1,188 @@
+# Publishes the current inhibit build as a GitHub release.
+#
+# Push to main runs "Windows installer for inhibit main" first. When that
+# succeeds, this workflow builds the Ubuntu 24.04 .deb, runs the inhibit
+# tests, and attaches both assets to the release for the version in
+# release-state.txt (for example v3.3.0-beta6-inhibit).
+#
+# workflow_dispatch builds Windows and Linux itself, then publishes.
+# A pull request into main builds and tests Linux only. It does not publish.
+#
+# The same version updates the existing release instead of failing. A new
+# beta number in release-state.txt creates a new tag. The newest inhibit
+# release is GitHub's Latest release (not a pre-release) so the repository
+# page shows it instead of the older 3.0.2 rc pre-releases. Those older
+# releases are left in place. A newer inhibit tag marks previous inhibit
+# releases as pre-releases.
+name: Publish inhibit release
+
+on:
+  workflow_run:
+    workflows: ["Windows installer for inhibit main"]
+    types: [completed]
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-inhibit-${{ github.event_name }}-${{ github.event.pull_request.number || github.event.workflow_run.head_sha || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  identity:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      label: ${{ steps.v.outputs.label }}
+      tag: ${{ steps.v.outputs.tag }}
+      sha: ${{ steps.v.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+      - id: v
+        run: |
+          python3 .github/scripts/inhibit-release-identity.py --github-output >> "$GITHUB_OUTPUT"
+          if [ "${{ github.event_name }}" = "workflow_run" ]; then
+            echo "sha=${{ github.event.workflow_run.head_sha }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "sha=${{ github.sha }}" >> "$GITHUB_OUTPUT"
+          fi
+
+  windows:
+    needs: identity
+    if: github.event_name == 'workflow_dispatch'
+    uses: ./.github/workflows/build-windows.yml
+    with:
+      version: ${{ needs.identity.outputs.label }}
+      hamlib_branch: "4.7.2"
+      save_ccache: false
+      recache: false
+
+  linux:
+    needs: identity
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.identity.outputs.sha }}
+
+      - name: Install Ubuntu 24.04 build packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            ca-certificates curl git \
+            build-essential cmake ccache patch \
+            gfortran \
+            libfftw3-dev \
+            qtbase5-dev qttools5-dev qtmultimedia5-dev libqt5serialport5-dev \
+            libqt5sql5-sqlite libqt5websockets5-dev \
+            libqt5multimedia5-plugins \
+            libusb-1.0-0-dev libudev-dev \
+            autoconf automake libtool pkg-config \
+            texinfo \
+            dpkg-dev \
+            asciidoctor \
+            python3 \
+            file xz-utils xauth xvfb \
+            portaudio19-dev \
+            bzip2
+
+      - name: Check inhibit version identity
+        run: |
+          python3 .github/scripts/tests/test_inhibit_release_identity.py
+          cmake -D SOURCE_DIR="$PWD" -D TEST_BINARY_DIR="${RUNNER_TEMP}/inhibit-identity" \
+            -P tests/release/test_inhibit_identity.cmake
+
+      - name: Restore Boost prefix
+        id: boost-cache
+        uses: actions/cache@v4
+        with:
+          path: .deps/boost
+          key: inhibit-boost-${{ hashFiles('.github/scripts/boost-version.sh', '.github/scripts/build-boost-linux.sh', '.github/scripts/boost-log-queue.patch', '.github/scripts/linux-boost-config.sh') }}
+
+      - name: Restore Hamlib prefix
+        id: hamlib-cache
+        uses: actions/cache@v4
+        with:
+          path: .deps/hamlib
+          key: inhibit-hamlib-4.7.2-${{ hashFiles('.github/scripts/build-hamlib-linux.sh') }}
+
+      - name: Restore ccache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: ccache-inhibit-linux-${{ github.sha }}
+          restore-keys: |
+            ccache-inhibit-linux-
+
+      - name: Build, test, and package
+        env:
+          CCACHE_DIR: ${{ github.workspace }}/.ccache
+          INHIBIT_INSTALL_SMOKE: "1"
+        run: .github/scripts/build-inhibit-linux-package.sh --source "${{ github.workspace }}"
+
+      - name: Upload Linux package
+        uses: actions/upload-artifact@v7
+        with:
+          name: wsjtx-${{ needs.identity.outputs.label }}-linux-x86_64-deb
+          path: wsjtx-build/wsjtx-${{ needs.identity.outputs.label }}-linux-x86_64.deb
+          if-no-files-found: error
+          compression-level: 0
+
+  release:
+    needs: [identity, linux, windows]
+    if: >-
+      always() &&
+      needs.linux.result == 'success' &&
+      (needs.windows.result == 'success' || needs.windows.result == 'skipped') &&
+      (
+        github.event_name == 'workflow_dispatch' ||
+        (
+          github.event_name == 'workflow_run' &&
+          github.event.workflow_run.event == 'push' &&
+          github.event.workflow_run.head_branch == 'main' &&
+          github.event.workflow_run.conclusion == 'success'
+        )
+      )
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.identity.outputs.sha }}
+
+      - name: Download Linux package
+        uses: actions/download-artifact@v7
+        with:
+          name: wsjtx-${{ needs.identity.outputs.label }}-linux-x86_64-deb
+          path: release-assets
+
+      - name: Download Windows installer from this run
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/download-artifact@v7
+        with:
+          name: wsjtx-${{ needs.identity.outputs.label }}-windows-x86_64-installer
+          path: release-assets
+
+      - name: Download Windows installer from the main installer run
+        if: github.event_name == 'workflow_run'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          ARTIFACT: wsjtx-${{ needs.identity.outputs.label }}-windows-x86_64-installer
+        run: gh run download "$RUN_ID" --repo "${{ github.repository }}" --name "$ARTIFACT" --dir release-assets
+
+      - name: Publish or update the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: .github/scripts/publish-inhibit-release.sh "${{ needs.identity.outputs.sha }}" release-assets
