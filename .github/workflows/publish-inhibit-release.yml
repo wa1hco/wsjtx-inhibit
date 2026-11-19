@@ -3,7 +3,7 @@
 # Push to main runs "Windows installer for inhibit main" first. When that
 # succeeds, this workflow builds the Ubuntu 24.04 .deb, runs the inhibit
 # tests, and attaches both assets to the release for the version in
-# release-state.txt (for example v3.3.0-beta6-inhibit).
+# release-state.txt (for example v3.3.0-beta8-inhibit).
 #
 # workflow_dispatch builds Windows and Linux itself, then publishes.
 # A pull request into main builds and tests Linux only. It does not publish.
