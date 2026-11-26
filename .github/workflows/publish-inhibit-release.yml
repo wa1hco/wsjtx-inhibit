@@ -165,14 +165,14 @@ jobs:
           ref: ${{ needs.identity.outputs.sha }}
 
       - name: Download Linux package
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: wsjtx-${{ needs.identity.outputs.label }}-linux-x86_64-deb
           path: release-assets
 
       - name: Download Windows installer from this run
         if: github.event_name == 'workflow_dispatch'
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: wsjtx-${{ needs.identity.outputs.label }}-windows-x86_64-installer
           path: release-assets
