@@ -79,6 +79,7 @@ namespace DecoderIpc {class Session;}
 #include "widgets/QSYMessage.h"
 #include "widgets/displaytext.h"
 #include "widgets/qsymonitor.h"
+#include "widgets/HeardByWindow.hpp"
 #include "MessageBox.hpp"
 #include "Network/NetworkAccessManager.hpp"
 #include "AutoRespondSelectionLatch.hpp"
@@ -279,6 +280,7 @@ public:
   QString checkLiveAudioTestJttyDrain();
   QString checkLiveAudioTestOutputFaults ();
   QString checkQsoCompletionTest (QString const& requestedProfile);
+  QString checkFoxHoundExchangeTest (QString const& station);
   bool liveAudioTestJttyStreamActive () const
   {
     return m_jttyTxStream && m_jttyTxStream->isActive ();
@@ -679,6 +681,7 @@ private slots:
   void auto_tx_mode(bool);
   void on_actionMessage_averaging_triggered();
   void on_actionActiveStations_triggered();
+  void on_actionHeard_by_triggered();
   void on_contest_log_action_triggered ();
   void on_fox_log_action_triggered ();
   void on_actionColors_triggered();
@@ -721,7 +724,6 @@ private slots:
   void on_sbTR_FST4W_valueChanged (int);
   void on_sbFtol_valueChanged (int);
   void on_sbFtol_2_valueChanged (int);
-  void on_comboBoxJttyStyle_currentIndexChanged (int index);
   void on_cbFast9_clicked(bool b);
   void on_sbCQTxFreq_valueChanged(int n);
   void on_cbCQTx_toggled(bool b);
@@ -826,7 +828,7 @@ private:
                                                  bool play_Wanted, bool play_DXcall, bool hasDXCall);
   void playDecodeAlertSound(bool play_Wanted, bool play_DXcall);
   void playDecodeAlertSound(DecodeAlertSound sound);
-  void updateRespondTarget(const DecodedText& dt, const QString& text, bool pounce,
+  void updateRespondTarget(const DecodedText& dt, bool pounce,
                            QDateTime const& decodePeriodStart, bool diskData);
   QString selectedTxMessage() const;
   AutoRespondPolicy autoRespondPolicy() const;
@@ -949,6 +951,8 @@ private:
   void applyJttyLiveEntryFormatting();
   void guardJttyLiveEntryLock();
   void updateJttyLiveEntryFrameLabel();
+  QString withJttyOverPrefix(QString const& expanded, QString const& uncommitted,
+                             bool * added = nullptr);
   double jttyRequestSentFraction(qint64 requestId) const;
   int jttyRequestFramesDone(qint64 requestId) const;
   int countJttyTransmitFrames(QString const& preparedMessage) const;
@@ -1105,6 +1109,7 @@ private:
   QScopedPointer<HelpTextWindow> m_mouseCmnds;
   QScopedPointer<MessageAveraging> m_msgAvgWidget;
   QScopedPointer<ActiveStations> m_ActiveStationsWidget;
+  QScopedPointer<HeardByWindow> m_heardByWindow;
   QScopedPointer<FoxLogWindow> m_foxLogWindow;
   QScopedPointer<CabrilloLogWindow> m_contestLogWindow;
   QScopedPointer<ColorHighlighting> m_colorHighlighting;
@@ -1659,7 +1664,8 @@ private:
   QString m_jttyQueueNotice;
   bool m_jttyLiveEntryArmed {false};
   bool m_guardingJttyLiveEntryLock {false};
-  int m_jttyLiveEntryCommitted {0};   // Tx_Message chars already sent/queued; locked against edits.
+  bool m_jttyOverPrefixed {false};    // this over's text already got the MyCall prefix
+  int m_jttyLiveEntryCommitted {0};  // Tx_Message chars already sent/queued; locked against edits.
   QString m_jttyLiveEntryLockedText;  // cached committed prefix, to detect edits that touch it
   struct PendingLiveEntryCommit { qint64 requestId; int start, end; int totalFrames {0}; };
   // Committed spans not yet confirmed fully transmitted; drives progressive sent/queued coloring and reject-triggered unlocking.
@@ -1918,7 +1924,7 @@ private:
   void houndCallers();
   void updateFoxQSOsInProgressDisplay();
   void foxQueueTopCallCommand();
-  void foxRxSequencer(QString msg, QString houndCall, QString rptRcvd);
+  void foxRxSequencer(DecodedText const& message);
   bool foxTxSequencer();
   void foxGenWaveform(int i,QString fm);
   void writeFoxQSO (QString const& msg);

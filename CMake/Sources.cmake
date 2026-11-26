@@ -4,6 +4,14 @@
 # so CMAKE_CURRENT_SOURCE_DIR stays the project root and all paths below
 # remain relative to it, exactly as when this content was inline.
 #
+# Legacy render callbacks and jt9 rejection stubs retain shared interfaces.
+set_property (SOURCE
+  lib/superfox/sfox_unpack.f90
+  lib/jt9_stream_stub.f90
+  lib/jt9_wspr_stub.f90
+  APPEND PROPERTY COMPILE_OPTIONS
+  "$<$<COMPILE_LANG_AND_ID:Fortran,GNU>:-Wno-unused-dummy-argument>")
+
 set (wsjt_qt_CXXSRCS
   ActiveStationList.cpp
   DecDataMutex.cpp
@@ -163,6 +171,8 @@ set (wsjtx_CXXSRCS
   Network/PSKReporter.cpp
   Network/PSKReporterConfiguration.cpp
   Network/PSKReporterIPFIX.cpp
+  Network/HeardByMqtt.cpp
+  models/HeardByModel.cpp
   Audio/WavLoadCoordinator.cpp
   Audio/WavInputLoader.cpp
   Modulator/Modulator.cpp
@@ -231,6 +241,7 @@ set (wsjtx_CXXSRCS
   widgets/QSYMessageParser.cpp
   widgets/QSYMessageCreator.cpp
   widgets/qsymonitor.cpp
+  widgets/HeardByWindow.cpp
   widgets/MMTTYIF.cpp
   )
 
@@ -313,6 +324,7 @@ set (wsjt_FSRCS
   lib/packjt.f90
   lib/77bit/packjt77_schema.f90
   lib/77bit/packjt77_grammar.f90
+  lib/decoded_message.f90
   lib/77bit/packjt77.f90
   lib/qra/q65/q65_workspace.f90
   lib/q65_codec.f90
@@ -351,6 +363,8 @@ set (wsjt_FSRCS
   lib/jtty/jtty_receive_context.f90
   lib/jtty/jtty_filler.f90
   lib/spectrum_rows.f90
+  lib/streaming_jtty_width.f90
+  lib/stream_fst4_window.f90
   lib/streaming_jtty.f90
   lib/streaming_encode.f90
   lib/refspectrum.f90
@@ -526,6 +540,7 @@ set (wsjt_FSRCS
   lib/ft4/ft4_downsample.f90
   lib/77bit/my_hash.f90
   lib/wsprd/osdwspr.f90
+  lib/wsprd/wspr_parallel.f90
   lib/ft8/osd174_91.f90
   lib/osd128_90.f90
   lib/pctile.f90
@@ -711,6 +726,7 @@ set (qra_CSRCS
 
 set (wsjt_CSRCS
   ${ka9q_CSRCS}
+  lib/fftw_plan_inplace.c
   lib/lookup3.c
   lib/ft8var/ft8_tsan.c
   lib/ftrsd/ftrsdap.c
@@ -752,7 +768,7 @@ set (wsprsim_CSRCS
   lib/lookup3.c
   lib/wsprd/wsprsim.c
   lib/wsprd/wsprsim_utils.c
-  lib/wsprd/wsprd_utils.c
+  lib/wsprd/wspr_pack.c
   lib/wsprd/fano.c
   lib/wsprd/tab.c
   lib/wsprd/nhash.c
@@ -760,7 +776,11 @@ set (wsprsim_CSRCS
 
 set (wspr_decoder_CSRCS
   lib/wsprd/wspr_decoder.c
+  lib/wsprd/wspr_tsan.c
+  lib/wsprd/wspr_noncoherent.c
+  lib/wsprd/wspr_demodulation.c
   lib/wsprd/wsprsim_utils.c
+  lib/wsprd/wspr_pack.c
   lib/wsprd/wsprd_utils.c
   lib/wsprd/fano.c
   lib/wsprd/jelinek.c
