@@ -2,7 +2,7 @@
 #
 # The installer label is release-state.txt plus the suffix in
 # CMake/Modules/inhibit-identity.cmake. With the current state that is
-# 3.3.0-beta8-inhibit. Bumping the beta in release-state.txt renames the
+# 3.3.0-beta11-inhibit. Bumping the beta in release-state.txt renames the
 # installer on the next run; the suffix file is the only marker to edit.
 #
 # inhibit-on-3.2-rc1 is not built: that branch is the older 3.2.0-rc1 port,
@@ -25,7 +25,7 @@ on:
   push:
     branches:
       - main
-      - rebase-v3.3.0-beta8
+      - rebase-v3.3.0-beta11
   pull_request:
     branches:
       - main
